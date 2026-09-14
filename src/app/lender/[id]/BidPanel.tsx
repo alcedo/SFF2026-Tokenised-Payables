@@ -14,10 +14,11 @@
 import { useMemo, useState } from 'react';
 
 import { ActionButton } from '@/components/ActionButton';
+import { AssetPicker } from '@/components/AssetPicker';
 import { Notice, Panel } from '@/components/primitives';
 import { buyNow, placeBid } from '@/app/actions';
 import { convert, formatRate } from '@/core/fx';
-import { ASSETS, type Asset, formatUnits, type BaseUnits } from '@/core/money';
+import { type Asset, formatUnits, type BaseUnits } from '@/core/money';
 import { formatPercent, priceFromPercent, quote } from '@/core/pricing';
 
 export function BidPanel({
@@ -116,27 +117,7 @@ export function BidPanel({
   return (
     <Panel title={buyNowBase ? 'Buy or bid' : 'Place a bid'}>
       <div className="space-y-3">
-        <label className="block">
-          <span className="mb-0.5 block text-[10.5px] tracking-wide text-ink-muted uppercase">
-            Funding asset
-          </span>
-          <div className="flex flex-wrap gap-1">
-            {ASSETS.map((a) => (
-              <button
-                key={a}
-                type="button"
-                onClick={() => setAsset(a)}
-                className={`rounded-[3px] border px-2 py-1 text-[12px] ${
-                  a === asset
-                    ? 'border-accent bg-accent-soft font-medium text-accent'
-                    : 'border-rule-strong bg-surface text-ink-muted hover:bg-surface-sunken'
-                }`}
-              >
-                {a}
-              </button>
-            ))}
-          </div>
-        </label>
+        <AssetPicker value={asset} onChange={setAsset} />
 
         {/*
           PRD §8 screen 11 pairs buy-now with bidding on one screen. It leads,

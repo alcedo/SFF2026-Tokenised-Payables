@@ -79,7 +79,9 @@ export type Intent =
       entityId: string;
       status: 'uncertified' | 'certified' | 'suspended';
     }
-  | { kind: 'settle_maturity'; payableId: string }
+  // PRD §3 question 13: redemption is denominated in XUSD; the asset is chosen
+  // only for payment, so it is required rather than defaulted.
+  | { kind: 'settle_maturity'; payableId: string; fundingCode: Asset }
   | { kind: 'advance_clock'; days: number }
   | { kind: 'submit'; payableId: string }
   | { kind: 'approve'; payableId: string }
