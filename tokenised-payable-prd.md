@@ -54,7 +54,7 @@ Audiences can also try it out themselves.
 | 9 | How does a sale settle? | Trade confirmation | The lender funds the XUSD purchase price using USDC, USDT, XSGD, or XUSD. The seller receives XUSD and the lender receives the listed quantity. |
 | 10 | What happens at maturity? | ADATA settlement → holder wallets | ADATA repurchases outstanding quantity at face value from each current holder. A lender's gross return on a holding is that quantity's face less its purchase price. |
 | 11 | What can a lender do after purchase? | Portfolio | Hold to maturity, relist all or part, or transfer any held quantity before maturity. |
-| 12 | How is the token represented? | Token detail / mock explorer | One invoice maps to one ERC-1155 token ID. The demo uses four-decimal face-value accounting and allows partial-quantity transfers in whole base units (§6). |
+| 12 | How is the token represented? | Token detail / mock explorer | One invoice maps to one ERC-1155 token ID. Quantities follow the representation in §6. |
 | 13 | How do pricing and funding differ? | Listing → funding confirmation | Issue, listing, bid, sale proceeds, and redemption are denominated in XUSD. The funding asset is selected only for payment. |
 
 Invoice disputes, cancellation, and live default or recovery workflows are out of scope. An example overdue position is included (§7).
@@ -113,9 +113,9 @@ The scenario uses ADATA payment terms of 30–180 days.
 
 **One invoice = one identifiable payable.** Each invoice maps to a distinct ERC-1155 token ID. After certification, the mock mint assigns the entire invoice quantity to one supplier wallet. That first holder may then list all or part of the holding at different prices, or transfer any allowed quantity to another eligible platform wallet, including another supplier. Multiple holders exist only after a sale or transfer, never at issuance. Each wallet's remaining quantity is a separate position for listing, transfer, and redemption.
 
-Use a four-decimal accounting convention: XUSD 1.0000 of face value corresponds to 10,000 base units. Partial-quantity transfers and listings are allowed. The minimum increment is one base unit (XUSD 0.0001); amounts between base units are not representable. A transfer or listing quantity must be a positive whole number of base units and must not exceed the sender's holding. 
+**Quantity representation.** Use a four-decimal accounting convention: XUSD 1.0000 of face value corresponds to 10,000 base units. Partial-quantity transfers and listings are allowed. The minimum increment is one base unit (XUSD 0.0001); amounts between base units are not representable. Store and compute quantities as integers of those base units. A transfer or listing quantity must be a positive whole number of base units and must not exceed the sender's holding.
 
-Note that ERC-1155 supports multiple token types and integer quantities
+ERC-1155 supports multiple token types and integer quantities.
 
 **Discount purchase; bullet redemption.** The lender buys a quantity below that quantity's face and receives a single payment equal to the held quantity at maturity. 
 
@@ -137,7 +137,7 @@ Use a simple Actual/365 convention, with no compounding or fees in the demo. Dis
 
 **Worked example:** XUSD 250,000 face value, 90 days remaining, price 97.85% → XUSD 244,625 proceeds, XUSD 5,375 discount, **8.7% annualised discount cost** and **8.9% lender yield**. Use this calculated example consistently in the supplier comparison.
 
-Keep XUSD amounts at four-decimal precision internally, using fixed-point arithmetic. Display two decimals in summary views and four in token detail where useful. Source-asset rounding must be explicit on confirmation. Show both the original invoice face and the quantity in the current action whenever they differ.
+Display two decimals in summary views and four in token detail where useful. Source-asset rounding must be explicit on confirmation. Show both the original invoice face and the quantity in the current action whenever they differ.
 
 ### Series bundling
 
@@ -156,7 +156,7 @@ Series face value is the sum of included member quantities. Buy, transfer, and r
 | Anchor obligor | ADATA Technology Co., Ltd. | Responsible for the maturity payment in the scenario. |
 | Original supplier | Chien Yu Precision | Fictional; distinct from current holders. |
 | Currency | XUSD | Fixed. |
-| Face value | 250,000.0000 XUSD | Original invoice face. Base units = face × 10⁴. |
+| Face value | 250,000.0000 XUSD | Original invoice face. |
 | Holder quantity | 250,000.0000 XUSD | Signed-in wallet's position; may be less than invoice face. |
 | Issue date / maturity date | T0 / T0 + 90 days | Derived from the demo clock. |
 | Original tenor / days remaining | 90 days / 90 days | Display separately; calculate yields using days remaining. |
@@ -187,7 +187,7 @@ Draft → Pending approval → Approved → Certified → Issued → Matured →
 - **Settled:** every remaining holder has received XUSD equal to their quantity; the payable is marked redeemed and cannot move or settle again.
 - **Overdue:** an unpaid obligation has passed its due date. Show one example recovery case with grace-period information, recovery status, and a fictional appointed liquidator. Recovery is a read-only scenario, not an operational workflow.
 
-Trade settlement must debit the payer, credit the seller in XUSD, move the traded quantity from seller to buyer, close the listing, and expire competing bids as one operation. The seller keeps any unlisted remainder. Maturity settlement must similarly debit ADATA, credit each current holder for their quantity, and mark the obligation settled together. A failed action leaves balances and ownership unchanged; repeated confirmation must not duplicate a payment. Holder quantities are whole base units and must sum to outstanding face until redemption, so pro-rata maturity credits are exact.
+Trade settlement must debit the payer, credit the seller in XUSD, move the traded quantity from seller to buyer, close the listing, and expire competing bids as one operation. The seller keeps any unlisted remainder. Maturity settlement must similarly debit ADATA, credit each current holder for their quantity, and mark the obligation settled together. A failed action leaves balances and ownership unchanged; repeated confirmation must not duplicate a payment. Holdings for a payable must sum to outstanding face until redemption, so pro-rata maturity credits are exact.
 
 Idempotency is required and important for all transaction, similar to how a blockchain will behave.
 
@@ -218,7 +218,7 @@ Idempotency is required and important for all transaction, similar to how a bloc
 10. **Payable detail:** lead with ADATA and the payment obligation. Show grade and rationale, original supplier, invoice reference, invoice face, listed quantity, holder breakdown, price, yield, remaining days, eligible funding assets, and event history. Expand a Series to inspect its members.
 11. **Place bid / buy now:** enter price as a percentage of the listed quantity's face and show the equivalent XUSD amount. Select the funding asset before confirmation. Show conversion, source debit, available balance, and XUSD seller credit.
 12. **Portfolio:** current holdings by quantity, purchase price for that quantity, invoice face, remaining days, maturity ladder, purchase-price-weighted entry yield, realised gross returns, and the overdue position. Allow eligible holdings to be relisted in whole or in part.
-13. **Transfer:** shared supplier/lender flow. Enter an eligible platform wallet address and a quantity (default = full holding), show the resolved recipient, confirm, and record the transfer event. Reject quantities that are not whole base units or that exceed the sender's unlisted holding.
+13. **Transfer:** shared supplier/lender flow. Enter an eligible platform wallet address and a quantity (default = full holding), show the resolved recipient, confirm, and record the transfer event. Reject quantities that exceed the sender's unlisted holding.
 
 ### StraitsX admin
 
@@ -228,7 +228,7 @@ Idempotency is required and important for all transaction, similar to how a bloc
 
 ### Common to all users
 
-1. **Send payable:** allow a holder to send any portion of their tokenised payable holding to another platform user. Enter the recipient's registered wallet address or select from a list of eligible recipients, specify the quantity to send (default = full holding), and confirm the transfer. The system verifies that the sender has sufficient unlisted quantity, the recipient is valid, and the quantity is a whole base unit. Successfully sending TP moves the specified quantity to the recipient's wallet, records the transaction, and updates event and ownership history. All transfers occur within the platform.
+1. **Send payable:** allow a holder to send any portion of their tokenised payable holding to another platform user. Enter the recipient's registered wallet address or select from a list of eligible recipients, specify the quantity to send (default = full holding), and confirm the transfer. The system verifies that the sender has sufficient unlisted quantity and the recipient is valid. Successfully sending TP moves the specified quantity to the recipient's wallet, records the transaction, and updates event and ownership history. All transfers occur within the platform.
 
 
 ## 9. Marketplace mechanics
@@ -330,7 +330,7 @@ Event        id, subject_type, subject_id, type, actor, timestamp,
 DemoClock    current_date, offset_days, xsgd_xusd_rate
 ```
 
-`payable_id OR series_id` means exactly one target. `Holding.quantity_xusd` is a positive four-decimal amount in whole base units; holdings for a payable must sum to outstanding face until redemption. A wallet with quantity zero has no holding row. Derive Series face value from member quantities, and validate that every member is wholly held by the same seller wallet and shares maturity. `Trade` records provide purchase cost and holding-period history for portfolio metrics. Tenor, remaining days, percentages, and yields are derived rather than independently editable values. Redemption of a split payable records one credit `Settlement` per holder against a single ADATA source debit.
+`payable_id OR series_id` means exactly one target. `Holding.quantity_xusd` is the wallet's remaining quantity under §6; holdings for a payable must sum to outstanding face until redemption. A wallet with quantity zero has no holding row. Derive Series face value from member quantities, and validate that every member is wholly held by the same seller wallet and shares maturity. `Trade` records provide purchase cost and holding-period history for portfolio metrics. Tenor, remaining days, percentages, and yields are derived rather than independently editable values. Redemption of a split payable records one credit `Settlement` per holder against a single ADATA source debit.
 
 `funding_source` belongs to a bid/payment instruction, never the instrument. Every payment event records the source asset, conversion, source debit, XUSD credit, and recipient. Approval events preserve the separate preparer and checker identities.
 
@@ -340,7 +340,7 @@ DemoClock    current_date, offset_days, xsgd_xusd_rate
 |---|---|
 | Devices | Desktop first, usable down to iPad. Validate the actual booth laptop and tablet layouts. |
 | Persistence | A lightweight postgres sql database. Changes must be reflected in other sessions without a manual reset. |
-| Consistency | Prevent duplicate acceptance, double spending, over-quantity transfers, stale-owner transfers, and duplicate redemption across sessions. Holder quantities must remain whole base units that sum to outstanding face. |
+| Consistency | Prevent duplicate acceptance, double spending, over-quantity transfers, stale-owner transfers, and duplicate redemption across sessions. Holdings for a payable must continue to sum to outstanding face. |
 | Performance | Core actions complete within 500 ms to 2000ms. show clear progress for simulated onboarding. |
 | Language | English required; Mandarin for issuer/supplier screens is optional. |
 
