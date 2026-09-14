@@ -148,7 +148,7 @@ export async function fundSettlement(form: FundSettlementForm) {
     intent: {
       kind: "settle_maturity",
       target: { kind: "payable", payableId: form.payableId },
-      funding: form.fundingAsset,          // "USDC" | "USDT" | "XSGD" | "XUSD"
+      fundingCode: form.fundingAsset,      // "USDC" | "USDT" | "XSGD" | "XUSD"
     },
     // Note what is absent: the holder list and the per-holder amounts.
   });
