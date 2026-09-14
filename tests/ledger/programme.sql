@@ -136,7 +136,7 @@ BEGIN
   PERFORM ledger.post(jsonb_build_object(
     'idempotencyKey','dddd0000-0000-0000-0000-00000000000a','actorUserId',PREP,
     'intent', jsonb_build_object('kind','settle_maturity','payableId',
-      (SELECT id FROM app.payable WHERE ref = 'TP-2026-8001'))));
+      (SELECT id FROM app.payable WHERE ref = 'TP-2026-8001'),'fundingCode','XUSD')));
 
   -- The second payable matured while the clock ran forward, so move its date
   -- out: the point under test is the limit, not the maturity rule.

@@ -367,11 +367,11 @@ BEGIN
     'intent', jsonb_build_object('kind','advance_clock','days', 90)));
   PERFORM ledger.post(jsonb_build_object(
     'idempotencyKey','00000000-0000-0000-0000-0000000000e8','actorUserId','11111111-0000-0000-0000-000000000001',
-    'intent', jsonb_build_object('kind','settle_maturity','payableId',PAYABLE)));
+    'intent', jsonb_build_object('kind','settle_maturity','payableId',PAYABLE,'fundingCode','XUSD')));
   BEGIN
     PERFORM ledger.post(jsonb_build_object(
       'idempotencyKey','00000000-0000-0000-0000-0000000000e9','actorUserId','11111111-0000-0000-0000-000000000001',
-      'intent', jsonb_build_object('kind','settle_maturity','payableId',PAYABLE)));
+      'intent', jsonb_build_object('kind','settle_maturity','payableId',PAYABLE,'fundingCode','XUSD')));
     RAISE EXCEPTION 'FAIL: the payable settled twice';
   EXCEPTION WHEN sqlstate 'ADA16' THEN
     RAISE NOTICE 'PASS  a settled payable cannot settle again';

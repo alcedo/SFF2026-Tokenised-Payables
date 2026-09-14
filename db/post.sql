@@ -179,6 +179,57 @@ BEGIN
 END $$;
 
 -- ----------------------------------------------------------------------------
+-- Funding an XUSD obligation
+-- ----------------------------------------------------------------------------
+-- Prices and redemptions are XUSD (PRD §6). The payer chooses which of the
+-- four cash assets to pay with (PRD §10), and the recipient is credited XUSD
+-- whatever that choice was. This is the one place that decides what the
+-- payer's side of such an entry looks like, so a trade and a redemption charge
+-- the same asset the same way.
+--
+-- XSGD is converted at the world rate and rounded half up to a base unit; the
+-- other three assets are 1:1. system_fx takes in what the payer paid and gives
+-- out the XUSD owed, so the entry still balances per asset. XUSD itself needs
+-- no conversion, so the payer is debited directly.
+--
+-- The rate applied comes back alongside the legs because PRD §10 requires the
+-- receipt to state it, and a later world reset must not change what a receipt
+-- says. The 1:1 assets record 1000000, a rate of exactly one, which is also
+-- what lets one source formula serve all four.
+DROP TYPE IF EXISTS ledger.payment CASCADE;
+CREATE TYPE ledger.payment AS (
+  funding ledger.cash_code,
+  legs    ledger.leg_spec[],
+  source  bigint,          -- what left the payer, in the funding asset
+  rate_e6 bigint           -- XSGD per XUSD scaled by 1e6; 1000000 for the 1:1 assets
+);
+
+CREATE OR REPLACE FUNCTION ledger.payer_legs(
+  p_payer text, p_funding ledger.cash_code, p_xusd bigint, p_rate_e6 bigint)
+RETURNS ledger.payment LANGUAGE plpgsql AS $$
+DECLARE
+  v_pay   ledger.payment;
+  v_payer uuid := ledger.wallet_account(p_payer, 'wallet_free');
+  v_xusd  uuid := ledger.cash_asset('XUSD');
+  v_fx    uuid;
+BEGIN
+  v_pay.funding := p_funding;
+  v_pay.rate_e6 := CASE WHEN p_funding = 'XSGD' THEN p_rate_e6 ELSE 1000000 END;
+  v_pay.source  := (p_xusd * v_pay.rate_e6 + 500000) / 1000000;   -- round half up
+  IF p_funding = 'XUSD' THEN
+    v_pay.legs := ARRAY[ROW(v_payer, v_xusd, -p_xusd)::ledger.leg_spec];
+  ELSE
+    v_fx := ledger.system_account('system_fx');
+    v_pay.legs := ARRAY[
+      ROW(v_payer, ledger.cash_asset(p_funding), -v_pay.source)::ledger.leg_spec,
+      ROW(v_fx, ledger.cash_asset(p_funding), v_pay.source)::ledger.leg_spec,
+      ROW(v_fx, v_xusd, -p_xusd)::ledger.leg_spec
+    ];
+  END IF;
+  RETURN v_pay;
+END $$;
+
+-- ----------------------------------------------------------------------------
 -- Rendering an entry back to the caller
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ledger.render_entry(p_entry ledger.journal_entry)
@@ -251,12 +302,10 @@ DECLARE
   v_bid         app.bid;
   v_asset       uuid;
   v_cash        uuid;
-  v_fx_cash     uuid;
   v_qty         bigint;
   v_price       bigint;
-  v_source      bigint;
-  v_rate        bigint;
   v_funding     ledger.cash_code;
+  v_payment     ledger.payment;
   v_holder      RECORD;
   v_shares      bigint[];
   v_holders     RECORD;
@@ -593,39 +642,15 @@ BEGIN
       END IF;
     END IF;
 
-    v_price   := v_bid.price_base;
-    v_funding := v_bid.funding_code;
-    v_cash    := ledger.cash_asset('XUSD');
-    v_rate    := v_world.xsgd_per_xusd_e6;
+    v_price := v_bid.price_base;
+    v_cash  := ledger.cash_asset('XUSD');
 
-    -- The recipient always receives XUSD. Only the payer's side varies, and
-    -- system_fx absorbs the difference so the entry still balances per asset.
-    IF v_funding = 'XSGD' THEN
-      v_source  := (v_price * v_rate + 500000) / 1000000;   -- round half up
-      v_fx_cash := ledger.cash_asset('XSGD');
-      v_legs := ARRAY[
-        ROW(ledger.wallet_account(v_bid.bidder_wallet, 'wallet_free'), v_fx_cash, -v_source)::ledger.leg_spec,
-        ROW(ledger.system_account('system_fx'), v_fx_cash, v_source)::ledger.leg_spec,
-        ROW(ledger.system_account('system_fx'), v_cash, -v_price)::ledger.leg_spec,
-        ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_cash, v_price)::ledger.leg_spec
-      ];
-    ELSE
-      v_source  := v_price;    -- USDC, USDT and XUSD are 1:1 at 4dp
-      v_fx_cash := ledger.cash_asset(v_funding);
-      IF v_funding = 'XUSD' THEN
-        v_legs := ARRAY[
-          ROW(ledger.wallet_account(v_bid.bidder_wallet, 'wallet_free'), v_cash, -v_price)::ledger.leg_spec,
-          ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_cash, v_price)::ledger.leg_spec
-        ];
-      ELSE
-        v_legs := ARRAY[
-          ROW(ledger.wallet_account(v_bid.bidder_wallet, 'wallet_free'), v_fx_cash, -v_source)::ledger.leg_spec,
-          ROW(ledger.system_account('system_fx'), v_fx_cash, v_source)::ledger.leg_spec,
-          ROW(ledger.system_account('system_fx'), v_cash, -v_price)::ledger.leg_spec,
-          ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_cash, v_price)::ledger.leg_spec
-        ];
-      END IF;
-    END IF;
+    -- The seller is credited XUSD whatever the buyer paid with. Only the
+    -- payer's side varies, and ledger.payer_legs decides it.
+    v_payment := ledger.payer_legs(v_bid.bidder_wallet, v_bid.funding_code, v_price, v_world.xsgd_per_xusd_e6);
+    v_legs := v_payment.legs || ARRAY[
+      ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_cash, v_price)::ledger.leg_spec
+    ];
 
     -- The traded quantity leaves escrow, not the seller's free balance. One
     -- leg per listing leg, so a series moves as one lot by construction.
@@ -644,12 +669,15 @@ BEGIN
     UPDATE app.bid SET status = 'superseded'
      WHERE listing_id = v_listing.id AND id <> v_bid.id AND status = 'placed';
 
-    UPDATE ledger.journal_entry
-       SET funding_code = v_funding, source_amount_base = v_source,
-           fx_rate_e6 = CASE WHEN v_funding = 'XSGD' THEN v_rate ELSE 1000000 END
-     WHERE id = v_entry.id;
-
   ELSIF v_kind = 'settle_maturity' THEN
+    -- PRD §3 q13: redemption is denominated in XUSD and the asset is chosen
+    -- only for payment. The screen always chooses one, so a command without
+    -- one is malformed rather than defaulted.
+    v_funding := (v_intent->>'fundingCode')::ledger.cash_code;
+    IF v_funding IS NULL THEN
+      RAISE EXCEPTION 'settle_maturity needs a fundingCode naming the asset the anchor pays from'
+        USING ERRCODE = 'ADA17';
+    END IF;
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
     IF v_payable.lifecycle_status = 'settled' THEN
       RAISE EXCEPTION 'payable % is already settled', v_payable.ref USING ERRCODE = 'ADA16';
@@ -687,11 +715,10 @@ BEGIN
       END LOOP;
     END LOOP;
 
-    -- ADATA pays each current holder the face of the quantity they hold, and
-    -- the tokens burn back to system_unissued. Because face and quantity are
-    -- the same number of base units, each holder's credit IS their quantity —
-    -- no pro-rata rounding is possible, and the credits reconcile to the debit
-    -- exactly by construction.
+    -- Each current holder is credited XUSD for the face of the quantity they
+    -- hold, and the tokens burn back to system_unissued. Because face and
+    -- quantity are the same number of base units, each holder's credit IS
+    -- their quantity, and no pro-rata rounding is possible.
     v_total_qty := 0;
     FOR v_holder IN
       SELECT a.wallet_address, SUM(b.balance)::bigint AS qty
@@ -705,10 +732,17 @@ BEGIN
       v_legs := v_legs || ARRAY[
         ROW(ledger.wallet_account(v_holder.wallet_address, 'wallet_free'), v_asset, -v_holder.qty)::ledger.leg_spec,
         ROW(ledger.system_account('system_unissued'), v_asset, v_holder.qty)::ledger.leg_spec,
-        ROW(ledger.wallet_account(v_anchor_wallet, 'wallet_free'), v_cash, -v_holder.qty)::ledger.leg_spec,
         ROW(ledger.wallet_account(v_holder.wallet_address, 'wallet_free'), v_cash, v_holder.qty)::ledger.leg_spec
       ];
     END LOOP;
+
+    -- ADATA pays the total once, in the asset it chose. The total is converted
+    -- rather than each holder's share, so rounding happens once and the XSGD
+    -- debit is what the whole obligation costs, not the sum of N rounded parts.
+    -- The XUSD legs net to zero by construction: minus the total on the payer
+    -- side against plus each holder's quantity here.
+    v_payment := ledger.payer_legs(v_anchor_wallet, v_funding, v_total_qty, v_world.xsgd_per_xusd_e6);
+    v_legs := v_legs || v_payment.legs;
 
     UPDATE app.payable SET lifecycle_status = 'settled' WHERE id = v_payable.id;
 
@@ -972,6 +1006,16 @@ BEGIN
   IF v_listing.id IS NOT NULL OR v_bid.id IS NOT NULL THEN
     UPDATE ledger.journal_entry
        SET listing_id = v_listing.id, bid_id = v_bid.id
+     WHERE id = v_entry.id;
+  END IF;
+
+  -- Record how the XUSD owed was paid, for the receipt and the explorer (PRD
+  -- §10). Here rather than in each paying branch so no branch can forget it,
+  -- and before the chain stamp below, after which the entry is append-only.
+  IF v_payment IS NOT NULL THEN
+    UPDATE ledger.journal_entry
+       SET funding_code = v_payment.funding, source_amount_base = v_payment.source,
+           fx_rate_e6 = v_payment.rate_e6
      WHERE id = v_entry.id;
   END IF;
 

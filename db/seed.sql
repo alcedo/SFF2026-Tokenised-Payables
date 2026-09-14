@@ -139,10 +139,15 @@ BEGIN
   END LOOP;
 END $$;
 
--- ADATA must be able to discharge everything outstanding at maturity.
+-- ADATA must be able to discharge everything outstanding at maturity. It also
+-- holds XSGD, so the settlement screen's funding choice can be shown on a
+-- fresh world without a top-up first.
 SELECT pg_temp.act('fund-anchor', '11111111-0000-0000-0000-000000000001',
   jsonb_build_object('kind','top_up','wallet','0xada7a0000000000000000000000000000000c21d',
                      'cashCode','XUSD','amountBase', 400000000000));
+SELECT pg_temp.act('fund-anchor-XSGD', '11111111-0000-0000-0000-000000000001',
+  jsonb_build_object('kind','top_up','wallet','0xada7a0000000000000000000000000000000c21d',
+                     'cashCode','XSGD','amountBase', 50000000000));
 
 -- ============================================================================
 --  History: payables that have already run their course
@@ -218,7 +223,8 @@ BEGIN
     v_here := h.mat_offset;
     PERFORM pg_temp.act('h-settle-' || h.ref, '11111111-0000-0000-0000-000000000001',
       jsonb_build_object('kind','settle_maturity','payableId',
-                         (SELECT id FROM app.payable WHERE ref = h.ref)));
+                         (SELECT id FROM app.payable WHERE ref = h.ref),
+                         'fundingCode','XUSD'));
   END LOOP;
   PERFORM pg_temp.act('clock-to-t0', '11111111-0000-0000-0000-000000000008',
     jsonb_build_object('kind','advance_clock','days', -v_here));
