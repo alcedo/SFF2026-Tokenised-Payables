@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 
+import { Shell } from '@/components/Shell';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -10,22 +11,28 @@ export const metadata: Metadata = {
 };
 
 /**
- * PRD section 14: "Desktop first, usable down to iPad." The layout never scales
- * below a readable figure size, so the viewport is left at its natural scale.
+ * PRD §14: "Desktop first, usable down to iPad." The layout never scales below
+ * a readable figure size, so the viewport is left at its natural scale.
  */
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
 };
 
+/**
+ * The world is shared and the clock can move under an open tab, so nothing here
+ * is statically rendered. PRD §14 requires changes to be reflected in other
+ * sessions without a manual reset.
+ */
+export const dynamic = 'force-dynamic';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="min-h-screen">
         {/*
-          PRD section 11: 'The "Demo environment — no real funds" ribbon is
-          always visible.' It lives in the root layout so no route can render
-          without it.
+          PRD §11: 'The "Demo environment — no real funds" ribbon is always
+          visible.' It lives in the root layout so no route can render without it.
         */}
         <div
           role="status"
@@ -33,7 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Demo environment — no real funds. All balances, wallets, grades and transactions are simulated.
         </div>
-        {children}
+        <Shell>{children}</Shell>
       </body>
     </html>
   );

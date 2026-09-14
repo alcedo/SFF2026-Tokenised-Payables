@@ -248,6 +248,7 @@ DECLARE
   v_anchor_wallet text;
   v_series      app.series;
   v_leg         RECORD;
+  v_erp         app.erp_invoice;
 BEGIN
   IF v_key IS NULL THEN
     RAISE EXCEPTION 'every command needs an idempotencyKey' USING ERRCODE = 'ADA17';
@@ -596,6 +597,33 @@ BEGIN
       RAISE EXCEPTION 'the demo clock only moves forward' USING ERRCODE = 'ADA19';
     END IF;
     UPDATE app.world SET offset_days = offset_days + v_days WHERE only_row;
+
+  ELSIF v_kind = 'create_payable' THEN
+    -- Importing from the ERP mock rather than typing an invoice by hand is the
+    -- common path (PRD section 8 screen 2), so the invoice is consumed here and
+    -- the picker greys it out. Doing it inside post() means the creation is in
+    -- the audit trail like every other act, instead of being a silent insert.
+    SELECT * INTO v_erp FROM app.erp_invoice WHERE id = (v_intent->>'erpInvoiceId')::uuid FOR UPDATE;
+    IF v_erp.id IS NULL THEN
+      RAISE EXCEPTION 'no such ERP invoice' USING ERRCODE = 'ADA15';
+    END IF;
+    IF v_erp.consumed_by IS NOT NULL THEN
+      RAISE EXCEPTION 'invoice % has already been issued as a payable', v_erp.doc_no
+        USING ERRCODE = 'ADA15';
+    END IF;
+
+    INSERT INTO app.payable (id, ref, anchor_id, original_supplier_id, invoice_ref,
+                             face_base, maturity_date, lifecycle_status)
+    VALUES (COALESCE((v_intent->>'payableId')::uuid, gen_random_uuid()),
+            v_intent->>'ref',
+            (SELECT id FROM app.entity WHERE entity_type = 'anchor' ORDER BY name LIMIT 1),
+            v_erp.supplier_id, v_erp.invoice_ref, v_erp.amount_base,
+            (v_world.t0 + v_world.offset_days) + v_erp.terms_days,
+            'draft')
+    RETURNING * INTO v_payable;
+
+    UPDATE app.erp_invoice SET consumed_by = v_payable.id WHERE id = v_erp.id;
+    UPDATE ledger.journal_entry SET payable_id = v_payable.id WHERE id = v_entry.id;
 
   ELSIF v_kind IN ('submit','approve','certify','grade') THEN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;

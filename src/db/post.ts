@@ -22,6 +22,7 @@ import type { Asset, BaseUnits } from '@/core/money';
  * round-trip test in tests/ledger catches.
  */
 export type Intent =
+  | { kind: 'create_payable'; erpInvoiceId: string; ref: string; payableId?: string }
   | { kind: 'issue_payable'; payableId: string; toWallet: string; tokenId: number }
   | { kind: 'top_up'; wallet: string; cashCode: Asset; amountBase: BaseUnits }
   | { kind: 'transfer'; payableId: string; fromWallet: string; toWallet: string; quantityBase: BaseUnits }

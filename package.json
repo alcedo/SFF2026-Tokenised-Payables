@@ -10,7 +10,10 @@
     "test": "scripts/test.sh",
     "test:watch": "vitest",
     "test:unit": "vitest run",
-    "db:reset": "scripts/db.sh reset"
+    "db:reset": "scripts/db.sh reset",
+    "serve": "scripts/serve.sh",
+    "verify:screens": "node scripts/screens.mjs",
+    "verify:runbook": "node scripts/runbook.mjs"
   },
   "dependencies": {
     "next": "16.3.5",
@@ -24,6 +27,7 @@
     "@types/pg": "8.15.5",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.1",
+    "playwright": "^1.63.0",
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
     "typescript": "5.9.2",
