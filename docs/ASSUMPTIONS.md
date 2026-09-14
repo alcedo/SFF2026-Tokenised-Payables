@@ -215,3 +215,31 @@ headroom figure rather than showing zero.
 **Why this was worth doing at all:** before this, the limit was stored,
 displayed, and enforced nowhere. A number on a screen that no code consults is
 worse than no number, because it invites a viewer to believe a control exists.
+
+## Rules the screens knew and the ledger did not
+
+Not an assumption. A class of defect, recorded because the same shape turned up
+three times and a fourth is likely.
+
+Three of the PRD's rules were stated in the document, shown correctly on screen,
+and enforced by no code at all:
+
+- **The programme limit** (section 8 screen 14) was a stored column, rendered
+  with a headroom figure and a progress bar, and consulted nowhere.
+- **The issuer's certification status** (section 5) was displayed on the
+  certification screen and never checked at issuance.
+- **"Only institutional lender accounts can bid or buy"** (section 9) was a
+  caution notice on the bid panel. The ledger accepted a bid from anyone.
+
+Each is now enforced in `ledger.post()`, at the point where the thing it governs
+actually happens. A rule only the UI knows holds for people who use the screens
+and for nobody else, and a figure on a dashboard that no code reads invites a
+viewer to believe a control exists.
+
+One related rule is deliberately **not** re-checked: section 8 screen 15's "only
+certified, graded payables can be listed". Listing escrows a free balance of the
+payable token; that balance exists only after issuance; issuance refuses
+anything not `certified`; and the `graded_before_certified` constraint means a
+payable past `approved` always carries a grade. A check at `publish_listing`
+would be a second opinion that can disagree with the first. There is a comment
+where a reader would otherwise look for it.

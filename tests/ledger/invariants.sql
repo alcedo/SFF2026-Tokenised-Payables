@@ -287,6 +287,43 @@ BEGIN
     'idempotencyKey','00000000-0000-0000-0000-0000000000f7','actorUserId','11111111-0000-0000-0000-000000000003',
     'intent', jsonb_build_object('kind','cancel_listing','listingId','7a000000-0000-0000-0000-000000000003')));
 
+  ------------------------------------------- 9b. institutional access only --
+  -- PRD §9: "Only institutional lender accounts can bid or buy." The bid panel
+  -- says so, but a rule only the UI knows holds for people who use the screens
+  -- and for nobody else.
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-0000000000f8','actorUserId','11111111-0000-0000-0000-000000000003',
+    'intent', jsonb_build_object('kind','publish_listing','listingId','7a000000-0000-0000-0000-000000000004',
+                                 'payableId',PAYABLE,'sellerWallet',SUPP,
+                                 'quantityBase', 100000000, 'minPriceBase', 96000000,
+                                 'buyNowPriceBase', 97000000)));
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','00000000-0000-0000-0000-0000000000f9','actorUserId','11111111-0000-0000-0000-000000000003',
+      'intent', jsonb_build_object('kind','place_bid','listingId','7a000000-0000-0000-0000-000000000004',
+                                   'bidderWallet',SUPP,'priceBase', 96000000,'fundingCode','XUSD')));
+    RAISE EXCEPTION 'FAIL: a supplier account placed a bid';
+  EXCEPTION WHEN sqlstate 'ADA34' THEN
+    RAISE NOTICE 'PASS  a non-institutional account cannot bid';
+  END;
+
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','00000000-0000-0000-0000-0000000000fa','actorUserId','11111111-0000-0000-0000-000000000001',
+      'intent', jsonb_build_object('kind','buy_now','listingId','7a000000-0000-0000-0000-000000000004',
+                                   'buyerWallet',ANCHOR,'fundingCode','XUSD')));
+    RAISE EXCEPTION 'FAIL: the anchor bought its own obligation';
+  EXCEPTION WHEN sqlstate 'ADA34' THEN
+    RAISE NOTICE 'PASS  a non-institutional account cannot buy now';
+  END;
+
+  -- And the rule does not accidentally lock out the accounts it is meant for.
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-0000000000fb','actorUserId','11111111-0000-0000-0000-000000000004',
+    'intent', jsonb_build_object('kind','buy_now','listingId','7a000000-0000-0000-0000-000000000004',
+                                 'buyerWallet',BANK,'fundingCode','USDC')));
+  RAISE NOTICE 'PASS  an institutional lender still buys';
+
   ------------------------------------------------- 10. duplicate redemption --
   PERFORM ledger.post(jsonb_build_object(
     'idempotencyKey','00000000-0000-0000-0000-0000000000e7','actorUserId','11111111-0000-0000-0000-000000000001',
@@ -305,9 +342,9 @@ BEGIN
 
   ------------------------------------------- 11. split settlement is exact --
   -- Three holders at maturity: the fund bought 100,000 on a bid, the bank
-  -- bought 50,000 at the buy-now price, and the supplier kept the rest. Each
-  -- must be paid the face of what they held, and ADATA debited exactly once
-  -- for the total.
+  -- bought 50,000 and then a further 10,000 at buy-now prices, and the supplier
+  -- kept the rest. Each must be paid the face of what they held, and ADATA
+  -- debited exactly once for the total.
   SELECT b.balance INTO v_after FROM ledger.account_balance b
     JOIN ledger.account a ON a.id=b.account_id JOIN ledger.asset s ON s.id=b.asset_id
    WHERE a.wallet_address=FUND AND s.cash_code='XUSD';
@@ -324,8 +361,9 @@ BEGIN
   SELECT b.balance INTO v_after FROM ledger.account_balance b
     JOIN ledger.account a ON a.id=b.account_id JOIN ledger.asset s ON s.id=b.asset_id
    WHERE a.wallet_address=BANK AND s.cash_code='XUSD';
-  IF v_after <> 500000000 THEN
-    RAISE EXCEPTION 'FAIL: the buy-now buyer redeemed %, expected 500000000 (50,000)', v_after;
+  IF v_after <> 600000000 THEN
+    RAISE EXCEPTION 'FAIL: the buy-now buyer redeemed %, expected 600000000 (50,000 + 10,000)',
+      v_after;
   END IF;
   RAISE NOTICE 'PASS  a split payable pays each holder and debits the anchor once';
 

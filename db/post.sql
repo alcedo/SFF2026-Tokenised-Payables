@@ -213,6 +213,24 @@ RETURNS jsonb LANGUAGE sql STABLE AS $$
 $$;
 
 -- ----------------------------------------------------------------------------
+-- Marketplace eligibility
+-- ----------------------------------------------------------------------------
+-- PRD §9: "Only institutional lender accounts can bid or buy." The UI says so
+-- on the bid panel, but a rule that only the UI knows is not a rule: it holds
+-- for people who use the screens and for nobody else. Eligibility belongs to
+-- the account, and a wallet belongs to an organisation, so a wallet is eligible
+-- when any live account on it is.
+CREATE OR REPLACE FUNCTION ledger.wallet_is_institutional(p_wallet text)
+RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM app.wallet w
+      JOIN app.app_user u ON u.entity_id = w.entity_id
+     WHERE w.address = p_wallet
+       AND u.deactivated_at IS NULL
+       AND u.institutional_eligible);
+$$;
+
+-- ----------------------------------------------------------------------------
 -- ledger.post
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ledger.post(p_command jsonb) RETURNS jsonb
@@ -450,6 +468,13 @@ BEGIN
       IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
         RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
       END IF;
+      -- PRD §8 screen 15's "only certified, graded payables can be listed" needs
+      -- no check here, and adding one would be a second opinion that can
+      -- disagree. A listing escrows a free balance of the payable token; that
+      -- balance exists only after issuance; issuance above refuses anything not
+      -- 'certified'; and the graded_before_certified constraint in §5 of the
+      -- schema means a payable past 'approved' always carries a grade.
+      --
       -- PRD §8 screen 6 presents an inbox: a payable the supplier has not yet
       -- accepted is visible but not yet actionable.
       IF v_payable.receipt_status = 'pending' THEN
@@ -491,6 +516,9 @@ BEGIN
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
     IF v_listing.status <> 'open' THEN
       RAISE EXCEPTION 'listing is %', v_listing.status USING ERRCODE = 'ADA11';
+    END IF;
+    IF NOT ledger.wallet_is_institutional(v_intent->>'bidderWallet') THEN
+      RAISE EXCEPTION 'only institutional lender accounts can bid' USING ERRCODE = 'ADA34';
     END IF;
     -- PRD §9: bids do not reserve funds. Nothing is locked and no leg is
     -- posted; the balance is rechecked when the seller accepts.
@@ -543,6 +571,13 @@ BEGIN
     -- never changed hands.
     IF v_bid.bidder_wallet = v_listing.seller_wallet THEN
       RAISE EXCEPTION 'a seller cannot buy their own listing' USING ERRCODE = 'ADA11';
+    END IF;
+
+    -- Rechecked here as well as at place_bid, because this is where the
+    -- quantity actually moves and because eligibility can be removed between
+    -- the two: the account that placed the bid may have been removed since.
+    IF NOT ledger.wallet_is_institutional(v_bid.bidder_wallet) THEN
+      RAISE EXCEPTION 'only institutional lender accounts can buy' USING ERRCODE = 'ADA34';
     END IF;
 
     -- Maturity closes the market whichever kind of lot this is.

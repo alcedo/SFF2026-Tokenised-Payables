@@ -156,6 +156,7 @@ export type PostErrorCode =
   | 'supplier_not_onboarded'
   | 'issuer_not_certified'
   | 'programme_limit_exceeded'
+  | 'not_institutional'
   | 'unknown';
 
 export interface PostError {
@@ -202,6 +203,7 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA31: 'supplier_not_onboarded',
   ADA32: 'issuer_not_certified',
   ADA33: 'programme_limit_exceeded',
+  ADA34: 'not_institutional',
   ADA20: 'insufficient_funds',
   ADA21: 'insufficient_quantity',
   '23505': 'duplicate_listing',
@@ -319,5 +321,7 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
     'That issuer is not certified under this programme, so nothing can be issued against it.',
   programme_limit_exceeded:
     'This issuance would take the issuer over its programme limit. Raise the limit, or wait for an outstanding payable to settle.',
+  not_institutional:
+    'Only institutional lender accounts can bid or buy. Switch to a lender persona in the demo controls.',
   unknown: 'That did not go through. Nothing was changed.',
 };
