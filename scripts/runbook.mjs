@@ -137,6 +137,23 @@ try {
   await page.goto(`${BASE}/lender`, { waitUntil: 'domcontentloaded' });
   await say(`lender opens the marketplace and finds ${created}`);
 
+  // PRD §8 screen 11 pairs buy-now with bidding. Proved here on a seeded lot
+  // rather than on the runbook's own payable, so the headline path stays
+  // issue → list → bid → accept and this stays the aside it is on the day.
+  await page.getByRole('link', { name: 'TP-2026-0149', exact: true }).first().click();
+  await page.waitForTimeout(900);
+  await expectText('Buy now', 'a listing with a published buy-now price');
+  await shot('buy-now');
+  await clickThrough('Buy now');
+  await expectText('Receipt', 'the buy-now result');
+  await say('takes a different lot outright at its published price, no bidding');
+
+  await page.goto(`${BASE}/lender/portfolio`, { waitUntil: 'domcontentloaded' });
+  await expectText('TP-2026-0149', 'the portfolio after buying now');
+  await say('that lot is in the portfolio immediately, with its cost basis');
+
+  await page.goto(`${BASE}/lender`, { waitUntil: 'domcontentloaded' });
+
   // Open it by reference rather than by position: listings are sorted by yield.
   await page.getByRole('link', { name: created, exact: true }).first().click();
   await page.waitForTimeout(900);

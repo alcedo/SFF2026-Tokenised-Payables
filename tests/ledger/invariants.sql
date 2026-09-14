@@ -159,7 +159,135 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS  holdings still sum to outstanding face after a partial sale';
 
-  -------------------------------------------------- 9. duplicate redemption --
+  --------------------------------------------------------------- 9. buy now --
+  -- PRD §8 screen 11. Buy-now is an acceptance the buyer performs against a
+  -- price the seller published in advance, so it must settle exactly like an
+  -- accepted bid and must be refused everywhere an acceptance would be.
+  --
+  -- One listing at a time: a seller may hold only one open listing per target,
+  -- so the no-buy-now case below waits until this one is filled.
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-0000000000f1','actorUserId','11111111-0000-0000-0000-000000000003',
+    'intent', jsonb_build_object('kind','publish_listing','listingId','7a000000-0000-0000-0000-000000000002',
+                                 'payableId',PAYABLE,'sellerWallet',SUPP,
+                                 'quantityBase', 500000000, 'minPriceBase', 480000000,
+                                 'buyNowPriceBase', 492500000)));
+
+  -- The seller cannot take their own offer.
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','00000000-0000-0000-0000-0000000000f4','actorUserId','11111111-0000-0000-0000-000000000003',
+      'intent', jsonb_build_object('kind','buy_now','listingId','7a000000-0000-0000-0000-000000000002',
+                                   'buyerWallet',SUPP,'fundingCode','XUSD')));
+    RAISE EXCEPTION 'FAIL: the seller bought their own listing';
+  EXCEPTION WHEN sqlstate 'ADA11' THEN
+    RAISE NOTICE 'PASS  a seller cannot buy their own listing';
+  END;
+
+  -- The real purchase, funded in USDC at 1:1.
+  SELECT b.balance INTO v_before FROM ledger.account_balance b
+    JOIN ledger.account a ON a.id=b.account_id JOIN ledger.asset s ON s.id=b.asset_id
+   WHERE a.wallet_address=SUPP AND s.cash_code='XUSD';
+  v_res := ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-0000000000f5','actorUserId','11111111-0000-0000-0000-000000000004',
+    'intent', jsonb_build_object('kind','buy_now','listingId','7a000000-0000-0000-0000-000000000002',
+                                 'buyerWallet',BANK,'fundingCode','USDC')));
+  IF v_res->>'kind' <> 'trade_settlement' THEN
+    RAISE EXCEPTION 'FAIL: a buy-now recorded as %, expected a trade settlement', v_res->>'kind';
+  END IF;
+  IF v_res->'receipt'->>'txHash' IS NULL THEN
+    RAISE EXCEPTION 'FAIL: a buy-now settled without a chain receipt';
+  END IF;
+  IF (v_res->'conversion'->>'sourceDebit')::bigint <> 492500000 THEN
+    RAISE EXCEPTION 'FAIL: USDC debit is %, expected 492500000 at par',
+      v_res->'conversion'->>'sourceDebit';
+  END IF;
+
+  -- Paid at the published price, in XUSD, to the seller.
+  SELECT b.balance INTO v_after FROM ledger.account_balance b
+    JOIN ledger.account a ON a.id=b.account_id JOIN ledger.asset s ON s.id=b.asset_id
+   WHERE a.wallet_address=SUPP AND s.cash_code='XUSD';
+  IF v_after - v_before <> 492500000 THEN
+    RAISE EXCEPTION 'FAIL: the seller was credited %, expected the 492500000 buy-now price',
+      v_after - v_before;
+  END IF;
+
+  -- The quantity left escrow and landed free with the buyer.
+  SELECT free_base INTO v_after FROM ledger.v_holding WHERE wallet_address=BANK;
+  IF v_after <> 500000000 THEN
+    RAISE EXCEPTION 'FAIL: the buyer holds % free, expected 500000000', v_after;
+  END IF;
+  SELECT listed_base INTO v_after FROM ledger.v_holding WHERE wallet_address=SUPP;
+  IF v_after <> 0 THEN
+    RAISE EXCEPTION 'FAIL: the seller still has % in escrow after the sale', v_after;
+  END IF;
+  RAISE NOTICE 'PASS  a buy-now settles at the published price and moves the lot';
+
+  -- The bid it created is recorded as accepted, so the buyer has a cost basis.
+  SELECT count(*) INTO v_n FROM app.bid
+   WHERE listing_id='7a000000-0000-0000-0000-000000000002'
+     AND bidder_wallet=BANK AND price_base=492500000 AND status='accepted';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'FAIL: a buy-now left % accepted bids, expected exactly one', v_n;
+  END IF;
+  RAISE NOTICE 'PASS  a buy-now leaves the same accepted-bid trail as an accepted bid';
+
+  -- A filled listing cannot be bought twice.
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','00000000-0000-0000-0000-0000000000f6','actorUserId','11111111-0000-0000-0000-000000000005',
+      'intent', jsonb_build_object('kind','buy_now','listingId','7a000000-0000-0000-0000-000000000002',
+                                   'buyerWallet',FUND,'fundingCode','XSGD')));
+    RAISE EXCEPTION 'FAIL: a filled listing was bought a second time';
+  EXCEPTION WHEN sqlstate 'ADA11' THEN
+    RAISE NOTICE 'PASS  a filled listing refuses a second buy-now';
+  END;
+
+  -- A replay returns the same receipt and pays the seller once.
+  SELECT b.balance INTO v_before FROM ledger.account_balance b
+    JOIN ledger.account a ON a.id=b.account_id JOIN ledger.asset s ON s.id=b.asset_id
+   WHERE a.wallet_address=SUPP AND s.cash_code='XUSD';
+  v_res2 := ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-0000000000f5','actorUserId','11111111-0000-0000-0000-000000000004',
+    'intent', jsonb_build_object('kind','buy_now','listingId','7a000000-0000-0000-0000-000000000002',
+                                 'buyerWallet',BANK,'fundingCode','USDC')));
+  IF (v_res2->>'replayed')::boolean IS NOT TRUE THEN
+    RAISE EXCEPTION 'FAIL: a replayed buy-now was not reported as one';
+  END IF;
+  IF v_res2->'receipt'->>'txHash' IS DISTINCT FROM v_res->'receipt'->>'txHash' THEN
+    RAISE EXCEPTION 'FAIL: the replayed buy-now minted a different receipt';
+  END IF;
+  SELECT b.balance INTO v_after FROM ledger.account_balance b
+    JOIN ledger.account a ON a.id=b.account_id JOIN ledger.asset s ON s.id=b.asset_id
+   WHERE a.wallet_address=SUPP AND s.cash_code='XUSD';
+  IF v_after <> v_before THEN
+    RAISE EXCEPTION 'FAIL: a replayed buy-now paid the seller twice';
+  END IF;
+  RAISE NOTICE 'PASS  replaying a buy-now returns the same receipt and pays once';
+
+  -- A listing with no buy-now price cannot be bought at one. Published now
+  -- that the first listing is filled and the seller is free to list again.
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-0000000000f2','actorUserId','11111111-0000-0000-0000-000000000003',
+    'intent', jsonb_build_object('kind','publish_listing','listingId','7a000000-0000-0000-0000-000000000003',
+                                 'payableId',PAYABLE,'sellerWallet',SUPP,
+                                 'quantityBase', 100000000, 'minPriceBase', 96000000)));
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','00000000-0000-0000-0000-0000000000f3','actorUserId','11111111-0000-0000-0000-000000000004',
+      'intent', jsonb_build_object('kind','buy_now','listingId','7a000000-0000-0000-0000-000000000003',
+                                   'buyerWallet',BANK,'fundingCode','USDC')));
+    RAISE EXCEPTION 'FAIL: bought at a buy-now price the seller never published';
+  EXCEPTION WHEN sqlstate 'ADA11' THEN
+    RAISE NOTICE 'PASS  a listing with no buy-now price refuses a buy-now';
+  END;
+
+  -- Release it, so the escrow does not outlive the case that needed it.
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-0000000000f7','actorUserId','11111111-0000-0000-0000-000000000003',
+    'intent', jsonb_build_object('kind','cancel_listing','listingId','7a000000-0000-0000-0000-000000000003')));
+
+  ------------------------------------------------- 10. duplicate redemption --
   PERFORM ledger.post(jsonb_build_object(
     'idempotencyKey','00000000-0000-0000-0000-0000000000e7','actorUserId','11111111-0000-0000-0000-000000000001',
     'intent', jsonb_build_object('kind','advance_clock','days', 90)));
@@ -175,10 +303,11 @@ BEGIN
     RAISE NOTICE 'PASS  a settled payable cannot settle again';
   END;
 
-  ------------------------------------------- 10. split settlement is exact --
-  -- Two holders at maturity: the fund bought 100,000, the supplier kept
-  -- 150,000. Each must be paid the face of what they held, and ADATA debited
-  -- exactly once for the total.
+  ------------------------------------------- 11. split settlement is exact --
+  -- Three holders at maturity: the fund bought 100,000 on a bid, the bank
+  -- bought 50,000 at the buy-now price, and the supplier kept the rest. Each
+  -- must be paid the face of what they held, and ADATA debited exactly once
+  -- for the total.
   SELECT b.balance INTO v_after FROM ledger.account_balance b
     JOIN ledger.account a ON a.id=b.account_id JOIN ledger.asset s ON s.id=b.asset_id
    WHERE a.wallet_address=FUND AND s.cash_code='XUSD';
@@ -192,9 +321,15 @@ BEGIN
     RAISE EXCEPTION 'FAIL: the anchor paid %, expected exactly the face once',
       5000000000 - v_after;
   END IF;
+  SELECT b.balance INTO v_after FROM ledger.account_balance b
+    JOIN ledger.account a ON a.id=b.account_id JOIN ledger.asset s ON s.id=b.asset_id
+   WHERE a.wallet_address=BANK AND s.cash_code='XUSD';
+  IF v_after <> 500000000 THEN
+    RAISE EXCEPTION 'FAIL: the buy-now buyer redeemed %, expected 500000000 (50,000)', v_after;
+  END IF;
   RAISE NOTICE 'PASS  a split payable pays each holder and debits the anchor once';
 
-  ----------------------------------------------------------- 11. the books --
+  ----------------------------------------------------------- 12. the books --
   SELECT count(*) INTO v_n FROM ledger.prove_books_balance();
   IF v_n <> 0 THEN RAISE EXCEPTION 'FAIL: projection disagrees with the journal on % rows', v_n; END IF;
   SELECT count(*) INTO v_n FROM (

@@ -48,6 +48,7 @@ export type Intent =
     }
   | { kind: 'withdraw_bid'; bidId: string }
   | { kind: 'accept_bid'; listingId: string; bidId: string }
+  | { kind: 'buy_now'; listingId: string; buyerWallet: string; fundingCode: Asset }
   | { kind: 'settle_maturity'; payableId: string }
   | { kind: 'advance_clock'; days: number }
   | { kind: 'submit'; payableId: string }

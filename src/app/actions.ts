@@ -206,6 +206,19 @@ export async function acceptBid(listingId: string, bidId: string, key?: string):
   return run({ kind: 'accept_bid', listingId, bidId }, key);
 }
 
+/**
+ * PRD §8 screen 11. Buy now: take the lot at the price the seller published,
+ * without waiting for them to accept a bid.
+ */
+export async function buyNow(
+  listingId: string,
+  buyerWallet: string,
+  fundingCode: string,
+  key?: string,
+): Promise<ActionResult> {
+  return run({ kind: 'buy_now', listingId, buyerWallet, fundingCode: fundingCode as never }, key);
+}
+
 export async function transferQuantity(
   payableId: string,
   fromWallet: string,

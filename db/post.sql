@@ -269,6 +269,7 @@ BEGIN
     WHEN 'place_bid'      THEN 'bid_placed'
     WHEN 'withdraw_bid'   THEN 'bid_withdrawn'
     WHEN 'accept_bid'     THEN 'trade_settlement'
+    WHEN 'buy_now'        THEN 'trade_settlement'
     WHEN 'settle_maturity' THEN 'redemption'
     WHEN 'advance_clock'  THEN 'clock_advanced'
     WHEN 'reset_world'    THEN 'world_reset'
@@ -460,7 +461,13 @@ BEGIN
     UPDATE app.bid SET status = 'withdrawn'
      WHERE id = (v_intent->>'bidId')::uuid AND status = 'placed';
 
-  ELSIF v_kind = 'accept_bid' THEN
+  ELSIF v_kind IN ('accept_bid', 'buy_now') THEN
+    -- One settlement path for both. Buy-now is an acceptance the buyer performs
+    -- against a price the seller published in advance, so the only difference
+    -- is who initiates it and where the price comes from. Giving it its own
+    -- branch would mean two places that move money, which is exactly what this
+    -- design exists to avoid.
+    --
     -- Lock by primary key only. See the header note on EvalPlanQual.
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
     IF v_listing.id IS NULL THEN
@@ -469,9 +476,30 @@ BEGIN
     IF v_listing.status <> 'open' THEN
       RAISE EXCEPTION 'listing is %', v_listing.status USING ERRCODE = 'ADA11';
     END IF;
-    SELECT * INTO v_bid FROM app.bid WHERE id = (v_intent->>'bidId')::uuid FOR UPDATE;
-    IF v_bid.status <> 'placed' THEN
-      RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
+
+    IF v_kind = 'buy_now' THEN
+      IF v_listing.buy_now_price_base IS NULL THEN
+        RAISE EXCEPTION 'this listing has no buy-now price' USING ERRCODE = 'ADA11';
+      END IF;
+      -- The buyer's own bid, created and accepted in the same operation, so the
+      -- trade has the same shape in the journal as any other and the portfolio
+      -- gets its cost basis from the same place.
+      INSERT INTO app.bid (listing_id, bidder_wallet, price_base, funding_code, status)
+      VALUES (v_listing.id, v_intent->>'buyerWallet', v_listing.buy_now_price_base,
+              (v_intent->>'fundingCode')::ledger.cash_code, 'placed')
+      RETURNING * INTO v_bid;
+    ELSE
+      SELECT * INTO v_bid FROM app.bid WHERE id = (v_intent->>'bidId')::uuid FOR UPDATE;
+      IF v_bid.status <> 'placed' THEN
+        RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
+      END IF;
+    END IF;
+
+    -- A seller cannot be the buyer. Without this the trade nets to nothing but
+    -- still marks the listing filled, which would quietly retire a lot that
+    -- never changed hands.
+    IF v_bid.bidder_wallet = v_listing.seller_wallet THEN
+      RAISE EXCEPTION 'a seller cannot buy their own listing' USING ERRCODE = 'ADA11';
     END IF;
 
     -- Maturity closes the market whichever kind of lot this is.

@@ -225,35 +225,38 @@ END $$;
 -- split holding exists on arrival.
 CREATE TEMP TABLE seed_live (
   ref text, supplier_id uuid, supplier_wallet text, supplier_user uuid,
-  face bigint, tenor int, grade text, ask_bps int, list boolean, sell_bps int
+  face bigint, tenor int, grade text, ask_bps int, list boolean, sell_bps int,
+  -- Buy-now must be at or above the minimum ask: it is what a lender pays to
+  -- take the lot immediately rather than bid and wait for the seller.
+  buy_bps int
 );
 INSERT INTO seed_live VALUES
   ('TP-2026-0143','e0000000-0000-0000-0000-000000000c43','0x6d1470000000000000000000000000000000b43c','11111111-0000-0000-0000-000000000004',
-    12000000000, 30, 'AAA', 9942, true, NULL),
+    12000000000, 30, 'AAA', 9942, true, NULL, 9955),
   ('TP-2026-0141','e0000000-0000-0000-0000-000000000c41','0x509911000000000000000000000000000000f88a','11111111-0000-0000-0000-000000000003',
-    2500000000, 90, 'AA', 9785, true, NULL),
+    2500000000, 90, 'AA', 9785, true, NULL, 9805),
   ('TP-2026-0142','e0000000-0000-0000-0000-000000000c42','0x4851ca000000000000000000000000000000e42d','11111111-0000-0000-0000-000000000005',
-    480000000, 60, 'A', 9840, true, NULL),
+    480000000, 60, 'A', 9840, true, NULL, NULL),
   ('TP-2026-0145','e0000000-0000-0000-0000-000000000c44','0x2b7744000000000000000000000000000000a144','11111111-0000-0000-0000-00000000000b',
-    3400000000, 45, 'AA', 9880, true, NULL),
+    3400000000, 45, 'AA', 9880, true, NULL, 9895),
   ('TP-2026-0146','e0000000-0000-0000-0000-000000000c45','0x8c3390000000000000000000000000000000e145','11111111-0000-0000-0000-00000000000c',
-    15600000000, 120, 'AAA', 9705, true, NULL),
+    15600000000, 120, 'AAA', 9705, true, NULL, 9730),
   ('TP-2026-0147','e0000000-0000-0000-0000-000000000c46','0x91da22000000000000000000000000000000b146','11111111-0000-0000-0000-00000000000d',
-    260000000, 30, 'A', 9915, true, NULL),
+    260000000, 30, 'A', 9915, true, NULL, NULL),
   ('TP-2026-0148','e0000000-0000-0000-0000-000000000c28','0x7009e5000000000000000000000000000000d128','11111111-0000-0000-0000-000000000009',
-    5900000000, 180, 'AA', 9520, true, NULL),
+    5900000000, 180, 'AA', 9520, true, NULL, 9560),
   ('TP-2026-0149','e0000000-0000-0000-0000-000000000c42','0x4851ca000000000000000000000000000000e42d','11111111-0000-0000-0000-000000000005',
-    880000000, 75, 'A', 9795, true, NULL),
+    880000000, 75, 'A', 9795, true, NULL, 9815),
   -- Held, not listed: a supplier choosing to keep the receivable.
   ('TP-2026-0150','e0000000-0000-0000-0000-000000000c44','0x2b7744000000000000000000000000000000a144','11111111-0000-0000-0000-00000000000b',
-    1250000000, 60, 'AA', 0, false, NULL),
+    1250000000, 60, 'AA', 0, false, NULL, NULL),
   ('TP-2026-0151','e0000000-0000-0000-0000-000000000c46','0x91da22000000000000000000000000000000b146','11111111-0000-0000-0000-00000000000d',
-    720000000, 90, 'A', 0, false, NULL),
+    720000000, 90, 'A', 0, false, NULL, NULL),
   -- Partially sold, so a payable with two current holders exists on arrival.
   ('TP-2026-0152','e0000000-0000-0000-0000-000000000c41','0x509911000000000000000000000000000000f88a','11111111-0000-0000-0000-000000000003',
-    4000000000, 100, 'AA', 0, false, 9750),
+    4000000000, 100, 'AA', 0, false, 9750, NULL),
   ('TP-2026-0153','e0000000-0000-0000-0000-000000000c43','0x6d1470000000000000000000000000000000b43c','11111111-0000-0000-0000-000000000004',
-    9200000000, 150, 'AAA', 0, false, 9610);
+    9200000000, 150, 'AAA', 0, false, 9610, NULL);
 
 DO $$
 DECLARE l RECORD; v_id uuid; v_tok int := 140; v_list uuid; v_half bigint;
@@ -280,7 +283,9 @@ BEGIN
     IF l.list THEN
       PERFORM pg_temp.act('l-list-' || l.ref, l.supplier_user,
         jsonb_build_object('kind','publish_listing','payableId',v_id,'sellerWallet',l.supplier_wallet,
-                           'quantityBase',l.face,'minPriceBase',(l.face * l.ask_bps) / 10000));
+                           'quantityBase',l.face,'minPriceBase',(l.face * l.ask_bps) / 10000)
+        || CASE WHEN l.buy_bps IS NULL THEN '{}'::jsonb
+                ELSE jsonb_build_object('buyNowPriceBase',(l.face * l.buy_bps) / 10000) END);
     END IF;
 
     -- A partial sale: list half, sell it, keep the rest.

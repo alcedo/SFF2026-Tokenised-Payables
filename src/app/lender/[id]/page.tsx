@@ -217,6 +217,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
             listingId={listing.id}
             listedFaceBase={listing.listedFaceBase.toString()}
             askBase={listing.askBase.toString()}
+            buyNowBase={listing.buyNowBase?.toString() ?? null}
             daysRemaining={listing.quote.daysRemaining}
             wallet={persona.wallet}
             eligible={persona.institutionalEligible}
