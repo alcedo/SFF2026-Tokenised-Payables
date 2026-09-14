@@ -24,7 +24,10 @@ import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
  */
 export default async function AdminPage() {
   const world = await readWorld();
-  const [totals, payables] = await Promise.all([readProgrammeTotals(world), readPayables(world)]);
+  const [totals, payables] = await Promise.all([
+    readProgrammeTotals(world),
+    readPayables(world, { includeSeriesMembers: true }),
+  ]);
   const overdue = payables.filter((p) => p.status === 'overdue');
 
   return (

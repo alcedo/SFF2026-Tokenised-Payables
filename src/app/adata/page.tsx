@@ -23,7 +23,7 @@ export default async function AdataDashboard() {
   const world = await readWorld();
   const [totals, payables] = await Promise.all([
     readProgrammeTotals(world),
-    readPayables(world),
+    readPayables(world, { includeSeriesMembers: true }),
   ]);
 
   const live = payables.filter(

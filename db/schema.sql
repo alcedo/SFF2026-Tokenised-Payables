@@ -733,15 +733,19 @@ CREATE VIEW ledger.v_series AS
 -- to that same seller's wallet. Deriving the seller from "the cash debit"
 -- instead is wrong whenever funding is XSGD: the debit is then in XSGD and
 -- sits against the FX book, not the seller.
--- TODO series: N token legs produce N rows sharing one lot price. Allocate
--- price_base pro-rata by member quantity before using it as a cost basis.
+--
+-- A series lot is one XUSD credit and N token credits. Attributing the whole
+-- lot price to every member would 12× the cash deployed on the portfolio and
+-- make every member look bought above par. Allocate pro-rata by quantity so
+-- the member prices sum back to the lot price exactly (largest remainder).
 CREATE VIEW ledger.v_trade AS
+WITH token_moves AS (
   SELECT e.id AS entry_id, e.seq, e.world_date, e.listing_id, e.bid_id,
          buyer.wallet_address  AS buyer_wallet,
          seller.wallet_address AS seller_wallet,
          tok.payable_id,
          tok_in.amount         AS quantity_base,
-         xusd_in.amount        AS price_base
+         xusd_in.amount        AS lot_price
     FROM ledger.journal_entry e
     JOIN ledger.journal_leg tok_in  ON tok_in.entry_id = e.id AND tok_in.amount > 0
     JOIN ledger.asset tok           ON tok.id = tok_in.asset_id AND tok.kind = 'payable'
@@ -754,7 +758,32 @@ CREATE VIEW ledger.v_trade AS
     JOIN ledger.asset xusd          ON xusd.id = xusd_in.asset_id AND xusd.cash_code = 'XUSD'
     JOIN ledger.account sc          ON sc.id = xusd_in.account_id
                                    AND sc.wallet_address = seller.wallet_address
-   WHERE e.kind = 'trade_settlement';
+   WHERE e.kind = 'trade_settlement'
+),
+sized AS (
+  SELECT *, SUM(quantity_base) OVER (PARTITION BY entry_id)::bigint AS lot_qty
+    FROM token_moves
+),
+floored AS (
+  SELECT *,
+         (lot_price * quantity_base) / lot_qty AS floor_price,
+         (lot_price * quantity_base) % lot_qty AS remainder,
+         (lot_price
+            - SUM((lot_price * quantity_base) / lot_qty)
+                OVER (PARTITION BY entry_id))::bigint AS residue
+    FROM sized
+)
+SELECT entry_id, seq, world_date, listing_id, bid_id,
+       buyer_wallet, seller_wallet, payable_id, quantity_base,
+       (floor_price
+          + CASE
+              WHEN ROW_NUMBER() OVER (
+                     PARTITION BY entry_id
+                     ORDER BY remainder DESC, payable_id
+                   ) <= residue
+              THEN 1 ELSE 0
+            END)::bigint AS price_base
+  FROM floored;
 
 -- The mock explorer and the event history read the same view, so a receipt
 -- reopened from history is byte-identical to the one shown at confirmation.

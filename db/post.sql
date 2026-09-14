@@ -247,6 +247,8 @@ DECLARE
   v_days        int;
   v_anchor_wallet text;
   v_series      app.series;
+  v_member      app.payable;
+  v_target_series uuid;
   v_leg         RECORD;
   v_erp         app.erp_invoice;
   v_supplier_id uuid;
@@ -499,6 +501,15 @@ BEGIN
       RETURNING * INTO v_bid;
     ELSE
       SELECT * INTO v_bid FROM app.bid WHERE id = (v_intent->>'bidId')::uuid FOR UPDATE;
+      IF v_bid.id IS NULL THEN
+        RAISE EXCEPTION 'no such bid' USING ERRCODE = 'ADA11';
+      END IF;
+      -- Recheck under the listing lock: a bid is an offer on one listing, and
+      -- pairing it with another would debit the bidder's price against a
+      -- different lot's tokens.
+      IF v_bid.listing_id IS DISTINCT FROM v_listing.id THEN
+        RAISE EXCEPTION 'that offer is not on this listing' USING ERRCODE = 'ADA11';
+      END IF;
       IF v_bid.status <> 'placed' THEN
         RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
       END IF;
@@ -581,6 +592,19 @@ BEGIN
      WHERE id = v_entry.id;
 
   ELSIF v_kind = 'settle_maturity' THEN
+    -- Identify the lot before taking row locks, then lock in id order. Locking
+    -- the clicked member first and the rest later can deadlock two sessions
+    -- settling different members of the same series.
+    SELECT series_id INTO v_target_series
+      FROM app.payable WHERE id = (v_intent->>'payableId')::uuid;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'no such payable' USING ERRCODE = 'ADA15';
+    END IF;
+    IF v_target_series IS NOT NULL THEN
+      SELECT * INTO v_series FROM app.series WHERE id = v_target_series FOR NO KEY UPDATE;
+      PERFORM 1 FROM app.payable WHERE series_id = v_target_series ORDER BY id FOR NO KEY UPDATE;
+      UPDATE ledger.journal_entry SET series_id = v_target_series WHERE id = v_entry.id;
+    END IF;
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
     IF v_payable.lifecycle_status = 'settled' THEN
       RAISE EXCEPTION 'payable % is already settled', v_payable.ref USING ERRCODE = 'ADA16';
@@ -588,8 +612,8 @@ BEGIN
     IF (v_world.t0 + v_world.offset_days) < v_payable.maturity_date THEN
       RAISE EXCEPTION 'payable % has not matured', v_payable.ref USING ERRCODE = 'ADA12';
     END IF;
-    v_asset := ledger.payable_asset(v_payable.id);
-    v_cash  := ledger.cash_asset('XUSD');
+
+    v_cash := ledger.cash_asset('XUSD');
     -- The anchor obligor funds redemption from its own wallet.
     SELECT address INTO v_anchor_wallet FROM app.wallet WHERE entity_id = v_payable.anchor_id LIMIT 1;
     IF v_anchor_wallet IS NULL THEN
@@ -597,19 +621,32 @@ BEGIN
     END IF;
 
     -- Maturity expires any listing still open, returning escrow to free so the
-    -- holder's whole position redeems in one place.
+    -- holder's whole position redeems in one place. Return every listing_leg,
+    -- not just the triggering payable's asset: a series listing holds one row
+    -- per member, and cancelling it while leaving the other members in
+    -- wallet_listed fails the escrow equality at COMMIT.
     FOR v_listing IN
       SELECT li.* FROM app.listing li
        WHERE li.status = 'open'
-         AND EXISTS (SELECT 1 FROM app.listing_leg ll
-                      WHERE ll.listing_id = li.id AND ll.asset_id = v_asset)
+         AND EXISTS (
+           SELECT 1 FROM app.listing_leg ll
+           JOIN ledger.asset ast ON ast.id = ll.asset_id
+           WHERE ll.listing_id = li.id
+             AND ast.kind = 'payable'
+             AND (
+               ast.payable_id = v_payable.id
+               OR (v_target_series IS NOT NULL AND ast.payable_id IN (
+                    SELECT p.id FROM app.payable p WHERE p.series_id = v_target_series
+                  ))
+             )
+         )
        ORDER BY li.id FOR UPDATE
     LOOP
       UPDATE app.listing SET status = 'cancelled' WHERE id = v_listing.id;
       UPDATE app.bid SET status = 'superseded' WHERE listing_id = v_listing.id AND status = 'placed';
       FOR v_leg IN
         SELECT asset_id, quantity_base FROM app.listing_leg
-         WHERE listing_id = v_listing.id AND asset_id = v_asset ORDER BY asset_id
+         WHERE listing_id = v_listing.id ORDER BY asset_id
       LOOP
         v_legs := v_legs || ARRAY[
           ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_leg.asset_id, -v_leg.quantity_base)::ledger.leg_spec,
@@ -622,26 +659,37 @@ BEGIN
     -- the tokens burn back to system_unissued. Because face and quantity are
     -- the same number of base units, each holder's credit IS their quantity —
     -- no pro-rata rounding is possible, and the credits reconcile to the debit
-    -- exactly by construction.
+    -- exactly by construction. A series walks every member in the same entry.
     v_total_qty := 0;
-    FOR v_holder IN
-      SELECT a.wallet_address, SUM(b.balance)::bigint AS qty
-        FROM ledger.account_balance b
-        JOIN ledger.account a ON a.id = b.account_id
-       WHERE b.asset_id = v_asset AND a.class = 'wallet' AND b.balance > 0
-       GROUP BY a.wallet_address
-       ORDER BY a.wallet_address
+    FOR v_member IN
+      SELECT p.* FROM app.payable p
+       WHERE p.lifecycle_status <> 'settled'
+         AND (p.id = v_payable.id
+              OR (v_target_series IS NOT NULL AND p.series_id = v_target_series))
+       ORDER BY p.id
     LOOP
-      v_total_qty := v_total_qty + v_holder.qty;
-      v_legs := v_legs || ARRAY[
-        ROW(ledger.wallet_account(v_holder.wallet_address, 'wallet_free'), v_asset, -v_holder.qty)::ledger.leg_spec,
-        ROW(ledger.system_account('system_unissued'), v_asset, v_holder.qty)::ledger.leg_spec,
-        ROW(ledger.wallet_account(v_anchor_wallet, 'wallet_free'), v_cash, -v_holder.qty)::ledger.leg_spec,
-        ROW(ledger.wallet_account(v_holder.wallet_address, 'wallet_free'), v_cash, v_holder.qty)::ledger.leg_spec
-      ];
+      IF (v_world.t0 + v_world.offset_days) < v_member.maturity_date THEN
+        RAISE EXCEPTION 'payable % has not matured', v_member.ref USING ERRCODE = 'ADA12';
+      END IF;
+      v_asset := ledger.payable_asset(v_member.id);
+      FOR v_holder IN
+        SELECT a.wallet_address, SUM(b.balance)::bigint AS qty
+          FROM ledger.account_balance b
+          JOIN ledger.account a ON a.id = b.account_id
+         WHERE b.asset_id = v_asset AND a.class = 'wallet' AND b.balance > 0
+         GROUP BY a.wallet_address
+         ORDER BY a.wallet_address
+      LOOP
+        v_total_qty := v_total_qty + v_holder.qty;
+        v_legs := v_legs || ARRAY[
+          ROW(ledger.wallet_account(v_holder.wallet_address, 'wallet_free'), v_asset, -v_holder.qty)::ledger.leg_spec,
+          ROW(ledger.system_account('system_unissued'), v_asset, v_holder.qty)::ledger.leg_spec,
+          ROW(ledger.wallet_account(v_anchor_wallet, 'wallet_free'), v_cash, -v_holder.qty)::ledger.leg_spec,
+          ROW(ledger.wallet_account(v_holder.wallet_address, 'wallet_free'), v_cash, v_holder.qty)::ledger.leg_spec
+        ];
+      END LOOP;
+      UPDATE app.payable SET lifecycle_status = 'settled' WHERE id = v_member.id;
     END LOOP;
-
-    UPDATE app.payable SET lifecycle_status = 'settled' WHERE id = v_payable.id;
 
   ELSIF v_kind = 'advance_clock' THEN
     v_days := (v_intent->>'days')::int;

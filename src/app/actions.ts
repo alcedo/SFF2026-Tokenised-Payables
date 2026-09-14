@@ -82,7 +82,7 @@ export async function advanceClock(days: number): Promise<ActionResult> {
  */
 export async function jumpToNextMaturity(): Promise<ActionResult> {
   const world = await readWorld();
-  const ahead = (await readPayables(world))
+  const ahead = (await readPayables(world, { includeSeriesMembers: true }))
     .filter((p) => p.status !== 'settled' && p.daysRemaining > 0)
     .map((p) => p.daysRemaining)
     .sort((a, b) => a - b);

@@ -314,8 +314,15 @@ function toPayable(r: RawPayable, world: World): PayableRow {
   };
 }
 
-export async function readPayables(world: World): Promise<PayableRow[]> {
-  const rows = await query<RawPayable>(`${PAYABLE_SELECT} WHERE p.series_id IS NULL ORDER BY p.ref`);
+export async function readPayables(
+  world: World,
+  opts: { includeSeriesMembers?: boolean } = {},
+): Promise<PayableRow[]> {
+  // Screens that total the programme count members once via readProgrammeTotals
+  // rather than listing them. Settlement, the due queue, and jump-to-maturity
+  // have to see the members or the seeded series lot can never be redeemed.
+  const where = opts.includeSeriesMembers ? '' : ' WHERE p.series_id IS NULL';
+  const rows = await query<RawPayable>(`${PAYABLE_SELECT}${where} ORDER BY p.ref`);
   return rows.map((r) => toPayable(r, world));
 }
 
