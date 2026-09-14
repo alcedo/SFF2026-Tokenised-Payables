@@ -157,7 +157,7 @@ export async function fundSettlement(form: FundSettlementForm) {
 
   const { receipt, conversion } = result.value;
   return {
-    sourceDebit: conversion!.sourceDebit,       // e.g. XSGD 320,458.7500 at 1.31
+    sourceDebit: conversion!.sourceDebit,       // e.g. XSGD 327,500.0000 at 1.31 for 250,000 of face
     rate: conversion!.rateE6,
     credits: receipt!.balanceMoves,             // one XUSD credit per current holder
     txHash: receipt!.txHash,
