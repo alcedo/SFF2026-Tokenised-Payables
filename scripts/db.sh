@@ -75,8 +75,12 @@ ensure() {
 		echo "app schema already present; skip"
 		return 0
 	fi
-	psql "$url" -v ON_ERROR_STOP=1 -1 \
-		-f "$ROOT/db/schema.sql" -f "$ROOT/db/post.sql" -f "$ROOT/db/seed.sql"
+	psql "$url" -q -v ON_ERROR_STOP=1 -1 \
+		-f "$ROOT/db/schema.sql" -f "$ROOT/db/post.sql" -f "$ROOT/db/seed.sql" >/tmp/ensure-load.log 2>&1 || {
+		echo "ensure failed to load:" >&2
+		grep -E 'ERROR|FATAL' /tmp/ensure-load.log >&2 | head -20
+		exit 1
+	}
 	echo "loaded schema into empty database"
 }
 

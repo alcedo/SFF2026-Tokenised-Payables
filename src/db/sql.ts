@@ -11,7 +11,6 @@ import type { PoolClient } from 'pg';
  * laptop can run them through psql, and next.config.mjs traces them into every
  * serverless bundle because on Vercel there is no checkout to read from.
  */
-export const WORLD_SQL_FILES = ['db/schema.sql', 'db/post.sql', 'db/seed.sql'] as const;
 
 /**
  * Remove psql meta-commands such as `\set` and `\echo`.
@@ -29,9 +28,15 @@ export function stripPsqlDirectives(sql: string): string {
 }
 
 export async function readWorldSql(): Promise<string[]> {
-  return Promise.all(
-    WORLD_SQL_FILES.map((file) => readFile(path.join(process.cwd(), file), 'utf8')),
-  );
+  // Literal `db/….sql` segments so Turbopack traces only these files. Joining
+  // a filename from an array is dynamic from the bundler's point of view and
+  // would ship the whole repository in every serverless function.
+  const root = process.cwd();
+  return Promise.all([
+    readFile(path.join(root, 'db/schema.sql'), 'utf8'),
+    readFile(path.join(root, 'db/post.sql'), 'utf8'),
+    readFile(path.join(root, 'db/seed.sql'), 'utf8'),
+  ]);
 }
 
 /**
