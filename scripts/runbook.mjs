@@ -156,6 +156,19 @@ try {
   }
   await say('clears it again, and the whole book comes back');
 
+  // PRD §8 screen 10: "Expand a Series to inspect its members."
+  await page.getByRole('link', { name: /^SERIES-/ }).first().click();
+  await page.waitForTimeout(900);
+  const members = await page.locator('details table.ledger tbody tr').count();
+  if (members < 2) throw new Error('a series lot showed no member invoices');
+  await page.locator('details summary').click();
+  await page.waitForTimeout(400);
+  await expectText('one holder across every member', 'the expanded series');
+  await shot('series-members');
+  await say(`opens the series lot and expands its ${members} member invoices`);
+
+  await page.goto(`${BASE}/lender`, { waitUntil: 'domcontentloaded' });
+
   // PRD §8 screen 11 pairs buy-now with bidding. Proved here on a seeded lot
   // rather than on the runbook's own payable, so the headline path stays
   // issue → list → bid → accept and this stays the aside it is on the day.

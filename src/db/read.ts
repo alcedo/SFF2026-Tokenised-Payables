@@ -215,6 +215,45 @@ export async function readPayable(id: string, world: World): Promise<PayableRow 
   return row ? toPayable(row, world) : null;
 }
 
+/**
+ * The invoices inside a series lot. PRD §8 screen 10: "Expand a Series to
+ * inspect its members."
+ *
+ * Each member carries its own holder, because §13 requires every member of a
+ * series to be wholly held by one wallet. Showing the holder per row is what
+ * makes that rule visible rather than asserted: a lender can see for
+ * themselves that the lot is not a stack of fragments.
+ */
+export interface SeriesMember extends PayableRow {
+  holderName: string | null;
+  holderWallet: string | null;
+}
+
+export async function readSeriesMembers(
+  seriesId: string,
+  world: World,
+): Promise<SeriesMember[]> {
+  const rows = await query<RawPayable & { holder_name: string | null; holder_wallet: string | null }>(
+    `SELECT sub.*,
+            (SELECT e2.name FROM ledger.v_holding h
+               JOIN app.wallet w2 ON w2.address = h.wallet_address
+               JOIN app.entity e2 ON e2.id = w2.entity_id
+              WHERE h.payable_id = sub.id
+              ORDER BY h.quantity_base DESC LIMIT 1)           AS holder_name,
+            (SELECT h.wallet_address FROM ledger.v_holding h
+              WHERE h.payable_id = sub.id
+              ORDER BY h.quantity_base DESC LIMIT 1)           AS holder_wallet
+       FROM (${PAYABLE_SELECT} WHERE p.series_id = $1) sub
+      ORDER BY sub.ref`,
+    [seriesId],
+  );
+  return rows.map((r) => ({
+    ...toPayable(r, world),
+    holderName: r.holder_name,
+    holderWallet: r.holder_wallet,
+  }));
+}
+
 // --- holdings ---------------------------------------------------------------
 
 export interface Holder {
@@ -476,7 +515,9 @@ export interface EventRow {
  * receipt reopened from history to be identical to the one shown at
  * confirmation, which it is here because both read the same rows.
  */
-export async function readEvents(opts: { payableId?: string; limit?: number } = {}): Promise<EventRow[]> {
+export async function readEvents(
+  opts: { payableId?: string; seriesId?: string; limit?: number } = {},
+): Promise<EventRow[]> {
   const rows = await query<{
     entry_id: string;
     seq: bigint;
@@ -499,9 +540,15 @@ export async function readEvents(opts: { payableId?: string; limit?: number } = 
        JOIN app.app_user u ON u.id = e.actor_user_id
        LEFT JOIN app.payable p ON p.id = e.payable_id
       WHERE ($1::uuid IS NULL OR e.payable_id = $1)
+        AND ($2::uuid IS NULL
+             OR e.series_id = $2
+             -- A series lot's history is also everything that happened to its
+             -- member invoices: each was created, approved and issued in its
+             -- own right before the lot existed.
+             OR p.series_id = $2)
       ORDER BY e.seq DESC
-      LIMIT $2`,
-    [opts.payableId ?? null, opts.limit ?? 100],
+      LIMIT $3`,
+    [opts.payableId ?? null, opts.seriesId ?? null, opts.limit ?? 100],
   );
   return rows.map((r) => ({
     entryId: r.entry_id,

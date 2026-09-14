@@ -20,6 +20,7 @@ import {
   readEvents,
   readHolders,
   readListing,
+  readSeriesMembers,
   readWorld,
 } from '@/db/read';
 
@@ -37,14 +38,20 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
   const listing = await readListing(id, world);
   if (!listing) notFound();
 
-  const [holders, bids, balances, events] = await Promise.all([
+  const [holders, members, bids, balances, events] = await Promise.all([
     listing.targetKind === 'payable' ? readHolders(listing.targetId) : Promise.resolve([]),
+    listing.targetKind === 'series'
+      ? readSeriesMembers(listing.targetId, world)
+      : Promise.resolve([]),
     readBids(listing.id, listing.listedFaceBase, listing.quote.daysRemaining),
     readBalances(persona.wallet),
     listing.targetKind === 'payable'
       ? readEvents({ payableId: listing.targetId, limit: 25 })
-      : readEvents({ limit: 25 }),
+      : readEvents({ seriesId: listing.targetId, limit: 25 }),
   ]);
+
+  const membersFace = members.reduce<bigint>((acc, m) => acc + m.outstandingBase, 0n);
+  const oneHolder = new Set(members.map((m) => m.holderWallet)).size <= 1;
 
   const openBids = bids.filter((b) => b.status === 'placed');
   const partial = listing.listedFaceBase !== listing.invoiceFaceBase;
@@ -146,6 +153,80 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
               face; your yield is on the price you pay.
             </p>
           </Panel>
+
+          {/*
+            PRD §8 screen 10: "Expand a Series to inspect its members."
+            A <details> rather than a client component: the rows are already
+            on the page, so expanding is a browser affordance and costs no
+            round trip. Collapsed by default because twelve invoices sharing
+            one anchor and one maturity is a detail, not the headline.
+          */}
+          {members.length > 0 ? (
+            <Panel title={`Series members (${members.length})`} dense>
+              <details className="group">
+                <summary className="cursor-pointer list-none px-3 py-2 text-[12px] text-accent hover:bg-surface-sunken">
+                  <span className="group-open:hidden">
+                    Show the {members.length} invoices in this lot →
+                  </span>
+                  <span className="hidden group-open:inline">Hide the member invoices</span>
+                </summary>
+                <table className="ledger">
+                  <thead>
+                    <tr>
+                      <th>Reference</th>
+                      <th>Invoice</th>
+                      <th>Original supplier</th>
+                      <th>Grade</th>
+                      <th className="num">Face</th>
+                      <th>Maturity</th>
+                      <th>Held by</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {members.map((m) => (
+                      <tr key={m.id}>
+                        <td className="font-medium">{m.ref}</td>
+                        <td className="text-ink-muted">{m.invoiceRef}</td>
+                        <td className="text-ink-muted">{m.supplierName}</td>
+                        <td>{m.grade ? <GradeBadge grade={m.grade} /> : '—'}</td>
+                        <td>
+                          <Amount value={m.outstandingBase} decimals={2} />
+                        </td>
+                        <td className="num">{m.maturityDate}</td>
+                        <td>
+                          {m.holderName ? (
+                            <span className="text-ink-muted">{m.holderName}</span>
+                          ) : (
+                            <span className="text-ink-faint">unissued</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={4} className="text-ink-muted">
+                        Total, which is the listed face
+                      </td>
+                      <td className="font-semibold">
+                        <Amount value={membersFace as never} decimals={2} />
+                      </td>
+                      <td colSpan={2} className="text-ink-faint">
+                        {oneHolder
+                          ? 'one holder across every member, as a series requires'
+                          : 'members are held by more than one wallet'}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </details>
+              <p className="px-3 py-2 text-[10.5px] text-ink-faint">
+                A series is a lot-grouping mechanism, not a new instrument. Every member shares one
+                anchor and one maturity, is wholly held by a single wallet, and trades only as part
+                of the whole lot.
+              </p>
+            </Panel>
+          ) : null}
 
           {holders.length > 0 ? (
             <Panel title="Current holders" dense>
