@@ -4,6 +4,7 @@
 #   scripts/db.sh up      start the server (idempotent)
 #   scripts/db.sh reset   drop, recreate, reload the schema and seed
 #   scripts/db.sh bare    the same without the seed, for tests with their own fixture
+#   scripts/db.sh ensure  load schema+seed only if the database has no app schema
 #   scripts/db.sh psql    open a shell on the dev database
 #   scripts/db.sh url     print the connection string
 #
@@ -59,12 +60,33 @@ reset() {
 	echo "${DB_NAME} reset"
 }
 
+# Load schema + seed against DATABASE_URL (or the local dev database) only when
+# the `app` schema is missing. Same files and the same single transaction as the
+# Vercel first-request path; this is the laptop/psql form of that check.
+ensure() {
+	local url="${DATABASE_URL:-}"
+	if [ -z "$url" ]; then
+		up
+		url="$DEV_URL"
+	fi
+	local empty
+	empty="$(psql "$url" -t -A -v ON_ERROR_STOP=1 -c "SELECT NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'app')")"
+	if [ "$empty" != "t" ]; then
+		echo "app schema already present; skip"
+		return 0
+	fi
+	psql "$url" -v ON_ERROR_STOP=1 -1 \
+		-f "$ROOT/db/schema.sql" -f "$ROOT/db/post.sql" -f "$ROOT/db/seed.sql"
+	echo "loaded schema into empty database"
+}
+
 case "${1:-up}" in
 up) up ;;
 reset) reset ;;
 bare)
 	SKIP_SEED=1 reset
 	;;
+ensure) ensure ;;
 psql)
 	up
 	shift
@@ -72,7 +94,7 @@ psql)
 	;;
 url) echo "$DEV_URL" ;;
 *)
-	echo "usage: scripts/db.sh {up|reset|bare|psql|url}" >&2
+	echo "usage: scripts/db.sh {up|reset|bare|ensure|psql|url}" >&2
 	exit 1
 	;;
 esac

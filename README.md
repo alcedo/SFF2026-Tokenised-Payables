@@ -60,19 +60,28 @@ The last two need the app running (`scripts/serve.sh`).
    **pooled** connection string, because each serverless instance opens its own
    pool and instances scale out under load.
 2. **Set `DATABASE_URL`** in the Vercel project's environment variables.
-3. **Load the schema once**, against that database:
-   ```bash
-   psql "$DATABASE_URL" -f db/schema.sql -f db/post.sql -f db/seed.sql
-   ```
-   Reset world does the same thing from inside the app afterwards.
+3. **Deploy.** The first request against an empty database (no `app` schema)
+   loads `db/schema.sql`, `db/post.sql` and `db/seed.sql` through the driver, in
+   one transaction. Later deploys leave an existing world alone. There is no
+   `psql` on Vercel; this is the same load Reset world already used, gated on
+   emptiness so a fresh Neon comes up seeded without a laptop step.
 4. **Set `ADATA_RESET_PIN`** if the URL is going to be public. Reset restores
    the seed for *everyone* connected, so it is already restricted to the
    StraitsX admin persona and needs the word RESET typed to arm. But the
    persona switcher is open by design (PRD §11), so anyone can become the
    admin. The PIN is the only gate a stranger cannot walk through. Leave it
    unset for a laptop demo and the screen says so plainly.
-5. **Deploy.** No build-time database access is needed; every route is
-   server-rendered on demand.
+
+To load a hosted database from a laptop instead (same files, skipped if `app`
+already exists):
+
+```bash
+export DATABASE_URL='postgres://…'
+scripts/db.sh ensure
+# equivalent:
+# psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -1 \
+#   -f db/schema.sql -f db/post.sql -f db/seed.sql
+```
 
 ### Notes for Neon
 
@@ -88,7 +97,9 @@ scale-to-zero on the branch.
 
 `Reset world` replays `db/schema.sql`, `db/post.sql` and `db/seed.sql` through
 the driver in one transaction, which takes a few seconds on Neon and needs no
-`psql` on the server.
+`psql` on the server. The first request against a database with no `app` schema
+does the same load, so a freshly provisioned Neon is seeded without a laptop
+`psql` step; a database that already has the demo is not touched.
 
 `PG_POOL_MAX` defaults to 1 connection per instance. Raise it only if you have
 measured a need and the database can take the total.

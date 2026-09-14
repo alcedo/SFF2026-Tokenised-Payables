@@ -76,10 +76,25 @@ export function pool(): Pool {
   return globalThis.__adataPool;
 }
 
+/**
+ * First use of the driver loads schema+seed if the database has no `app`
+ * schema. That is how a fresh Neon on Vercel becomes the demo world without
+ * psql. Memoised per process; a populated database is a no-op after one
+ * catalog check.
+ *
+ * Dynamic import so this module can finish initialising before ensure.ts
+ * asks for pool(). A static import would be a cycle.
+ */
+async function ensureReady(): Promise<void> {
+  const { ensureWorld } = await import('./ensure');
+  await ensureWorld();
+}
+
 export async function query<R extends QueryResultRow>(
   text: string,
   params: readonly unknown[] = [],
 ): Promise<R[]> {
+  await ensureReady();
   const result = await pool().query<R>(text, params as unknown[]);
   return result.rows;
 }
@@ -100,6 +115,7 @@ export async function queryOne<R extends QueryResultRow>(
  * need to hold a lock open deliberately.
  */
 export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  await ensureReady();
   const client = await pool().connect();
   try {
     await client.query('BEGIN');

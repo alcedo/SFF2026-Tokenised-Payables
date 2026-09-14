@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:unit": "vitest run",
     "db:reset": "scripts/db.sh reset",
+    "db:ensure": "scripts/db.sh ensure",
     "serve": "scripts/serve.sh",
     "verify:screens": "node scripts/screens.mjs",
     "verify:runbook": "node scripts/runbook.mjs"
