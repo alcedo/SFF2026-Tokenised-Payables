@@ -9,7 +9,9 @@ import {
   Percent,
   Stat,
 } from '@/components/primitives';
+import { MarketFilters } from './MarketFilters';
 import { formatUnits } from '@/core/money';
+import { applyFilter, isFiltered, parseFilter } from '@/core/market';
 import { readMarketplace, readWorld } from '@/db/read';
 
 /**
@@ -18,10 +20,23 @@ import { readMarketplace, readWorld } from '@/db/read';
  * The default sort is yield, per §9. Listed quantity is shown alongside the
  * original invoice face wherever they differ, because a lender comparing two
  * rows needs to know whether they are looking at a whole invoice or a slice.
+ *
+ * The filter lives in the URL and is applied by `src/core/market.ts`, which
+ * explains why the filtering is here and not in SQL. The summary figures above
+ * the table describe the filtered view, not the whole book: a lender who has
+ * narrowed to 30-day AAA paper wants the best yield among those, and a
+ * headline number that ignored the filter would be answering a question
+ * nobody asked.
  */
-export default async function MarketplacePage() {
-  const world = await readWorld();
-  const listings = await readMarketplace(world);
+export default async function MarketplacePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [world, params] = await Promise.all([readWorld(), searchParams]);
+  const all = await readMarketplace(world);
+  const filter = parseFilter(params);
+  const listings = applyFilter(all, filter);
 
   const totalFace = listings.reduce<bigint>((acc, l) => acc + l.listedFaceBase, 0n);
   const bestYield = listings.reduce((best, l) => Math.max(best, l.quote.lenderYieldPercent ?? 0), 0);
@@ -37,8 +52,14 @@ export default async function MarketplacePage() {
         </div>
       </div>
 
+      <MarketFilters shown={listings.length} total={all.length} />
+
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <Stat label="Open lots" value={listings.length} />
+        <Stat
+          label={isFiltered(filter) ? 'Lots matching' : 'Open lots'}
+          value={listings.length}
+          hint={isFiltered(filter) ? `of ${all.length} open` : undefined}
+        />
         <Stat label="Face on offer" value={formatUnits(totalFace as never, 2)} hint="XUSD" />
         <Stat label="Best yield" value={`${bestYield.toFixed(1)}%`} hint="annualised, Actual/365" />
         <Stat label="Anchor obligor" value="ADATA" hint="every lot in this programme" />
@@ -46,10 +67,17 @@ export default async function MarketplacePage() {
 
       <Panel title="Open listings" dense>
         {listings.length === 0 ? (
-          <EmptyState
-            title="Nothing is listed right now."
-            hint="A supplier lists a payable from Request financing. Reset the world to restore the seeded listings."
-          />
+          isFiltered(filter) ? (
+            <EmptyState
+              title="No lot matches these filters."
+              hint={`${all.length} lots are open. Clear a filter to widen the search.`}
+            />
+          ) : (
+            <EmptyState
+              title="Nothing is listed right now."
+              hint="A supplier lists a payable from Request financing. Reset the world to restore the seeded listings."
+            />
+          )
         ) : (
           <div className="overflow-x-auto">
             <table className="ledger">

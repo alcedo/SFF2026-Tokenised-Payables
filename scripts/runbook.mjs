@@ -137,6 +137,25 @@ try {
   await page.goto(`${BASE}/lender`, { waitUntil: 'domcontentloaded' });
   await say(`lender opens the marketplace and finds ${created}`);
 
+  // PRD §8 screen 9 asks for filters on maturity, tenor, grade, ticket size
+  // and yield. The filter lives in the URL, so what the presenter narrows to
+  // is also a link they can send afterwards.
+  const allLots = await page.locator('table.ledger tbody tr').count();
+  await page.getByRole('button', { name: 'AAA', exact: true }).click();
+  await page.waitForTimeout(900);
+  const aaaLots = await page.locator('table.ledger tbody tr').count();
+  if (aaaLots >= allLots) throw new Error('filtering to AAA did not narrow the book');
+  if (!page.url().includes('grade=AAA')) throw new Error('the filter did not reach the URL');
+  await shot('marketplace-filtered');
+  await say(`filters to AAA paper: ${aaaLots} of ${allLots} lots, and the URL carries it`);
+
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await page.waitForTimeout(900);
+  if ((await page.locator('table.ledger tbody tr').count()) !== allLots) {
+    throw new Error('clearing the filter did not restore the book');
+  }
+  await say('clears it again, and the whole book comes back');
+
   // PRD §8 screen 11 pairs buy-now with bidding. Proved here on a seeded lot
   // rather than on the runbook's own payable, so the headline path stays
   // issue → list → bid → accept and this stays the aside it is on the day.
