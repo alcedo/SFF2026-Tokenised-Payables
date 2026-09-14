@@ -251,3 +251,39 @@ SELECT v.doc_no, e.id, v.invoice_ref, v.amount, v.terms,
   JOIN app.entity e ON lower(e.name) = lower(v.supplier_name)
                    AND e.entity_type = 'supplier'
 ON CONFLICT (doc_no) DO NOTHING;
+
+-- ----------------------------------------------------------------------------
+-- The demo has to be usable when this file finishes
+-- ----------------------------------------------------------------------------
+-- Every insert above is guarded on state it expects to find, which is what
+-- makes the file safe to replay. A guard that matches nothing skips silently,
+-- though: an admin lookup that resolves to no rows would leave the
+-- counterparties and the whole register unwritten, and the transaction would
+-- still commit. The result is the empty supplier dropdown and empty ERP table
+-- this file exists to prevent, with nothing in the log to say so.
+--
+-- Failing the first request loudly is better than serving that. The screens are
+-- unusable either way; only one of the two says why.
+DO $$
+DECLARE v_suppliers bigint; v_lenders bigint; v_invoices bigint;
+BEGIN
+  SELECT count(*) INTO v_suppliers
+    FROM app.entity e
+   WHERE e.entity_type = 'supplier'
+     AND EXISTS (SELECT 1 FROM app.app_user u
+                  WHERE u.entity_id = e.id AND u.deactivated_at IS NULL);
+
+  SELECT count(*) INTO v_lenders
+    FROM app.entity e
+   WHERE e.entity_type = 'lender'
+     AND EXISTS (SELECT 1 FROM app.app_user u
+                  WHERE u.entity_id = e.id AND u.deactivated_at IS NULL);
+
+  SELECT count(*) INTO v_invoices FROM app.erp_invoice WHERE consumed_by IS NULL;
+
+  IF v_suppliers = 0 OR v_lenders = 0 OR v_invoices = 0 THEN
+    RAISE EXCEPTION
+      'fixtures left an unusable world: % supplier(s) with an account, % lender(s), % free ERP invoice(s)',
+      v_suppliers, v_lenders, v_invoices;
+  END IF;
+END $$;
