@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "scripts/test.sh",
+    "test:watch": "vitest",
+    "test:unit": "vitest run",
+    "db:reset": "scripts/db.sh reset"
   },
   "dependencies": {
     "next": "16.3.5",
