@@ -94,6 +94,30 @@ Section 12 states two rows incompletely and explicitly delegates the rest:
   explicit due date and sample recovery timeline". Built with a due date 45 days
   before T0 and a fictional recovery timeline on the overdue screen.
 
+## The XSGD rate reads two ways, and one of them is wrong by 72%
+
+Not an assumption. A trap, recorded because a careful reader will hit it and a
+careless one will ship the wrong number.
+
+Section 6 states the rate as **"1 XUSD = 1.31 XSGD"**. Section 10 states the
+arithmetic as **"source debit = XUSD obligation / rate, where rate is XUSD per
+1 XSGD"**.
+
+Those agree. Section 10's rate is XUSD per XSGD, which is 1/1.31 = 0.7634, so
+dividing by it multiplies by 1.31. Discharging a 244,625 XUSD obligation costs
+**320,458.7500 XSGD**, and the payer needs more XSGD than XUSD, which is the
+sanity check.
+
+The trap is reading section 10's "rate" as the 1.31 from section 6 and dividing
+by it. That gives 186,735.88 XSGD, understating the debit by a factor of
+1.31² = 1.716. It looks plausible on screen and would be caught by nobody in
+the room.
+
+`src/core/fx.ts` holds the rate in the section 6 orientation (XSGD per XUSD,
+13,100 scaled) and multiplies, because a multiplication is harder to invert by
+accident than a division. The 320,458.7500 figure is asserted in
+`src/core/__tests__/pricing.test.ts`.
+
 ## Series membership and partial holdings
 
 Section 6 says series membership is a lot-grouping mechanism and section 13
