@@ -895,3 +895,31 @@ GRANT EXECUTE ON FUNCTION ledger.prove_books_balance() TO adata_app;
 --      AND data_type IN ('double precision','real','numeric')
 --      AND NOT (table_name = 'asset' AND column_name = 'token_id');
 --   -- must return zero rows
+
+-- ----------------------------------------------------------------------------
+-- §13  ERP mock
+-- ----------------------------------------------------------------------------
+-- PRD §8 screen 2: "Import from ERP. The import uses a clearly simulated
+-- SAP-style picker and select from a list of 10 different sample invoice
+-- pre-generated for the demo."
+--
+-- These are approved invoices that have NOT yet become payables. They are
+-- reference data for the create-payable screen, deliberately outside the
+-- ledger: nothing here has a token, a holder or a balance. `consumed_by` is set
+-- when a preparer turns one into a payable, so the picker can grey it out
+-- instead of letting the same invoice be issued twice.
+CREATE TABLE app.erp_invoice (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  doc_no         text NOT NULL UNIQUE,          -- SAP-style document number
+  supplier_id    uuid NOT NULL REFERENCES app.entity(id),
+  invoice_ref    text NOT NULL,
+  amount_base    bigint NOT NULL CHECK (amount_base > 0),
+  terms_days     integer NOT NULL CHECK (terms_days BETWEEN 30 AND 180),
+  -- PRD §5: "The scenario uses ADATA payment terms of 30-180 days."
+  approved_on    date NOT NULL,
+  cost_centre    text NOT NULL,
+  consumed_by    uuid REFERENCES app.payable(id),
+  UNIQUE (consumed_by)                          -- one invoice becomes at most one payable
+);
+CREATE INDEX erp_invoice_available ON app.erp_invoice(doc_no) WHERE consumed_by IS NULL;
+GRANT SELECT, INSERT, UPDATE ON app.erp_invoice TO adata_app;

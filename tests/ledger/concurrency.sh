@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 URL="$(scripts/db.sh url)"
-scripts/db.sh reset >/dev/null
+scripts/db.sh bare >/dev/null
 psql "$URL" -q -v ON_ERROR_STOP=1 -f tests/ledger/fixture.sql >/dev/null
 
 SUPP='0x509911000000000000000000000000000000f88a'

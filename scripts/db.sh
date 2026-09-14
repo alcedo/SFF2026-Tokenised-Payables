@@ -2,7 +2,8 @@
 # Local Postgres for development and tests.
 #
 #   scripts/db.sh up      start the server (idempotent)
-#   scripts/db.sh reset   drop, recreate and reload the schema
+#   scripts/db.sh reset   drop, recreate, reload the schema and seed
+#   scripts/db.sh bare    the same without the seed, for tests with their own fixture
 #   scripts/db.sh psql    open a shell on the dev database
 #   scripts/db.sh url     print the connection string
 #
@@ -48,7 +49,7 @@ reset() {
 		grep -E 'ERROR|FATAL' /tmp/schema-load.log >&2 | head -20
 		exit 1
 	}
-	if [ -f "$ROOT/db/seed.sql" ]; then
+	if [ -f "$ROOT/db/seed.sql" ] && [ "${SKIP_SEED:-}" != "1" ]; then
 		psql "$DEV_URL" -q -v ON_ERROR_STOP=1 -f "$ROOT/db/seed.sql" >/tmp/seed-load.log 2>&1 || {
 			echo "seed failed to load:" >&2
 			grep -E 'ERROR|FATAL' /tmp/seed-load.log >&2 | head -20
@@ -61,6 +62,9 @@ reset() {
 case "${1:-up}" in
 up) up ;;
 reset) reset ;;
+bare)
+	SKIP_SEED=1 reset
+	;;
 psql)
 	up
 	shift
@@ -68,7 +72,7 @@ psql)
 	;;
 url) echo "$DEV_URL" ;;
 *)
-	echo "usage: scripts/db.sh {up|reset|psql|url}" >&2
+	echo "usage: scripts/db.sh {up|reset|bare|psql|url}" >&2
 	exit 1
 	;;
 esac

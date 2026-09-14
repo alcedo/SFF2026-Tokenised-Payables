@@ -30,7 +30,7 @@ function run(cmd: string, args: string[]) {
 }
 
 beforeAll(() => {
-  run('scripts/db.sh', ['reset']);
+  run('scripts/db.sh', ['bare']);
   process.env.DATABASE_URL = run('scripts/db.sh', ['url']).trim();
   run('psql', [process.env.DATABASE_URL, '-q', '-v', 'ON_ERROR_STOP=1', '-f', 'tests/ledger/fixture.sql']);
 }, 60_000);

@@ -246,6 +246,8 @@ DECLARE
   v_total_qty   bigint;
   v_days        int;
   v_anchor_wallet text;
+  v_series      app.series;
+  v_leg         RECORD;
 BEGIN
   IF v_key IS NULL THEN
     RAISE EXCEPTION 'every command needs an idempotencyKey' USING ERRCODE = 'ADA17';
@@ -345,44 +347,85 @@ BEGIN
     ];
 
   ELSIF v_kind = 'publish_listing' THEN
-    SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
-    v_asset := ledger.payable_asset(v_payable.id);
-    v_qty   := (v_intent->>'quantityBase')::bigint;
-    IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
-      RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
+    -- A series listing and a payable listing differ only in how many legs they
+    -- carry. Building both from the same loop is what keeps the escrow
+    -- invariant one equality instead of two cases.
+    IF v_intent ? 'seriesId' THEN
+      SELECT * INTO v_series FROM app.series WHERE id = (v_intent->>'seriesId')::uuid FOR NO KEY UPDATE;
+      IF (v_world.t0 + v_world.offset_days) >= v_series.maturity_date THEN
+        RAISE EXCEPTION 'series % has reached maturity', v_series.ref USING ERRCODE = 'ADA12';
+      END IF;
+      INSERT INTO app.listing (id, target_kind, target_series_id, seller_wallet,
+                               min_price_base, buy_now_price_base, status)
+      VALUES (COALESCE((v_intent->>'listingId')::uuid, gen_random_uuid()), 'series', v_series.id,
+              v_intent->>'sellerWallet', (v_intent->>'minPriceBase')::bigint,
+              (v_intent->>'buyNowPriceBase')::bigint, 'open')
+      RETURNING * INTO v_listing;
+
+      -- PRD section 6: a series moves as one lot of wholly held members, so
+      -- each leg is that member's entire free balance, and a member the seller
+      -- only partly holds makes the whole listing illegal.
+      FOR v_holder IN
+        SELECT p.id AS payable_id, p.face_base FROM app.payable p
+         WHERE p.series_id = v_series.id ORDER BY p.id
+      LOOP
+        v_asset := ledger.payable_asset(v_holder.payable_id);
+        SELECT COALESCE(b.balance, 0) INTO v_qty
+          FROM ledger.account_balance b
+          JOIN ledger.account a ON a.id = b.account_id
+         WHERE a.wallet_address = v_intent->>'sellerWallet'
+           AND a.purpose = 'wallet_free' AND b.asset_id = v_asset;
+        IF v_qty <> v_holder.face_base THEN
+          RAISE EXCEPTION 'series member is not wholly held by the seller (holds %, face %)',
+            v_qty, v_holder.face_base USING ERRCODE = 'ADA14';
+        END IF;
+        INSERT INTO app.listing_leg (listing_id, asset_id, quantity_base)
+        VALUES (v_listing.id, v_asset, v_qty);
+        v_legs := v_legs || ARRAY[
+          ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_asset, -v_qty)::ledger.leg_spec,
+          ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_asset, v_qty)::ledger.leg_spec
+        ];
+      END LOOP;
+    ELSE
+      SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
+      v_asset := ledger.payable_asset(v_payable.id);
+      v_qty   := (v_intent->>'quantityBase')::bigint;
+      IF v_qty <= 0 THEN
+        RAISE EXCEPTION 'a listing must be positive' USING ERRCODE = 'ADA19';
+      END IF;
+      IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
+        RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
+      END IF;
+      INSERT INTO app.listing (id, target_kind, target_payable_id, seller_wallet,
+                               min_price_base, buy_now_price_base, status)
+      VALUES (COALESCE((v_intent->>'listingId')::uuid, gen_random_uuid()), 'payable', v_payable.id,
+              v_intent->>'sellerWallet', (v_intent->>'minPriceBase')::bigint,
+              (v_intent->>'buyNowPriceBase')::bigint, 'open')
+      RETURNING * INTO v_listing;
+      INSERT INTO app.listing_leg (listing_id, asset_id, quantity_base)
+      VALUES (v_listing.id, v_asset, v_qty);
+      v_legs := ARRAY[
+        ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_asset, -v_qty)::ledger.leg_spec,
+        ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_asset, v_qty)::ledger.leg_spec
+      ];
     END IF;
-    INSERT INTO app.listing (id, target_kind, target_payable_id, seller_wallet,
-                             min_price_base, buy_now_price_base, status)
-    VALUES (COALESCE((v_intent->>'listingId')::uuid, gen_random_uuid()), 'payable', v_payable.id,
-            v_intent->>'sellerWallet', (v_intent->>'minPriceBase')::bigint,
-            (v_intent->>'buyNowPriceBase')::bigint, 'open')
-    RETURNING * INTO v_listing;
-    -- One leg per asset. A series listing is the same shape with N legs, which
-    -- is why the escrow invariant is one equality rather than two cases.
-    INSERT INTO app.listing_leg (listing_id, asset_id, quantity_base)
-    VALUES (v_listing.id, v_asset, v_qty);
-    -- Escrow: the listed quantity leaves the free account entirely, so
-    -- "available" is just the free balance and over-committing is blocked by
-    -- the same CHECK that blocks an overdraft.
-    v_legs := ARRAY[
-      ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_asset, -v_qty)::ledger.leg_spec,
-      ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_asset, v_qty)::ledger.leg_spec
-    ];
 
   ELSIF v_kind = 'cancel_listing' THEN
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
     IF v_listing.status <> 'open' THEN
       RAISE EXCEPTION 'listing is %', v_listing.status USING ERRCODE = 'ADA11';
     END IF;
-    v_asset := ledger.payable_asset(v_listing.target_payable_id);
-    SELECT quantity_base INTO v_qty FROM app.listing_leg
-     WHERE listing_id = v_listing.id AND asset_id = v_asset;
     UPDATE app.listing SET status = 'cancelled' WHERE id = v_listing.id;
     UPDATE app.bid SET status = 'superseded' WHERE listing_id = v_listing.id AND status = 'placed';
-    v_legs := ARRAY[
-      ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_asset, -v_qty)::ledger.leg_spec,
-      ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_asset, v_qty)::ledger.leg_spec
-    ];
+    FOR v_leg IN
+      SELECT asset_id, quantity_base FROM app.listing_leg
+       WHERE listing_id = v_listing.id ORDER BY asset_id
+    LOOP
+      v_legs := v_legs || ARRAY[
+        ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_leg.asset_id, -v_leg.quantity_base)::ledger.leg_spec,
+        ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_leg.asset_id, v_leg.quantity_base)::ledger.leg_spec
+      ];
+    END LOOP;
 
   ELSIF v_kind = 'place_bid' THEN
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
@@ -415,14 +458,19 @@ BEGIN
       RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
     END IF;
 
-    SELECT * INTO v_payable FROM app.payable WHERE id = v_listing.target_payable_id FOR NO KEY UPDATE;
-    IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
-      RAISE EXCEPTION 'payable has reached maturity' USING ERRCODE = 'ADA12';
+    -- Maturity closes the market whichever kind of lot this is.
+    IF v_listing.target_kind = 'series' THEN
+      SELECT * INTO v_series FROM app.series WHERE id = v_listing.target_series_id FOR NO KEY UPDATE;
+      IF (v_world.t0 + v_world.offset_days) >= v_series.maturity_date THEN
+        RAISE EXCEPTION 'series % has reached maturity', v_series.ref USING ERRCODE = 'ADA12';
+      END IF;
+    ELSE
+      SELECT * INTO v_payable FROM app.payable WHERE id = v_listing.target_payable_id FOR NO KEY UPDATE;
+      IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
+        RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
+      END IF;
     END IF;
 
-    v_asset   := ledger.payable_asset(v_payable.id);
-    SELECT quantity_base INTO v_qty FROM app.listing_leg
-     WHERE listing_id = v_listing.id AND asset_id = v_asset;
     v_price   := v_bid.price_base;
     v_funding := v_bid.funding_code;
     v_cash    := ledger.cash_asset('XUSD');
@@ -457,11 +505,17 @@ BEGIN
       END IF;
     END IF;
 
-    -- The traded quantity leaves escrow, not the seller's free balance.
-    v_legs := v_legs || ARRAY[
-      ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_asset, -v_qty)::ledger.leg_spec,
-      ROW(ledger.wallet_account(v_bid.bidder_wallet, 'wallet_free'), v_asset, v_qty)::ledger.leg_spec
-    ];
+    -- The traded quantity leaves escrow, not the seller's free balance. One
+    -- leg per listing leg, so a series moves as one lot by construction.
+    FOR v_leg IN
+      SELECT asset_id, quantity_base FROM app.listing_leg
+       WHERE listing_id = v_listing.id ORDER BY asset_id
+    LOOP
+      v_legs := v_legs || ARRAY[
+        ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_leg.asset_id, -v_leg.quantity_base)::ledger.leg_spec,
+        ROW(ledger.wallet_account(v_bid.bidder_wallet, 'wallet_free'), v_leg.asset_id, v_leg.quantity_base)::ledger.leg_spec
+      ];
+    END LOOP;
 
     UPDATE app.listing SET status = 'filled' WHERE id = v_listing.id;
     UPDATE app.bid SET status = 'accepted' WHERE id = v_bid.id;
@@ -492,17 +546,23 @@ BEGIN
     -- Maturity expires any listing still open, returning escrow to free so the
     -- holder's whole position redeems in one place.
     FOR v_listing IN
-      SELECT * FROM app.listing
-       WHERE target_payable_id = v_payable.id AND status = 'open' ORDER BY id FOR UPDATE
+      SELECT li.* FROM app.listing li
+       WHERE li.status = 'open'
+         AND EXISTS (SELECT 1 FROM app.listing_leg ll
+                      WHERE ll.listing_id = li.id AND ll.asset_id = v_asset)
+       ORDER BY li.id FOR UPDATE
     LOOP
       UPDATE app.listing SET status = 'cancelled' WHERE id = v_listing.id;
       UPDATE app.bid SET status = 'superseded' WHERE listing_id = v_listing.id AND status = 'placed';
-      SELECT quantity_base INTO v_qty FROM app.listing_leg
-       WHERE listing_id = v_listing.id AND asset_id = v_asset;
-      v_legs := v_legs || ARRAY[
-        ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_asset, -v_qty)::ledger.leg_spec,
-        ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_asset, v_qty)::ledger.leg_spec
-      ];
+      FOR v_leg IN
+        SELECT asset_id, quantity_base FROM app.listing_leg
+         WHERE listing_id = v_listing.id AND asset_id = v_asset ORDER BY asset_id
+      LOOP
+        v_legs := v_legs || ARRAY[
+          ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_leg.asset_id, -v_leg.quantity_base)::ledger.leg_spec,
+          ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_leg.asset_id, v_leg.quantity_base)::ledger.leg_spec
+        ];
+      END LOOP;
     END LOOP;
 
     -- ADATA pays each current holder the face of the quantity they hold, and

@@ -24,7 +24,7 @@ stage() {
 # assertion block, which psql itself reports as success.
 sql_stage() {
 	local name="$1" file="$2"
-	scripts/db.sh reset >/tmp/stage.log 2>&1 || {
+	"${RESET_CMD:-scripts/db.sh}" "${RESET_ARG:-reset}" >/tmp/stage.log 2>&1 || {
 		fail "$name (database reset)"
 		tail -20 /tmp/stage.log | sed 's/^/      /'
 		return
@@ -58,8 +58,9 @@ else
 fi
 
 echo "── ledger ───────────────────────────────────────────"
-sql_stage "runbook: issue, list, bid, accept, advance, settle" tests/ledger/runbook.sql
-sql_stage "invariants: the things PRD 14 says must not happen" tests/ledger/invariants.sql
+RESET_ARG=reset sql_stage "seed matches PRD section 12" tests/ledger/seed.sql
+RESET_ARG=bare sql_stage "runbook: issue, list, bid, accept, advance, settle" tests/ledger/runbook.sql
+RESET_ARG=bare sql_stage "invariants: the things PRD 14 says must not happen" tests/ledger/invariants.sql
 stage "concurrency: two lenders race one listing" tests/ledger/concurrency.sh
 
 echo
