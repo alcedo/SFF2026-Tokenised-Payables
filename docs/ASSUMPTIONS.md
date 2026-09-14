@@ -292,3 +292,21 @@ serverless instances can cold-start on the same empty database.
 **If wrong:** the party list and the funding table are two `VALUES` blocks in
 `db/fixtures.sql`, and the counts they have to satisfy are named in
 `tests/ledger/fixtures.sql`.
+
+## Naming who the approval queue is waiting on
+
+Section 8 screen 3 asks for "preparer submission and separate checker approval,
+with actor and timestamp history". History is what already happened. The screen
+said nothing about what happens next, so a presenter reading a row had to know
+the lifecycle by heart to work out which persona to become.
+
+**Built:** each row names the role that owes the next move, the people who hold
+that role, and the move itself, and reads "Your turn" to whoever that is. The
+header counts how many rows are waiting on the acting persona. All of it derives
+from the `TRANSITIONS` table in `src/core/lifecycle.ts`, the same table the
+buttons are disabled by, so the sentence and the controls cannot disagree.
+Where no live account holds the awaited role, which the admin can cause by
+removing the last one, the row says that instead of naming nobody.
+
+**If wrong:** `pendingStep` in `src/core/lifecycle.ts` and the notice block in
+`src/app/adata/approvals/page.tsx`.

@@ -4,13 +4,24 @@ import {
   EmptyState,
   GradeBadge,
   LedgerScroll,
+  Notice,
   Panel,
   StatusChip,
 } from '@/components/primitives';
 import { approvePayable, certifyPayable, issuePayable, submitPayable } from '@/app/actions';
 import { currentPersona } from '@/app/session';
-import { attempt } from '@/core/lifecycle';
+import { attempt, pendingStep, ROLE_LABELS } from '@/core/lifecycle';
 import { readEvents, readPayables, readPersonas, readWorld } from '@/db/read';
+
+/** The journal kinds that make up a payable's approval trail. */
+const HISTORY_KINDS = [
+  'payable_created',
+  'submitted_for_approval',
+  'approved',
+  'certified',
+  'graded',
+  'issuance',
+];
 
 /**
  * PRD §8 screen 3. Approval queue.
@@ -35,14 +46,46 @@ export default async function ApprovalsPage() {
     ['draft', 'pending_approval', 'approved', 'certified'].includes(p.storedStatus),
   );
 
-  const historyFor = (payableId: string) =>
-    events.filter(
-      (e) =>
-        e.payableRef === payables.find((p) => p.id === payableId)?.ref &&
-        ['payable_created', 'submitted_for_approval', 'approved', 'certified', 'graded', 'issuance'].includes(
-          e.kind,
-        ),
-    );
+  // Whose move each one is, and the sentence that says so, decided once. The
+  // header count and the notice on each row are the same question asked at two
+  // altitudes, and deriving it twice is how the number and the rows drift.
+  const queue = inFlight.map((p) => {
+    const step = pendingStep(p.storedStatus);
+    if (!step) return { payable: p, yourTurn: false, notice: null };
+
+    const yourTurn = step.actors.includes(persona.role);
+    const holders = personas.filter((x) => step.actors.includes(x.role)).map((x) => x.name);
+    return {
+      payable: p,
+      yourTurn,
+      notice: {
+        heading: yourTurn
+          ? 'Your turn'
+          : `Waiting on the ${listOf(step.actors.map((r) => ROLE_LABELS[r]))}`,
+        // `holders` can be empty. The admin may remove the last person holding
+        // a role (PRD §5 permits zero StraitsX admins, only not two), and a row
+        // that then says "must certify it" with nobody named is a dead end the
+        // presenter cannot read their way out of.
+        detail: yourTurn
+          ? `You are ${persona.name}, ${ROLE_LABELS[persona.role]}. Next step: ${step.action}.`
+          : holders.length > 0
+            ? `${listOf(holders)} must ${step.action}. Switch persona in the demo controls to act as them.`
+            : `No active account holds that role, so nobody can ${step.action} yet. Add one on the accounts screen.`,
+      },
+    };
+  });
+  const mine = queue.filter((q) => q.yourTurn).length;
+
+  // One pass over the journal rather than a scan per payable. The predicate
+  // used to re-find the payable for every event it tested, which on the seeded
+  // catalogue is tens of thousands of comparisons for a page of thirty rows.
+  const historyByRef = new Map<string, typeof events>();
+  for (const e of events) {
+    if (e.payableRef === null || !HISTORY_KINDS.includes(e.kind)) continue;
+    const seen = historyByRef.get(e.payableRef);
+    if (seen) seen.push(e);
+    else historyByRef.set(e.payableRef, [e]);
+  }
 
   return (
     <div className="space-y-3">
@@ -52,6 +95,21 @@ export default async function ApprovalsPage() {
           A payable moves draft → pending approval → approved → certified → issued. The preparer who
           submits cannot approve; StraitsX certifies and issues.
         </p>
+        {inFlight.length > 0 ? (
+          <p className="mt-1 text-[11.5px]">
+            {mine > 0 ? (
+              <span className="font-medium text-accent">
+                {mine} of {inFlight.length} {mine === 1 ? 'is' : 'are'} waiting on you,{' '}
+                {persona.name}.
+              </span>
+            ) : (
+              <span className="text-ink-muted">
+                Nothing here is waiting on {persona.name}, {ROLE_LABELS[persona.role]}. Switch
+                persona in the demo controls to take the next step.
+              </span>
+            )}
+          </p>
+        ) : null}
       </div>
 
       {inFlight.length === 0 ? (
@@ -62,13 +120,13 @@ export default async function ApprovalsPage() {
           />
         </Panel>
       ) : (
-        inFlight.map((p) => {
+        queue.map(({ payable: p, yourTurn, notice }) => {
           const canSubmit = attempt(p.storedStatus, 'submit', persona.role).ok;
           const canApprove = attempt(p.storedStatus, 'approve', persona.role).ok;
           const canCertify = attempt(p.storedStatus, 'certify', persona.role).ok;
           const canIssue = attempt(p.storedStatus, 'issue', persona.role).ok;
           const supplierWallet = personas.find((x) => x.entityName === p.supplierName)?.wallet;
-          const history = historyFor(p.id);
+          const history = historyByRef.get(p.ref) ?? [];
 
           return (
             <Panel
@@ -120,7 +178,7 @@ export default async function ApprovalsPage() {
                         {history.map((e) => (
                           <li key={e.entryId} className="text-[11.5px] text-ink-muted">
                             <span className="num">{e.worldDate}</span> · {e.kind.replace(/_/g, ' ')}{' '}
-                            · <span className="text-ink">{e.actorName}</span> ({e.actorRole.replace(/_/g, ' ')})
+                            · <span className="text-ink">{e.actorName}</span> ({ROLE_LABELS[e.actorRole]})
                           </li>
                         ))}
                       </ul>
@@ -129,6 +187,16 @@ export default async function ApprovalsPage() {
                 </div>
 
                 <div className="space-y-2">
+                  {notice ? (
+                    <Notice tone={yourTurn ? 'accent' : 'caution'}>
+                      <span className="block text-[11px] font-semibold tracking-wide uppercase">
+                        {notice.heading}
+                      </span>
+                      <span className="mt-0.5 block text-[11.5px] text-ink-muted">
+                        {notice.detail}
+                      </span>
+                    </Notice>
+                  ) : null}
                   {canSubmit ? (
                     <ActionButton
                       label="Submit for approval"
@@ -170,10 +238,6 @@ export default async function ApprovalsPage() {
                       args={[p.id, supplierWallet!, Number(p.ref.slice(-4))]}
                     />
                   ) : null}
-                  <p className="text-[10.5px] text-ink-faint">
-                    Acting as {persona.name}, {persona.role.replace(/_/g, ' ')}. Switch persona in
-                    the demo controls to take the next step.
-                  </p>
                 </div>
               </div>
             </Panel>
@@ -182,4 +246,13 @@ export default async function ApprovalsPage() {
       )}
     </div>
   );
+}
+
+/**
+ * "a, b, or c". The issue step admits three roles, and a bare comma list reads
+ * as a requirement for all of them rather than any one.
+ */
+const LIST = new Intl.ListFormat('en', { type: 'disjunction' });
+function listOf(parts: readonly string[]): string {
+  return LIST.format(parts);
 }
