@@ -264,3 +264,31 @@ made on the screen and a command without one is a bug, not a preference.
 **If wrong:** the default is one line in `FundingPanel.tsx`, and the XSGD
 balance is one top-up in `db/seed.sql` with one assertion in
 `tests/ledger/seed.sql`.
+
+## What a database with no world row boots into
+
+Section 12 specifies the demo catalogue and section 11 gives Reset world the job
+of restoring it. Neither says what a database that has never been seeded should
+contain, because on a laptop the question does not arise: `scripts/db.sh reset`
+loads the seed before the app starts.
+
+A hosted deployment takes the other path. `src/db/ensure.ts` loads
+`db/fixtures.sql` on the first request against a database with no `app.world`
+row, and that file held only the three accounts `ledger.post()` needs to accept
+a command at all. That is enough to render every screen and not enough to use
+one: with no supplier holding a live account the manual-entry dropdown is empty,
+and with an empty `app.erp_invoice` the import path is an empty table.
+
+**Built:** the fixtures seed the smallest world in which every screen has
+something to show. Two suppliers, two lenders funded in all four assets, the
+five acting accounts, and a 24-invoice ERP register. No payables, because a
+fresh deployment is a programme that has not issued anything yet rather than a
+replay of section 12's history. Names, ids and wallets are `db/seed.sql`'s, so a
+database that boots on the fixtures and is later Reset keeps the same people
+instead of reading as a different universe. `tests/ledger/fixtures.sql` asserts
+the contract, and asserts that loading the file twice converges, because two
+serverless instances can cold-start on the same empty database.
+
+**If wrong:** the party list and the funding table are two `VALUES` blocks in
+`db/fixtures.sql`, and the counts they have to satisfy are named in
+`tests/ledger/fixtures.sql`.

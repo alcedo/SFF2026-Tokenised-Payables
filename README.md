@@ -62,10 +62,12 @@ The last two need the app running (`scripts/serve.sh`).
 2. **Set `DATABASE_URL`** in the Vercel project's environment variables.
 3. **Deploy.** The first request against a database with no `app.world` row
    loads `db/schema.sql` and `db/post.sql` if the schema is missing, then
-   `db/fixtures.sql` (ADATA, StraitsX, and the three acting accounts). It does
-   not load the demo catalogue. You can create payables and onboard
-   counterparties from there. Reset world still loads `db/seed.sql` when you
-   want the PRD §12 demo. There is no `psql` step.
+   `db/fixtures.sql`: ADATA, StraitsX, two suppliers, two funded lenders, the
+   five acting accounts, and a 24-invoice ERP register. That is a programme
+   that has not issued anything yet rather than the PRD §12 catalogue. Both
+   ways into create-payable work on arrival, so you do not have to onboard
+   anyone first. Reset world still loads `db/seed.sql` when you want the full
+   demo with its history, listings and bid book. There is no `psql` step.
 4. **Set `ADATA_RESET_PIN`** if the URL is going to be public. Reset restores
    the seed for *everyone* connected, so it is already restricted to the
    StraitsX admin persona and needs the word RESET typed to arm. But the
