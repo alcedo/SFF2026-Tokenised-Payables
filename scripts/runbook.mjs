@@ -128,9 +128,14 @@ try {
 
   await page.getByRole('link', { name: 'Request financing' }).first().click();
   await page.waitForTimeout(800);
+  // PRD §8 screen 7 lets the seller "optionally set buy-now". Setting it here
+  // rather than relying on a seeded price proves the whole chain: what the
+  // supplier types is what the lender is offered.
+  await page.getByLabel('Buy now price').fill('245500');
+  await page.waitForTimeout(300);
   await shot('request-financing');
   await clickThrough('Publish listing');
-  await say('lists the whole payable at 97.85% of face');
+  await say('lists the whole payable at 97.85% of face, with a 245,500 buy-now price');
 
   // ------------------------------------------------------------------ 3. bid
   await become('Rina Okafor');
@@ -190,8 +195,10 @@ try {
   await page.getByRole('link', { name: created, exact: true }).first().click();
   await page.waitForTimeout(900);
   await expectText('Anchor obligor', 'the payable detail');
+  // The buy-now price the supplier typed, offered to the lender unchanged.
+  await expectText('245,500.00', 'the buy-now panel on the new listing');
   await shot('payable-detail');
-  await say('reads the detail, which leads with ADATA and the obligation');
+  await say('reads the detail: ADATA first, and the supplier\'s buy-now price offered');
 
   await clickThrough('Place bid');
   await say('bids at the ask, funded in USDC');

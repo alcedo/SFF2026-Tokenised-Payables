@@ -53,7 +53,7 @@ Switch to **supplier**.
 
 1. **My Tokenised Payables** → accept the incoming payable from the inbox.
 2. Open **Request financing**. The listed quantity defaults to the full holding.
-3. Enter **97.85%** as the price.
+3. Enter **97.85%** as the price, and **245,500** as the optional buy-now price.
 
 Stop here and read the comparison out loud. This is the number the audience came
 for:
@@ -84,8 +84,9 @@ to bring the whole market back.
 Optionally switch to the second lender and bid slightly lower, so the seller has
 a choice to make on the next screen.
 
-**If you are short on time, use buy-now instead.** Six seeded listings carry a
-buy-now price. Opening one shows the price, the debit in the chosen funding
+**If you are short on time, use buy-now instead.** The listing you just
+published carries the 245,500 buy-now price you typed, and six seeded listings
+carry one too. Opening one shows the price, the debit in the chosen funding
 asset and the balance it comes out of, and one confirmation settles the whole
 lot without the seller having to accept. It is the same settlement path, so the
 receipt and the portfolio entry are identical.
