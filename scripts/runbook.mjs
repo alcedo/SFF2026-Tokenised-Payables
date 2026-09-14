@@ -196,6 +196,37 @@ try {
   await shot('explorer');
   await say('the books still reconcile to the journal after the full run');
 
+  // ------------------------------------------------------- 7. reset guards
+  // The demo runs on a public URL, so the one control that destroys everyone
+  // else's session is checked here rather than trusted. Last, because a
+  // successful reset is also how the world is handed to the next presenter.
+  await become('Rina Okafor');
+  await page.goto(`${BASE}/reset`, { waitUntil: 'domcontentloaded' });
+  await expectText('Only the StraitsX administrator', 'reset as a lender');
+  if (await page.getByRole('button', { name: 'Reset the world' }).isVisible().catch(() => false)) {
+    throw new Error('a lender was offered the reset button');
+  }
+  await say('a lender cannot reach the reset control at all');
+
+  await become('Nadia Rahman');
+  await page.goto(`${BASE}/reset`, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel('Type RESET to confirm').fill('reset');
+  await page.getByRole('button', { name: 'Reset the world' }).click();
+  await page.waitForTimeout(1200);
+  await expectText('Type RESET exactly', 'the refused reset');
+  await expectText('T0 + 90d', 'the clock after a refused reset');
+  await say('a mistyped confirmation is refused, and the clock has not moved');
+
+  await page.getByLabel('Type RESET to confirm').fill('RESET');
+  await page.getByRole('button', { name: 'Reset the world' }).click();
+  await page.waitForTimeout(6000);
+  await expectText('T0', 'the clock after the reset');
+  await page.goto(`${BASE}/lender`, { waitUntil: 'domcontentloaded' });
+  const body = await page.locator('body').innerText();
+  if (body.includes(created)) throw new Error(`${created} survived the reset`);
+  await shot('after-reset');
+  await say('the admin resets the world, and it is seeded and ready for the next run');
+
   const seconds = Math.round((Date.now() - started) / 1000);
   console.log(`\nrunbook complete in ${seconds}s of machine time`);
 } catch (e) {

@@ -147,12 +147,21 @@ export function DemoControls({
           Trigger overdue
         </a>
 
-        <a
-          href="/reset"
-          className="rounded-[3px] border border-critical/30 bg-critical-soft px-1.5 py-0.5 text-[11px] text-critical hover:bg-critical/10"
-        >
-          Reset world
-        </a>
+        {/*
+          Reset is the administrator's, not the room's. The URL is public and a
+          reset lands on every connected session, so a participant should not
+          find the control sitting next to the ones that only affect their own
+          screen. /reset refuses the action too; hiding it here only keeps it
+          out of reach of an accidental click.
+        */}
+        {current.role === 'straitsx_admin' ? (
+          <a
+            href="/reset"
+            className="rounded-[3px] border border-critical/30 bg-critical-soft px-1.5 py-0.5 text-[11px] text-critical hover:bg-critical/10"
+          >
+            Reset world
+          </a>
+        ) : null}
 
         {pending ? <span className="text-[11px] text-ink-faint">working…</span> : null}
         {note ? <span className="text-[11px] text-ink-muted">{note}</span> : null}

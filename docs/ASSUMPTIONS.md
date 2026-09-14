@@ -117,3 +117,22 @@ requires every member to be wholly held by one wallet. Section 6 also says
 **Built:** a payable whose quantity is split across wallets cannot join a series,
 and a transfer or sale that would split a series member is refused while that
 member is in an active series listing.
+
+## Who may reset the shared world
+
+Section 11 asks for a "Reset world" control and warns that the world is shared,
+but does not say who may press it. The demo is going out on a public URL that
+anyone can open.
+
+**Built:** three gates. `/reset` and the server action both require the
+StraitsX admin persona; the phrase RESET must be typed exactly; and if
+`ADATA_RESET_PIN` is set in the environment, it must match. Non-admin personas
+do not see the control on the demo bar at all.
+
+**What each is worth, honestly:** the persona switcher is open, because section
+11 asks for it, so a stranger can become the admin in two clicks. The role gate
+therefore stops accidents, not attackers. The typed phrase is what actually
+prevents the realistic failure — someone clicking a red button mid-presentation
+to see what it does. The PIN is the only real lock, and it is optional so a
+laptop demo is not made tedious. When no PIN is set the screen says so rather
+than implying a protection it does not have.
