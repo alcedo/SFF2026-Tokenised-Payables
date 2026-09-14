@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   allocateProRata,
   formatUnits,
+  fromBaseUnits,
   fromWholeUnits,
   parseUnits,
   sum,
@@ -191,6 +192,13 @@ describe('funding conversion', () => {
     const c = convert(parseUnits('0.0001'), 'XSGD');
     expect(c.rounded).toBe(true);
     expect(c.sourceDebit).toBe(1n);
+  });
+
+  it('rounds half up at the world rate, as the ledger does', () => {
+    // 12345 * 1310000 = 16171950000, which is 16171.95 base units.
+    const c = convert(fromBaseUnits(12345n), 'XSGD', 1_310_000n);
+    expect(c.sourceDebit).toBe(16172n);
+    expect(c.rounded).toBe(true);
   });
 });
 
