@@ -47,12 +47,17 @@ realistic however long the URL stays up.
 ## Verify it
 
 ```bash
-npm test                     # unit, schema, ledger, invariants, concurrency
+npm test                     # unit, schema, ledger, fixtures, invariants, concurrency
 npm run verify:screens       # every screen, every persona, in a real browser
 npm run verify:runbook       # the whole runbook driven click by click
+npm run verify:demo          # the register, the suggested reference, the queue handover
+npm run verify:fresh         # the same, against a database that has never been seeded
 ```
 
-The last two need the app running (`scripts/serve.sh`).
+The middle three need the app running (`scripts/serve.sh`). `scripts/fresh.sh`
+builds its own database and serves it on :3101. A new deployment boots from
+`db/fixtures.sql` rather than the `db/seed.sql` that Reset world replays, so
+that is the world an audience meets first and the one no other driver covers.
 
 ## Deploy to Vercel
 

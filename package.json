@@ -13,6 +13,8 @@
     "db:reset": "scripts/db.sh reset",
     "serve": "scripts/serve.sh",
     "verify:screens": "node scripts/screens.mjs",
+    "verify:demo": "node scripts/demo.mjs",
+    "verify:fresh": "scripts/fresh.sh",
     "verify:runbook": "node scripts/runbook.mjs"
   },
   "dependencies": {
