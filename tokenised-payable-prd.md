@@ -1,391 +1,382 @@
 # PRD — ADATA Tokenised Payables Demo
 
 **Product:** Clickable web demo of the ADATA tokenised payables programme
-**Programme:** Project BLOOM · StraitsX × ADATA × BaaS Innovations
-**Target:** Token2049, early Oct 2026
-**Chain:** Mocked now, testnet later
 
+**Programme context:** Project BLOOM · StraitsX × ADATA × BaaS Innovations
 
----
+**Target:** Token2049, early October 2026 — planning assumption; confirm event and delivery dates
 
-## 0. Read this first
+**Delivery:** Mock application now; testnet integration in a later phase
 
-This is a **mock**. No chain, no money, no real ADATA data. It exists so a BaaS or bank person can click through the whole flow and understand the product in five minutes.
----
-
-## 2. Audience and success
-
-
-**Success looks like:**
-
-A BaaS or bank person clicks through it alone, without James narrating, and comes away able to explain the product to their own credit team. If they need us standing next to them, the demo failed.
-
-Concretely, on screen:
-
-- **It looks like a working product, not a prototype.** Real-looking data everywhere, no lorem ipsum, no empty states, no "coming soon" buttons. Every screen has seeded history behind it so nothing looks like it was born five seconds ago.
-- **Banker-grade, not crypto-grade.** Reads like a treasury or trade-finance portal. Muted, dense, tabular. No gradients, no glow, no wallet-connect aesthetic, no token tickers scrolling. A credit officer should recognise the furniture.
-- **The credit story is the loudest thing on the lender screens.** Payable detail leads with the anchor obligor and grade, not the supplier. If a banker looks at that screen for ten seconds and thinks they're underwriting a small Taiwanese vendor, we've lost the pitch.
-- **The supplier contrast is visible without clicking.** 9.1% vs 18% sits on the supplier dashboard, not buried in a flow.
-- **Five minutes, end to end**, issue → list → bid → accept → fast-forward → settle, with no dead ends, no errors, no page a persona can reach that isn't built.
-- **Obviously a demo, never mistakable for live.** Permanent "Demo environment — no real funds" ribbon, demo controls visually separated from product UI. Nobody should walk away thinking this is in production or MAS-approved.
-- **Recoverable in one click.** Reset world puts it back to seed between pitches, so a botched run costs nothing.
-- **Fast.** Under 500ms per action. Lag reads as a broken product, not a mock.
-
-Failure looks like: a pretty landing page with a "Launch app" button and three screens behind it.
+**Status:** Working draft; demo defaults and outstanding decisions are recorded in §§15–16
 
 ---
-## 3. The questions the demo must answer / demonstrate
 
-| # | Key Question | Screen/Flow That Answers It | Description |
+## 1. Purpose
+
+Build a self-guided demo that shows how an ADATA supplier can receive an approved tokenised payable, sell all or part of it for early payment, and have ADATA settle the obligation with each current holder at maturity.
+
+The suppliers need working capital, while lenders assess the anchor buyer's obligation. The demo should make that relationship clear through the transaction flow and credit information.
+
+It uses fictional invoices that mirrors real world requirements, suppliers, balances, grades, and transactions. It moves no real funds and makes no blockchain transactions. ADATA is the named anchor buyer in the scenario, although this can be expanded to other anchor buyers in the future.
+
+IMPORTANT: We will later port this platform over to be used on sepolia testnet for real testnet transactions to be defined in another PRD.
+
+## 2. Audience and success criteria
+
+The primary audience is bank, financial institution, suppliers and anchor buyer as issuer.
+
+A viewer should be able to complete the core flow without narration and explain it to audience.
+
+Audiences can also try it out themselves.
+
+| Criterion | Acceptance condition |
+|---|---|
+| Complete story | A viewer can issue → list → bid → accept → advance time → settle within five minutes, following §19. |
+| Product credibility | All reachable screens work and contain realistic seeded data or useful guidance. No placeholder copy, dead controls, or unfinished routes. |
+| Clear credit narrative | Lender detail leads with ADATA as anchor obligor, its sample/demo credit grade, and the repayment obligation. Supplier information is secondary. |
+| Visible supplier benefit | The supplier dashboard shows sale proceeds, annualised financing cost, and the indicative 18% bank benchmark without opening another screen. |
+| Appropriate design | Use the visual language of treasury and trade-finance portals: restrained colours, clear tables, compact layouts, and readable numbers. |
+| Repeatability | Each tokenised payable can be fast forwarded on the demo clock per tokenised payable to showcase maturity of the tokenised payables |
+
+## 3. Questions the demo must answer
+
+| # | Question | Screen or flow | Required answer |
 |---|---|---|---|
-| 1 | How does a supplier receive a tokenised payable? | Payables inbox / Supplier dashboard | The issuer (e.g. ADATA) issues the tokenised payable on the platform. The supplier receives and views it on their dashboard. |
-| 2 | How does a supplier sell a tokenised payable for financing? | Marketplace listing flow / Supplier action | After receiving it, the supplier lists it **in XUSD** on the central marketplace so banks and FIs can bid to finance it. Listing currency is XUSD only. |
-| 3 | How do banks/FIs select payables to finance, and what do they see? | Lender marketplace / Payable & credit detail | Banks and FIs browse the marketplace, review the payable and credit details, and bid or offer directly on it. |
-| 4 | How does a supplier transfer a payable without listing it? | Transfer / wallet assignment | The supplier can send the token to another wallet on the platform (e.g. group treasury or another party) instead of listing it. |
-| 5 | What if the supplier does not sell? | Hold-to-maturity / Payable detail | The supplier keeps the token until maturity. The issuer must then repurchase it at full face value. |
-| 6 | How is a tokenised payable created and issued? | Buyer issue / Approval flow | The issuer creates the payable from an approved invoice and sets terms (amount, due date). **Currency is always XUSD** — the payable cannot be issued or listed in another asset. |
-| 7 | Does the supplier have to accept it? | Accept / reject inbox action | If required: the supplier confirms the payable is correct before it can be listed, transferred, or held. Rejection returns it to the issuer. |
-| 8 | How does bidding close and who wins? | Bid book / Accept offer | The supplier (or the platform, if it is an auction) accepts a bid; other bids expire. Show rate, amount, tenor, and bidder. |
-| 9 | How does the supplier get paid after a sale? | Settlement / Funding confirmation | The winning FI pays the discounted **XUSD** price from an allowed funding source (**USDC / USDT / XSGD / XUSD**); the token moves to the FI; the supplier is credited in XUSD. |
-| 10 | What happens at maturity? | Maturity / Issuer redemption | The issuer **must repurchase the entire token at face value** from the current holder. If an FI bought it at a discount, profit = face value − purchase price. If the supplier held it, they receive full face value. |
-| 11 | What can an FI do after they buy? | Lender portfolio / Position detail | Hold to maturity for the issuer buyback (and the discount profit), or — if allowed — re-list or transfer the token. Show purchase price, face value, implied yield, and days to redemption. |
-| 12 | How is the tokenised payable represented on-chain? | Token standard / Token detail | Each tokenised payable is an **ERC-1155** token. For this demo, **decimals = 4**: $1.0000 face value = **10,000 base units**. UI amounts are human-readable XUSD; on-chain balances are in base units (`amount × 10⁴`). |
-| 13 | What is the payable listed in, and how is it funded? | Listing / Bid / Fund settlement | The TP is **always listed, priced, bid, and redeemed in XUSD**. The payer (lender on purchase, ADATA at maturity) chooses a **funding source**: **USDC, USDT, XSGD, or XUSD**. Funding is a payment rail, not a second listing currency. |
+| 1 | How does a supplier receive a payable? | Issuer creation → supplier inbox | ADATA creates a payable from an approved invoice; approval and certification precede mock issuance to the supplier wallet. |
+| 2 | How does the supplier obtain early payment? | Request financing → offers | The supplier lists all or part of the tokenised payable on a marketplace and sets a buy-now price or a bid price before accepting a bid. |
+| 3 | What does the lender underwrite? | Marketplace → credit detail | ADATA's payment obligation, with an indicative grade, terms, invoice reference, and event history. |
+| 4 | Can a holder transfer without selling? | Transfer | A holder can transfer any allowed quantity they own to another eligible wallet on the platform, with no on-platform payment. |
+| 5 | What if the supplier holds it? | My payables → maturity | At maturity, ADATA pays XUSD face value for the quantity the supplier still holds. |
+| 6 | Who approves issuance? | ADATA approval → StraitsX grading | A separate ADATA checker approves the invoice-backed payable; StraitsX certifies it before issuance. |
+| 7 | Must the supplier accept receipt? | Supplier inbox | Supplier will have an option to accept the tokenised payable or reject it |
+| 8 | Who wins the bidding? | Offers received | The seller chooses an eligible bid. Successful settlement closes the listing and expires competing bids. No automatic auction. |
+| 9 | How does a sale settle? | Trade confirmation | The lender funds the XUSD purchase price using USDC, USDT, XSGD, or XUSD. The seller receives XUSD and the lender receives the listed quantity. |
+| 10 | What happens at maturity? | ADATA settlement → holder wallets | ADATA repurchases outstanding quantity at face value from each current holder. A lender's gross return on a holding is that quantity's face less its purchase price. |
+| 11 | What can a lender do after purchase? | Portfolio | Hold to maturity, relist all or part, or transfer any held quantity before maturity. |
+| 12 | How is the token represented? | Token detail / mock explorer | One invoice maps to one ERC-1155 token ID. The demo uses four-decimal face-value accounting and allows partial-quantity transfers in whole base units (§6). |
+| 13 | How do pricing and funding differ? | Listing → funding confirmation | Issue, listing, bid, sale proceeds, and redemption are denominated in XUSD. The funding asset is selected only for payment. |
 
-Out of demo scope: wrong payable, cancellation, and issuer non-payment.
+Invoice disputes, cancellation, and live default or recovery workflows are out of scope. An example overdue position is included (§7).
 
----
+## 4. Scope and priorities
 
-## 4. Scope
+**Required for the demo**
 
-### In
-- Four personas, switchable (§5)
-- Signup, mock KYC, custodial wallet with a displayed 0x address
-- Mock ERP invoice import → payable creation → maker-checker approval → mint
-- StraitsX certification and credit grading
-- Supplier: hold to maturity, or list for financing
-- Marketplace: listings, bids, accept-bid, buy-now — **listings locked to XUSD**
-- Funding source picker on buy and on maturity settlement: **USDC / USDT / XSGD / XUSD**
-- Peer-to-peer transfer by wallet address
-- Per-asset stablecoin balances with a "simulate top-up" button (pick which asset)
-- Maturity, settlement to whoever holds it, and one overdue example
-- Time fast-forward, world reset, seeded history
-
-### Out
-- Any real chain, wallet signing, or gas
-- Real KYC/AML, sanctions, accreditation checks
-- Real money, on-ramp, off-ramp, fiat
-- Actual ERP integration (we mock the import screen only)
-- A real credit model — grades are assigned by hand in the admin view
-- Aave vault / DeFi phase 2
-- Fractional ownership of a single invoice (see §6, we bundle instead)
-- Multi-tenancy, multiple anchor buyers beyond ADATA
-- Legal docs, e-signature, invoice verification
-- Listing or issuing a payable in USDC, USDT, or XSGD (funding only)
-
----
-
-## 5. Personas
+- Four switchable personas: ADATA, supplier, lender, and StraitsX admin.
+- There can be multiple supplier, lender, issuer, but only 1 StraitsX Admin
+- Instant signup, mock KYC, and simulated custodial wallets with displayed `0x` addresses.
+- Manual payable creation with prefilled sample invoice data, followed by maker-checker approval, grading, and issuance.
+- Supplier receipt, hold-to-maturity, and listing of all or part of a holding for financing.
+- Institutional marketplace with bids, seller acceptance, buy-now, and secondary listings.
+- XUSD denomination throughout; USDC, USDT, XSGD, and XUSD as funding options.
+- Peer-to-peer transfers of any held quantity between eligible platform wallets.
+- Four-asset balances and demo-only top-ups.
+- Maturity settlement to each current holder in proportion to quantity, and one illustrative overdue/recovery screen.
+- One seeded Series to demonstrate invoice bundling, subject to the ownership default in §6.
+- Shared state, seeded history, fast-forward controls, and reset.
+- Partial-quantity ownership: a supplier can sell portions to different lenders at different discount rates, or transfer a portion to any eligible platform wallet.
+- All personas will have a wallet balance that they can fund with stablecoins through a mock funding button.
 
 
-**1. ADATA finance (anchor buyer / issuer)**
-Owes money to suppliers on 30–180 day terms. Issues the payable **in XUSD**. Pays XUSD face value at maturity to whoever holds it, funded from USDC / USDT / XSGD / XUSD. Never receives cash from this product. They will be the one redeeming the tokenised payables.
+**Out of scope**
+- Real blockchain connectivity, private keys, wallet signing, gas, or money movement.
+- Real KYC/AML, sanctions screening, accreditation, on/off-ramps, or fiat settlement.
+- Actual ERP integration, invoice verification, legal documents, or e-signatures.
+- A production credit model; grades are manually assigned demo values.
+- Coupons, early buyback, and partial maturity settlement (paying less than outstanding face).
+- Issuing or listing in USDC, USDT, or XSGD.
+- Operational cancellation, invoice disputes, liquidation, or recovery processing.
 
-**2. Supplier (first holder)**
-Small vendors globally for example. Has the cash-flow problem. Currently borrows at roughly 18% from banks. Receives the TP, then chooses: hold to maturity for full XUSD face value, or sell now at a discount for XUSD today (buyer may fund that purchase in USDC / USDT / XSGD / XUSD). A large company like ADATA will make an order from small supplier, and small supplier will have to figure out their own financing in order to fulfill the order from a large company like ADATA.
+## 5. Personas / Role
 
-**3. Lender / investor (bank, fund, corporate treasury)**
-Buys the TP at a discount, priced in XUSD. Pays with USDC / USDT / XSGD / XUSD. Gets XUSD face value at maturity. Underwriting the anchor's credit, not the supplier's — that's the pitch.
+| Persona | Purpose | Main actions |
+|---|---|---|
+| **ADATA finance — anchor buyer / issuer** | Settle approved supplier obligations on their agreed due dates. ADATA receives no financing proceeds in this flow. | Create and approve payables; review outstanding obligations; fund XUSD redemption to current holders at maturity. |
+| **Supplier — first holder** | Obtain early payment against an approved receivable, or retain it until maturity. | Receive, list all or part, accept bids, hold, or transfer a quantity. |
+| **Lender — bank, fund, or corporate treasury** | Purchase a payable at a discount based on the anchor obligation and receive face value at maturity. | Review credit information, bid, buy, manage holdings, relist all or part, or transfer a quantity. |
+| **StraitsX admin — platform** | Demonstrate issuer onboarding, programme standards, grading, and oversight. | Certify ADATA / tokenised payable issuer, set programme limits, assign sample grades, and monitor settlement. All other admin related controls handled by this persona |
 
-**4. StraitsX admin (platform)**
-Onboards and certifies issuers, assigns credit grade, admits payables to the marketplace, oversees settlement. This is the standard-setter role that the Aug 12 strategy calls the durable moat, so it should be visible, not hidden.
 
-Persona switching is one dropdown in the demo control bar. No logging in and out during a pitch.
+There should be a feature to create new account for new users, and assign them a persona.
+There should be a persona switcher to allow us to switch b/w personas for easy demo without having to login and logout.
 
----
+For example: Create a user -> assign it a persona -> fill up necessary information -> user with its relevant persona account created. We can then view this newly created user in the drop down and switch to the user and view the user's holdings and other user account values.
 
-## 6. The instrument
+StraitsX admin account is the only one where there's 1 single account managed by 1 single user. The admin account can delete all other users from the platform.
 
-**One invoice = one token.** Non-fungible by design, using ERC1155 standard.
+The scenario uses ADATA payment terms of 30–180 days.
 
-**Priced as a discount to face, not principal plus interest.** Buy at 97.85, receive 100 at maturity. Two reasons: it's the market convention for receivables, and it keeps us away from the "interest" language that legal team flagged as a problem for licensed e-money players. The UI shows implied annualised yield alongside the price so lenders can compare, but the instrument itself pays no coupon.
+## 6. Instrument and pricing
 
-**Bullet only.** Single payment at maturity. No coupon schedule. Invoices don't work that way and it doubles the state machine.
+### Core terms
 
-**Listed in XUSD only.** Face value, ask, bid, buy-now, and the maturity repurchase are all XUSD. The supplier cannot list in USDC, USDT, or XSGD. A Series is the same: one XUSD face for the bundle.
+**One invoice = one identifiable payable.** Each invoice maps to a distinct ERC-1155 token ID. After certification, the mock mint assigns the entire invoice quantity to one supplier wallet. That first holder may then list all or part of the holding at different prices, or transfer any allowed quantity to another eligible platform wallet, including another supplier. Multiple holders exist only after a sale or transfer, never at issuance. Each wallet's remaining quantity is a separate position for listing, transfer, and redemption.
 
-**Funding source is a payment rail, not the instrument.** When a lender buys, and when ADATA funds maturity, the payer chooses one of: **USDC, USDT, XSGD, XUSD**. USD stables (USDC, USDT, XUSD) convert **1:1** into the XUSD obligation. XSGD converts at a **mocked FX rate** shown on the confirmation screen. The token and the books stay in XUSD; the supplier / current holder is credited in XUSD.
+Use a four-decimal accounting convention: XUSD 1.0000 of face value corresponds to 10,000 base units. Partial-quantity transfers and listings are allowed. The minimum increment is one base unit (XUSD 0.0001); amounts between base units are not representable. A transfer or listing quantity must be a positive whole number of base units and must not exceed the sender's holding. 
 
-**Bundles.** Small invoices can be grouped into a Series by shared maturity date — for example `SERIES-2026-Q4-30D`, twelve invoices, XUSD 180k total. MUFG asked for exactly this on the Amazon deal, because sub-$10k tickets aren't worth a bank's time. A Series is bought and settled as one unit. This gets us the economics of fractionalisation without building a fractionalisation wrapper.
+Note that ERC-1155 supports multiple token types and integer quantities
 
-**Fields on every TP:**
+**Discount purchase; bullet redemption.** The lender buys a quantity below that quantity's face and receives a single payment equal to the held quantity at maturity. 
 
-Listing price, bid, and implied yield are marketplace fields, not instrument fields.
+**XUSD denomination.** Face value, listing prices, bids, buy-now prices, sale proceeds, and redemption amounts are all XUSD. 
+
+**Funding conversion.** USDC, USDT, and XUSD fund XUSD obligations at a mocked 1:1 rate. XSGD uses a single mocked rate of 1XUSD = 1.31 XSGD. The recipient always receives XUSD. 
+
+### Pricing convention
+
+Use one calculation across listings, offers, dashboards, and the runbook. `F` and `P` apply to the quantity being priced, not automatically to the original invoice face:
+
+- `F` = XUSD face value of the quantity being listed, bid, or sold; `P` = XUSD purchase price for that quantity; `d` = remaining calendar days to maturity.
+- Price (% of face) = `100 × P / F`.
+- Discount amount = `F − P`.
+- Annualised discount cost (% of face) = `100 × (F − P) / F × 365 / d`.
+- Lender implied annualised yield (% of purchase price) = `100 × (F − P) / P × 365 / d`.
+
+Use a simple Actual/365 convention, with no compounding or fees in the demo. Display the two annualised measures with their distinct labels; they use different denominators. The 18% supplier bank rate and 5% anchor funding rate are indicative benchmarks. At or after maturity, show “Due” or “Overdue” instead of calculating a forward yield.
+
+**Worked example:** XUSD 250,000 face value, 90 days remaining, price 97.85% → XUSD 244,625 proceeds, XUSD 5,375 discount, **8.7% annualised discount cost** and **8.9% lender yield**. Use this calculated example consistently in the supplier comparison.
+
+Keep XUSD amounts at four-decimal precision internally, using fixed-point arithmetic. Display two decimals in summary views and four in token detail where useful. Source-asset rounding must be explicit on confirmation. Show both the original invoice face and the quantity in the current action whenever they differ.
+
+### Series bundling
+
+A Series groups invoices with the same anchor, currency, and maturity date into one purchase and settlement lot. It aggregates smaller tickets. Each member retains its invoice reference and token ID. Series membership is a lot-grouping mechanism; it does not replace the quantity rules above. Individual payables may still be sold or transferred in part when they are not locked into a Series operation.
+
+Series bundling allow us to bundle TPs by maturity so ticket size is worth a bank’s time. 
+
+Series face value is the sum of included member quantities. Buy, transfer, and redemption must apply to every member together at those quantities. Series yield uses the aggregate price and shared maturity date; the Series grade is assigned explicitly by the admin.
+
+
+### Payable fields shown to users
 
 | Field | Example | Notes |
 |---|---|---|
-| Reference | `TP-2026-0141` | Human-readable id. Series use `SERIES-…` |
-| Anchor obligor | ADATA Technology Co., Ltd. | must buy the tokenised payable |
-| Supplier | Chien Yu Precision | Made up name for this demo |
-| Currency | XUSD | Locked. Always XUSD. Funding source is separate (USDC / USDT / XSGD / XUSD), §6 / §10 |
-| Face value | 250,000.0000 | UI XUSD; on-chain = `× 10⁴`, Q12 |
-| Issue date | T+0 | Relative to demo clock |
-| Maturity date | T+90 | |
-| Tenor | 90 days | Derived, not stored |
-| Credit grade | AA | Assigned by StraitsX admin, §8.15 |
-| Invoice ref | INV-TW-88213 | Fictional |
-| Series | — | Nullable. Set when bundled |
-| Status | Listed | Lifecycle in §7 |
-| Holder wallet | `0x7a3f…c21d` | Current holder, not original supplier |
-| Mint tx | mock hash | Payable-level. Later events live on `Event.chain_ref`, §10 / §13 |
+| Reference | `TP-2026-0141` | Stable human-readable ID. |
+| Anchor obligor | ADATA Technology Co., Ltd. | Responsible for the maturity payment in the scenario. |
+| Original supplier | Chien Yu Precision | Fictional; distinct from current holders. |
+| Currency | XUSD | Fixed. |
+| Face value | 250,000.0000 XUSD | Original invoice face. Base units = face × 10⁴. |
+| Holder quantity | 250,000.0000 XUSD | Signed-in wallet's position; may be less than invoice face. |
+| Issue date / maturity date | T0 / T0 + 90 days | Derived from the demo clock. |
+| Original tenor / days remaining | 90 days / 90 days | Display separately; calculate yields using days remaining. |
+| Credit grade | AA — Sample | Assigned by StraitsX admin; include rationale. |
+| Invoice reference | `INV-TW-88213` | Fictional. |
+| Series | — | Optional bundle membership; split holdings are ineligible. |
+| Lifecycle / market status | Issued / Listed | Separate obligation status from listing status. |
+| Current holder(s) | `0x7a3f…c21d` · 250,000.0000 | Quantity per wallet. Quantities must sum to outstanding face until redemption. |
+| Token ID / issuance reference | Mock ID / mock transaction | Clearly labelled as simulated. |
 
----
+Listing price, bid price, purchase price, and yield belong to marketplace or position records, not the contractual face value.
 
-## 7. Lifecycle
+## 7. Lifecycle and transaction rules
 
-```
-Draft ──▶ Pending approval ──▶ Certified ──▶ Issued ──▶ Listed ──▶ Financed
-  │            (ADATA            (StraitsX     (minted    (on          (sold to
-  │             checker)          grades it)    to         market)      lender)
-  │                                             supplier)                  │
-  ▼                                                                        ▼
-Cancelled                                              Transferred ◀──▶ Financed
-                                                                           │
-                                                                           ▼
-                                                       Matured ──▶ Settled
-                                                           │
-                                                           ▼
-                                                    Overdue ──▶ Recovery
+Separate the payable's obligation lifecycle from market activity and ownership history.
+
+```text
+Draft → Pending approval → Approved → Certified → Issued → Matured → Settled
+                                                               │
+                                                               └→ Overdue
 ```
 
-- **Cancelled** only possible before mint.
-- **Transferred** is a peer-to-peer move by wallet address, no money changing hands on-platform. Available to any holder.
-- **Settled** pays XUSD face value to the current holder, whoever that is. ADATA funds that XUSD obligation from USDC / USDT / XSGD / XUSD. This is the moment worth pausing on during a pitch.
-- **Overdue** and **Recovery** exist as one pre-seeded example, not a fully built workflow. Banks will ask what happens on default, and "we don't show that" is a bad answer. One screen showing grace period, recovery status, and appointed liquidator is enough.
+- **Pending approval → Approved:** the ADATA checker approves the preparer's submission.
+- **Approved → Certified:** StraitsX assigns a grade and certifies eligibility under the programme.
+- **Certified → Issued:** mock mint assigns the full quantity to the supplier wallet.
+- **Issued:** each holder may hold, list, sell, or transfer any quantity they own, up to their balance, before maturity. “Listed,” “Financed,” and “Transferred” are market labels or historical events; none is a prerequisite for maturity.
+- **Matured:** the payable is due, regardless of who holds it or whether it was ever financed. Expire active listings and bids. ADATA funds the full outstanding face, allocated to each current holder in proportion to quantity held.
+- **Settled:** every remaining holder has received XUSD equal to their quantity; the payable is marked redeemed and cannot move or settle again.
+- **Overdue:** an unpaid obligation has passed its due date. Show one example recovery case with grace-period information, recovery status, and a fictional appointed liquidator. Recovery is a read-only scenario, not an operational workflow.
 
----
+Trade settlement must debit the payer, credit the seller in XUSD, move the traded quantity from seller to buyer, close the listing, and expire competing bids as one operation. The seller keeps any unlisted remainder. Maturity settlement must similarly debit ADATA, credit each current holder for their quantity, and mark the obligation settled together. A failed action leaves balances and ownership unchanged; repeated confirmation must not duplicate a payment. Holder quantities are whole base units and must sum to outstanding face until redemption, so pro-rata maturity credits are exact.
+
+Idempotency is required and important for all transaction, similar to how a blockchain will behave.
 
 ## 8. Screens
 
-### ADATA (issuer)
-1. **Dashboard** — outstanding payables, total face value, next settlement date, financed vs unfinanced split.
-2. **Create payable** — two entry paths: manual form, or **"Import from ERP"** which shows a fake SAP-style file picker, then a parsed list of invoices with tick boxes. Currency is **XUSD**, not editable. The import path is the answer to Mark's Q2 and costs almost nothing to fake.
-3. **Approval queue** — maker-checker. Preparer submits, approver signs off. Shows who did what and when.
-4. **Settlement** — payables coming due, one-click "Fund settlement". Payer picks a **funding source** (USDC / USDT / XSGD / XUSD). Shows the XUSD face being funded, any 1:1 or FX conversion, and payment going to the current holder's wallet in XUSD — not back to the original supplier.
+### ADATA
+
+1. **Dashboard:** outstanding payable count and face value, next settlement date, and financed/unfinanced split. Count Series members once in programme totals. Split holdings still count as one payable.
+2. **Create payable:** manual entry or “Import from ERP.” The import uses a clearly simulated SAP-style picker and select from a list of 10 different sample invoice pre-generated for the demo
+
+3. **Approval queue:** preparer submission and separate checker approval, with actor and timestamp history. Certification and issuance status remain visible after approval.
+
+4. **Settlement:** due payables, current holders and quantities, and full XUSD obligation. “Fund settlement” opens the funding-asset picker, conversion, source debit, and per-holder XUSD credits before confirmation.
 
 ### Supplier
-5. **Onboarding** — three steps: company details, upload docs, connect wallet (auto-generated custodial 0x address). Auto-approves in a few seconds with a Verified badge. Answers Mark's Q1.
-6. **My payables** — list of TPs held, each showing XUSD face value, days to maturity, and a live "sell now for X XUSD" figure.
-7. **Request financing** — pick a payable, set a minimum acceptable **XUSD** price or accept the indicative rate, publish to the marketplace. Listing currency is XUSD; there is no currency picker. Show the comparison plainly: *financing cost 9.1% p.a. vs your current bank rate 18%*. That contrast is the entire supplier pitch.
-8. **Offers received** — bids from lenders in XUSD, with the bidder's chosen funding source shown; accept one.
+
+5. **Onboarding:** company details and custodial wallet creation. Mark the account "KYC verified” on submit. No document upload and no external wallet connection required. (we will only need to submit KYC docs in the real production launch)
+
+6. **My Tokenised Payables:** inbox and holdings, invoice face, held quantity, days remaining, and indicative or executable sale proceeds labelled accordingly. Keep the calculated financing comparison visible. Provide hold information and access to transfer of any held quantity.
+
+7. **Request financing:** choose an eligible holding and the quantity to list (default = full holding), enter a minimum XUSD price or use an indicative price, and optionally set buy-now. Publish in XUSD with no currency picker. Price percentages use the listed quantity as `F`.
+
+8. **Offers received:** bidder, listed quantity, XUSD offer, price as a percentage of listed face, days remaining, implied yield, and selected funding asset. The seller accepts one offer.
 
 ### Lender
-9. **Marketplace** — filterable list. Filters: maturity, tenor, credit grade, size, yield. All listings are XUSD, so no listing-currency filter. Sort by yield.
-10. **Payable detail** — the money screen for banks. Anchor obligor and its credit standing, grade and what the grade means, supplier, invoice reference, face (XUSD), price (XUSD), implied yield, days to maturity, allowed funding sources, and a full event log of every state change with its (mock) tx hash. This is Mark's Q3.
-11. **Place bid / buy now** — prices entered in XUSD. Before confirm, pick **funding source**: USDC / USDT / XSGD / XUSD. Confirmation shows XUSD amount due, source asset, and conversion (1:1 or mocked XSGD FX).
-12. **Portfolio** — holdings, weighted average yield, maturity ladder, realised returns, plus the one overdue position.
-13. **Transfer** — send a held TP to another wallet address. Confirmation screen, then an event in the log.
+
+9. **Marketplace:** “Institutional lenders only” header; filter by maturity, tenor, sample grade, ticket size, and yield. Default sort is yield. No listing-currency filter is needed. Show listed quantity alongside original invoice face when they differ.
+10. **Payable detail:** lead with ADATA and the payment obligation. Show grade and rationale, original supplier, invoice reference, invoice face, listed quantity, holder breakdown, price, yield, remaining days, eligible funding assets, and event history. Expand a Series to inspect its members.
+11. **Place bid / buy now:** enter price as a percentage of the listed quantity's face and show the equivalent XUSD amount. Select the funding asset before confirmation. Show conversion, source debit, available balance, and XUSD seller credit.
+12. **Portfolio:** current holdings by quantity, purchase price for that quantity, invoice face, remaining days, maturity ladder, purchase-price-weighted entry yield, realised gross returns, and the overdue position. Allow eligible holdings to be relisted in whole or in part.
+13. **Transfer:** shared supplier/lender flow. Enter an eligible platform wallet address and a quantity (default = full holding), show the resolved recipient, confirm, and record the transfer event. Reject quantities that are not whole base units or that exceed the sender's unlisted holding.
 
 ### StraitsX admin
-14. **Issuer certification** — onboard ADATA, set programme limits.
-15. **Grading** — assign AAA / AA / A to each payable, with the LTV mapping shown (AAA ≈ 97%). Only graded payables reach the marketplace.
-16. **Programme oversight** — total issued, financed, settled, overdue.
 
----
+14. **Issuer certification:** ADATA programme details, certification status, and configurable programme limits.
+15. **Grading:** assign AAA / AA / A with an sample rationale. Only certified, graded payables can be listed. An advance-rate/LTV mapping is pending definition (§16); do not present it as an external rating or guarantee.
+16. **Programme oversight:** issued, financed, settled, and overdue totals, with access to event history and the sample recovery case.
+
+### Common to all users
+
+1. **Send payable:** allow a holder to send any portion of their tokenised payable holding to another platform user. Enter the recipient's registered wallet address or select from a list of eligible recipients, specify the quantity to send (default = full holding), and confirm the transfer. The system verifies that the sender has sufficient unlisted quantity, the recipient is valid, and the quantity is a whole base unit. Successfully sending TP moves the specified quantity to the recipient's wallet, records the transaction, and updates event and ownership history. All transfers occur within the platform.
+
 
 ## 9. Marketplace mechanics
 
-**Recommendation for v1: bid-and-accept, plus optional buy-now.** Not a full order book with depth.
+Use **bid-and-accept with optional buy-now**. A full order book, automatic auction matching, and market-depth visualisation are out of scope.
 
-- A supplier lists a payable **in XUSD** with an optional buy-now price (XUSD). There is no other listing currency.
-- Lenders place bids as a price (% of XUSD face). The UI shows implied yield next to each.
-- On bid or buy-now, the lender selects a **funding source**: USDC / USDT / XSGD / XUSD. The bid itself is still an XUSD price.
-- Supplier accepts a bid, or a lender hits buy-now. Settlement of the trade converts the chosen funding asset into XUSD for the seller.
-- Secondary works identically: any holder can relist, still in XUSD.
+- Only eligible institutional lender accounts can bid or buy. Marketplace access is a demo permission, not real accreditation.
+- A holder lists a quantity of a payable or a Series in XUSD. The listed quantity defaults to the full holding and may be any allowed partial quantity. Store monetary prices in XUSD for that quantity; percentage-of-face entry converts to the same amount using listed face as `F`.
+- Validate the seller's ownership, quantity, and the instrument's eligibility before listing. A wallet may have only one active listing per payable or Series. Listed quantity cannot exceed the seller's holding.
+- Listed quantity is locked to the listing. Any unlisted remainder may be held or transferred. A transfer that would reduce the holding below the listed quantity must close the listing and expire its bids as part of the transfer.
+- The lender selects a funding asset when bidding or buying. The XUSD bid is fixed; its source-asset debit follows the displayed conversion rule.
+- **Draft funding default:** bids do not reserve funds. Recheck balance, ownership, listed quantity, listing status, and maturity when a seller accepts. If funds are insufficient, show an actionable message and leave the bid, balances, and position unchanged.
+- For XSGD, use a fixed rate within each resettable demo world so bid and acceptance amounts remain reproducible.
+- On successful purchase, move only the listed quantity, expire competing bids, and show the seller's XUSD receipt, the buyer's new holding, and the seller's remaining quantity if any.
+- Secondary sales use the same rules.
 
-An order book with live depth and a price chart looks better on a screen but is roughly a week of extra work for something nobody at a booth will read. If we want visual richness cheaply, add a **historical yield chart per grade** using seeded data instead.
+**Structure decision:** the draft demonstrates direct institutional purchase. The earlier source notes also describe lending through a pool with licensed intermediaries. Institutional gating does not settle that difference. Keep the direct-purchase flow as an explicit demo assumption until legal and commercial owners confirm the structure (§16).
 
-**One thing to flag.** Rajiv's guidance was to avoid securities classification by having investors lend into a pool rather than buy the instrument directly, with licensed intermediaries in between. An open marketplace where anyone bids shows the opposite of that structure. Suggested compromise for the demo: gate the marketplace to **whitelisted institutional lenders**, show an "Institutional lenders only" label on the marketplace header, and keep retail out of the story entirely. Costs nothing, and stops the demo contradicting our own legal position in front of a bank.
+## 10. Wallets, funding, and audit history
 
----
+Every account has a simulated custodial wallet address and separate USDC, USDT, XSGD, and XUSD balances. No keys are generated or held for this mock; there are no seed phrases or signing prompts.
 
-## 10. Wallets and money
+For each chain-relevant action, show:
 
-- Every account gets a custodial wallet with a displayed `0x` address on signup. Platform holds the keys. No seed phrases, no signing.
-- Each wallet holds four balances: **USDC, USDT, XSGD, XUSD**. The **tokenised payable is always XUSD**. The other three are **funding sources** only — they pay for a purchase or a maturity settlement; they are not listing currencies.
-- Conversion: **USDC / USDT / XUSD → XUSD at 1:1**. **XSGD → XUSD at a mocked FX rate** shown on the confirm screen. Semiconductor trade is USD-denominated; XSGD is on the MOU as a funding option, not as a listing currency.
-- **"Simulate top-up"** button adds a chosen asset (USDC / USDT / XSGD / XUSD) to the balance. Visible only in demo mode, styled as a demo control so nobody mistakes it for a product feature.
-- Every state change writes an event with a **plausible-looking tx hash** and a fake block number, and a mock explorer drawer shows the event.
+1. XUSD obligation, quantity, and recipient(s). For a split payable at maturity, show each holder and the XUSD credit for their quantity.
+2. Selected funding asset and available balance, when the action is a payment.
+3. Conversion rate and resulting source-asset debit, when a funding asset is used.
+4. XUSD amount credited to each recipient, when the action is a payment.
+5. Confirmation, a recorded event, and a mocked blockchain transaction receipt.
 
-**Building for the testnet swap.** Keep every chain artefact behind a single `chain_ref` field and one `ChainAdapter` interface with two implementations: `MockChain` now, `TestnetChain` later. Nothing else in the app should know whether the hash is real. That way phase 2 is swapping one module, not rewriting the app. State it explicitly in the build so it doesn't get shortcut under deadline.
+For XSGD, `source debit = XUSD obligation / rate`, where rate is XUSD per 1 XSGD. For the three mocked USD assets, the rate is 1:1. Simulated top-ups belong only in the demo controls.
 
----
+Every meaningful action creates an audit event. Every successful chain-relevant action also generates a mocked blockchain transaction and displays it as a transaction receipt immediately after confirmation. The same receipt must be reopenable from event history and the mock explorer. Label every hash, block number, and receipt as simulated.
+
+Chain-relevant actions are issuance (mint to the supplier wallet), trade settlement, quantity transfer, maturity redemption, and simulated wallet top-up. A receipt includes a transaction hash, block number, success status, from and to addresses, token ID and quantity when tokens move, and asset debit/credit when balances change.
+
+Approval, grading, listing publication, bid placement, and other application events remain visible in audit history without a chain receipt. They are not mocked as on-chain transactions.
+
+
 
 ## 11. Demo controls
 
-A persistent bar, clearly marked as demo-only:
+Provide a persistent bar, clearly labelled **Demo controls**:
 
-- **Persona switcher** — jump between the four roles instantly
-- **Fast-forward** — +1 day / +30 days / jump to next maturity. Nobody waits ninety days at a booth. This is the single most important control in the build.
-- **Reset world** — back to seed state between pitches
-- **Simulate top-up** — pick USDC / USDT / XSGD / XUSD
-- **Trigger overdue** — for when a banker asks about default
+- **Persona switcher:** move between all four roles; select preparer/checker within ADATA.
+- **Fast-forward:** +1 day, +30 days, or jump to next maturity. Recalculate remaining days and due statuses. Advancing time does not automatically fund ADATA's obligations.
+- **Reset world:** restore the complete seed state, including the clock and mocked FX rate.
+- **Simulate top-up:** choose a wallet and asset, then add a mock balance.
+- **Trigger overdue:** open or activate the designated overdue example without requiring a live default workflow.
 
-Plus a permanent **"Demo environment — no real funds"** ribbon. The ADATA announcement is still pending MAS and ADATA sign-off, so nothing on screen should imply this is live.
-
----
+The “Demo environment — no real funds” ribbon is always visible. Because the world is shared, show that reset and time changes affect all connected demo sessions.
 
 ## 12. Seed data
 
-Everything is fictional. No real ADATA supplier names, no real invoice numbers. Dates are relative to demo T0 so it never goes stale.
+Use fictional supplier names, invoice numbers, financials, grades, and histories. ADATA is the intentional named-anchor exception. Dates are relative to demo T0; fixed references are identifiers rather than live dates.
 
-| Ref | Supplier | Face (XUSD) | Tenor | Grade | Ask | Implied yield | State |
-|---|---|---|---|---|---|---|---|
-| TP-2026-0143 | Ming Kuo Components | 1,200,000 | 30d | AAA | 99.42 | 7.1% | Listed |
-| TP-2026-0141 | Chien Yu Precision | 250,000 | 90d | AA | 97.85 | 8.9% | Listed |
-| TP-2026-0142 | Hsin Ta Electronics | 48,000 | 60d | A | 98.40 | 9.9% | Listed |
-| SERIES-2026-Q4-30D | 12 suppliers bundled | 180,000 | 30d | A | 99.20 | 9.8% | Listed |
-| TP-2026-0128 | Yung Sheng Metals | 320,000 | 60d | AA | — | 9.2% realised | Settled |
-| TP-2026-0119 | Fu Hsing Plastics | 75,000 | 90d | A | — | — | Overdue, recovery |
+| Reference | Original supplier(s) | Face (XUSD) | Days remaining at T0 | Grade | Ask (% of face) | Lender yield | Initial state |
+|---|---|---:|---:|---|---:|---:|---|
+| TP-2026-0143 | Ming Kuo Components | 1,200,000 | 30 | AAA | 99.42 | 7.1% | Issued / Listed |
+| TP-2026-0141 | Chien Yu Precision | 250,000 | 90 | AA | 97.85 | 8.9% | Issued / Listed |
+| TP-2026-0142 | Hsin Ta Electronics | 48,000 | 60 | A | 98.40 | 9.9% | Issued / Listed |
+| SERIES-2026-Q4-30D | 12 fictional suppliers; one current holder | 180,000 | 30 | A | 99.20 | 9.8% | Issued / Listed |
+| TP-2026-0128 | Yung Sheng Metals | 320,000 | — | AA | — | 9.2% realised annualised yield | Settled |
+| TP-2026-0119 | Fu Hsing Plastics | 75,000 | Past due | A | — | — | Overdue / showcase demo recovery |
 
-Seeded accounts: one ADATA finance user plus one approver, three suppliers, two lenders (one bank, one fund) with pre-funded **USDC / USDT / XSGD / XUSD** balances and existing portfolio history, one StraitsX admin. Seed at least one lender heavy in USDC and one in XUSD so the funding-source picker is not a no-op during the pitch.
+Listed yields are calculated from the remaining days and asks above, rounded to one decimal place. The settled row needs a historical purchase price and holding period that support the displayed 9.2%; overdue data needs an explicit due date and sample recovery timeline. Seeded listings are whole holdings so the five-minute runbook stays a full-invoice story; partial-quantity listing and transfer remain available in the live demo.
 
-All seed payables are **XUSD-listed**. Ask and implied yield are against XUSD face. XSGD FX is a single mocked rate on the demo clock (shown on any XSGD confirm screen).
+Seed one ADATA preparer, one ADATA checker, three interactive supplier accounts, two institutional lenders (one bank and one fund), and one StraitsX admin. Include fictional supplier entity records and wallets for all remaining invoice originators. Pre-fund both lenders in all four assets, with one predominantly funded in USDC and the other in XUSD, and add portfolio history.
 
-The supplier comparison numbers to keep visible throughout: **supplier's current cost of borrowing ~18%, ADATA's cost of funds ~5%.** The spread is the product.
+Also seed an **unissued ERP invoice** for the core runbook: XUSD 250,000, 90 days from issuance, payable to the active supplier. Give it a distinct invoice/payable reference so the pitch can issue and list a new position without colliding with the existing listed example. Include a suggested 97.85% price and two competing bids on another seeded listing to make the bid book immediately visible.
 
----
+Keep the supplier bank benchmark of 18% and anchor funding benchmark of 5% labelled as scenario assumptions. Actual displayed sale costs come from the selected payable's price and remaining days.
 
 ## 13. Data model
 
+The model must distinguish entities, user roles, ownership, market activity, and payments. This is a minimum conceptual model, not a database schema.
+
+```text
+Entity       id, name, entity_type, certification_status, programme_limit
+User         id, entity_id, name, role, mock_kyc_status, institutional_eligible
+Wallet       address, entity_id, balances_by_asset
+Payable      id, ref, token_id, anchor_id, original_supplier_id, face_xusd,
+             currency (= XUSD), issue_date, maturity_date, grade, grade_rationale,
+             invoice_ref, lifecycle_status, series_id (nullable)
+Holding      payable_id, wallet, quantity_xusd
+Series       id, ref, anchor_id, currency (= XUSD), maturity_date, grade,
+             member_payable_ids
+Listing      id, payable_id OR series_id, seller_wallet, quantity_xusd,
+             min_price_xusd, buy_now_price_xusd (nullable), status
+Bid          id, listing_id, bidder_wallet, price_xusd, funding_source, status
+Trade        id, listing_id, accepted_bid_id (nullable), buyer_wallet,
+             seller_wallet, quantity_xusd, purchase_price_xusd, executed_at,
+             settlement_id
+Settlement   id, kind (trade|redemption), payable_id OR series_id,
+             payer_wallet, recipient_wallet, quantity_xusd, xusd_amount,
+             funding_source, source_amount, fx_rate, status, completed_at
+Event        id, subject_type, subject_id, type, actor, timestamp,
+             chain_ref (nullable), payload
+DemoClock    current_date, offset_days, xsgd_xusd_rate
 ```
-User          id, name, entity_type, role, kyc_status, wallet_address
-Wallet        address, user_id, usdc_balance, usdt_balance, xsgd_balance, xusd_balance
-Payable       ref, anchor_id, supplier_id, face, currency (= XUSD), issue_date,
-              maturity_date, grade, invoice_ref, status, holder_wallet,
-              series_id (nullable), mint_tx
-Series        id, ref, maturity_date, grade, member_payable_ids
-Listing       id, payable_id, seller_wallet, buy_now_price (XUSD), min_price (XUSD), status
-Bid           id, listing_id, bidder_wallet, price_pct, implied_yield,
-              funding_source (USDC|USDT|XSGD|XUSD), status
-Settlement    id, payable_id, xusd_amount, funding_source, fx_rate (nullable), status
-Event         id, payable_id, type, actor, timestamp, chain_ref, payload
-DemoClock     current_date, offset_days, xsgd_xusd_rate
-```
 
-`Payable.currency` is constrained to `XUSD`. `funding_source` is only on the payment (bid / buy-now / maturity settlement), never on the instrument.
+`payable_id OR series_id` means exactly one target. `Holding.quantity_xusd` is a positive four-decimal amount in whole base units; holdings for a payable must sum to outstanding face until redemption. A wallet with quantity zero has no holding row. Derive Series face value from member quantities, and validate that every member is wholly held by the same seller wallet and shares maturity. `Trade` records provide purchase cost and holding-period history for portfolio metrics. Tenor, remaining days, percentages, and yields are derived rather than independently editable values. Redemption of a split payable records one credit `Settlement` per holder against a single ADATA source debit.
 
-`Event` is the audit trail and drives both the mock explorer and the lender's event log. Every meaningful action writes one. Funding conversions write an event with source asset, XUSD amount, and rate.
+`funding_source` belongs to a bid/payment instruction, never the instrument. Every payment event records the source asset, conversion, source debit, XUSD credit, and recipient. Approval events preserve the separate preparer and checker identities.
 
----
+## 14. Non-functional requirements
 
-## 14. Non-functional
-
-| | Default |
+| Area | Requirement |
 |---|---|
-| Devices | Desktop first, responsive down to iPad. Booth pitches run off a laptop. |
-| Persistence | Shared demo world on a light backend, so a listing made on one device shows up on another. Needed if two people demo side by side. |
-| Language | English. Mandarin toggle on the supplier and issuer screens is a nice-to-have — ADATA and BaaS are Taiwanese, and it lands well, but it's the first thing to cut. |
-| Branding | Neutral platform name, "Powered by StraitsX" in the footer, logo swappable by config so BaaS can front it. Strategy is BaaS customer-facing, Fazz behind. |
-| Performance | Any action under 500ms. A laggy demo reads as a broken product. |
-| Accounts | No email verification. Signup is instant. |
+| Devices | Desktop first, usable down to iPad. Validate the actual booth laptop and tablet layouts. |
+| Persistence | A lightweight postgres sql database. Changes must be reflected in other sessions without a manual reset. |
+| Consistency | Prevent duplicate acceptance, double spending, over-quantity transfers, stale-owner transfers, and duplicate redemption across sessions. Holder quantities must remain whole base units that sum to outstanding face. |
+| Performance | Core actions complete within 500 ms to 2000ms. show clear progress for simulated onboarding. |
+| Language | English required; Mandarin for issuer/supplier screens is optional. |
 
----
+| Accounts | Instant mock signup with no email verification. Persona selection must still enforce the simulated role's permitted actions. |
 
-## 15. Assumption register
+| Validation | Invalid inputs and insufficient balances receive clear inline feedback;|
 
-These are my defaults, numbered to match the questions from the earlier thread. Override any and I'll redraft.
+| Auditability | All meaningful actions are traceable to a persona, subject, and demo timestamp. Mock chain references are clearly labelled. |
 
-| # | Question | Default taken |
+## 15. Delivery plan and verification
+
+| Stage | Deliverables | Exit condition |
 |---|---|---|
-| 1 | Coupons or bullet? | Bullet at maturity |
-| 2 | Fractional? | No. Bundle into Series instead |
-| 3 | Bundling by maturity? | Yes, one Series in seed data |
-| 4 | Currency | **Listed in XUSD only.** Funding source: USDC / USDT / XSGD / XUSD |
-| 5 | Supplier as third persona? | Yes |
-| 6 | ADATA maker-checker? | Yes |
-| 7 | StraitsX admin / grading? | Yes, visible |
-| 8 | Mock KYC? | Yes, 3 steps, auto-approve |
-| 9 | Whitelisted lenders? | Yes, institutional only |
-| 10 | Order book? | No. Bid-and-accept plus buy-now |
-| 11 | Primary and secondary? | Both |
-| 12 | Price chart? | Yield-by-grade chart, seeded. Cut if tight |
-| 13 | Fast-forward? | Yes, essential |
-| 14 | Settlement funding | ADATA clicks "Fund settlement", picks USDC / USDT / XSGD / XUSD, no escrow |
-| 15 | Default / liquidation? | One seeded overdue example, one screen |
-| 16 | Early buyback? | No |
-| 17 | Chain | Mocked, behind a swappable adapter |
-| 18 | Which chain named? | None named on screen. Avoids a Monad vs XLayer argument we don't need this month |
-| 19 | Shared state? | Yes, light backend |
-| 20 | Reset + seed? | Yes |
-| 21 | Branding | Neutral + swappable logo |
-| 22 | Mandarin? | Nice-to-have, first to cut |
-| 23 | Device | Desktop first |
-| 24 | Claims | Demo ribbon everywhere, nothing implying live or MAS-approved |
+| 1 — Core issuance | Data model, shared state, holdings by quantity, personas, wallets, ERP mock, maker-checker, grading, issuance, mock-chain boundary. | An invoice can be created, independently approved, certified, and issued in full to the correct supplier wallet. |
+| 2 — Financing and redemption | Marketplace, partial listings, bids, buy-now, four funding assets, conversion, quantity transfers, Series, multi-holder maturity settlement, clock, and top-ups. | Supplier-held and lender-held quantities redeem correctly, including split holdings; secondary trades and transfers preserve ownership, quantities, and balances. |
+| 3 — Demo readiness | Seeded history, overdue view, visual polish, reset, runbook, and two timed dry runs with the presenter. Add optional features only after the core flow passes. | The presenter and an unassisted reviewer each complete the core story in five minutes. |
 
----
+Before handover, verify:
 
-## 16. Open questions for legal and commercial
+- Every persona can reach and complete its required screens, with distinct maker/checker actions.
+- Currency is locked to XUSD, and each of the four funding assets produces the expected debit and XUSD credit.
+- The §6 worked example matches every screen; fast-forward recalculates remaining days and yields correctly.
+- Held, sold, partly transferred, and bundled payables pay each current holder their outstanding quantity at maturity.
+- Partial listings leave the unlisted remainder with the seller; competing bids, stale actions, insufficient funds, over-quantity transfers, and repeated confirmation cannot corrupt ownership or balances.
+- A Series moves as one lot of wholly held members, and programme totals do not double count its members.
+- Reset restores the full world on both devices; the ribbon and mock labels remain visible throughout.
 
-Not blockers for the build, but they'll come up at the booth and someone should have an answer.
 
-1. **Does the demo need to match the pool structure?** Rajiv's slides 20–29 propose investors lending to a pool rather than buying the instrument. This demo shows direct purchase. Which one are we actually pitching at Token2049?
-2. **What must live inside the smart contract** so it maps to ADATA's legal invoice? Still open from the 3 Sep thread. Doesn't block a mock, blocks the real thing.
-3. **Enforceability.** Taiwan-domiciled issuer, Taiwan courts. If a banker asks "what's my recourse," what's the line?
-4. **Who is the named lender in the pilot?** DBS, UOB, OCBC — none of them appear to have a banking relationship with ADATA. Still the hard part.
-5. **Has ADATA committed a number?** As of 4 Sep, no. Still the hard part.
-6. **Grading authority.** We say StraitsX sets the standard. On what basis, and does anyone external validate it?
+## Appendix — source context
 
----
 
-## 17. Risks
-
-| Risk | Handling |
-|---|---|
-| Demo mistaken for a live product | Permanent demo ribbon, no MAS or bank logos, no claims of approval |
-| Marketplace contradicts our legal structure | Institutional-only gating and label (§9) |
-| "Tokenised deposit" naming collision internally | Use TP consistently, correct it in channels |
-| Real ADATA or supplier data leaking into seed | All names fictional, flagged in §12 |
-| Three weeks is short | Phase the build (§18), cut list already identified |
-| Someone asks about default and we have nothing | Seeded overdue example |
-| Booth confuses listing currency with funding asset | Lock listing to XUSD on every screen; funding source only appears on confirm |
-
----
-
-## 18. Build plan
-
-Roughly three weeks to Token2049. Product requirements were meant to be locked by around 24 Sep for the SFF track, so the same lock date works here.
-
-**Week 1 — spine.** Data model, four personas, auth, four-asset wallets, ERP-import mock, payable creation (XUSD locked), maker-checker, grading, mint. Chain adapter interface in from day one.
-
-**Week 2 — the story.** Marketplace, bids, accept, buy-now, funding-source picker + conversion, transfers, settlement, demo clock, top-up.
-
-**Week 3 — make it presentable.** Seed data and history, overdue example, yield chart if time, polish, write the runbook, two dry runs with James.
-
-Blockchain roadmap is full, so this likely needs an external builder or the NUS students route rather than the squad.
-
----
-
-## 19. Demo runbook (5 minutes)
-
-OCBC asked for a runbook on the SFF demo and they were right to. James should be able to run this cold.
-
-1. **Set up (20s).** "ADATA buys components from hundreds of Taiwanese suppliers and pays in 90 days. Those suppliers borrow at 18% to bridge the gap. ADATA borrows at 5%. That gap is the product."
-2. **ADATA issues (60s).** Import invoices from ERP, tick three, submit, approve as checker. Payables mint to supplier wallets. "ADATA didn't receive any cash. It issued a promise."
-3. **Supplier finances (60s).** Switch persona. Show the 250k XUSD, 90-day payable. Show "sell today for 244,625 XUSD, cost 8.9%, versus your bank at 18%." List it — listing currency is XUSD, no other option.
-4. **Lender buys (90s).** Switch persona. Marketplace, filter by grade, open the detail. Walk the credit view: obligor is ADATA, not the small supplier. Place a bid in XUSD, pay from **USDC** (or USDT / XSGD / XUSD). Switch back, accept. Supplier is credited in XUSD.
-5. **Fast-forward (45s).** Jump 90 days. ADATA funds settlement, again picking a funding source. XUSD face value pays to the lender, not the supplier. "The obligation followed the token. The listing was XUSD; they funded it in USDC."
-6. **The awkward question (30s).** Open the overdue example. Grace period, recovery, liquidator.
-7. **Ask (15s).** Bank: would you look at a pilot tranche. Corporate: how much do you pay out on terms each month.
-
----
-
-## Appendix — where this came from
-
-- #tf-taiwan-adata-tokenised-payables, Mark Hew 11–12 Sep 2026 (Token2049 ask, the three questions, pitch deck)
-- #tf-adata-baas-partnership, 14 Aug 2026 (ADATA Tokenized Deposit discussion notes — model, legal structure, spread economics, MVP vs Aave phasing)
-- #tf-amazon-2025-partnership-tokenised-payables, Dec 2024 (MUFG feedback on bundling and custody)
-- Notion: *Amazon tokenized payable* RFC (TP definition, exchange components, EIP-1155 vs NFT options)
-- Notion: *KR3.4 tokenised payables design for ADATA* (NFT standard, lifecycle, settlement flow, testnet prototype by Q4)
-- Notion: *StraitsX x ADATA x BaaS MOU*, *ADATA MOU Signing*
-- Daily Work Log 3 Sep 2026 (MAS interest restriction for e-money licensees, 3-week requirements lock, smart contract to legal invoice mapping)
+- `#tf-taiwan-adata-tokenised-payables`, Mark Hew, 11–12 Sep 2026 — Token2049 request, core questions, and pitch deck.
+- `#tf-adata-baas-partnership`, 14 Aug 2026 — ADATA discussion notes on structure, economics, and MVP/DeFi phasing.
+- `#tf-amazon-2025-partnership-tokenised-payables`, Dec 2024 — MUFG feedback on bundling and custody.
+- Notion: *Amazon tokenized payable* RFC — instrument definition and exchange components.
+- Notion: *KR3.4 tokenised payables design for ADATA* — lifecycle, settlement, and testnet context.
+- Notion: *StraitsX x ADATA x BaaS MOU* and *ADATA MOU Signing* — partnership context.
+- Daily Work Log, 3 Sep 2026 — legal questions, requirements timing, and invoice-to-contract mapping.
+- [ERC-1155: Multi Token Standard](https://eips.ethereum.org/EIPS/eip-1155) — checked during this review to clarify token IDs, quantities, and the distinction between the standard and application rules.
