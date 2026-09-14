@@ -4,8 +4,7 @@ import { ASSETS, type Asset } from '@/core/money';
 
 /**
  * The funding-asset choice PRD §10 puts in front of every payment: one button
- * per asset a wallet can hold, with the chosen one filled in. Shared by the bid
- * panel and the settlement panel so the two payments look like one product.
+ * per asset a wallet can hold, with the chosen one filled in.
  */
 export function AssetPicker({ value, onChange }: { value: Asset; onChange: (asset: Asset) => void }) {
   return (

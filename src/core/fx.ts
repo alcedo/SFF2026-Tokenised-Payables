@@ -22,11 +22,7 @@ import { type Asset, type BaseUnits, mulDivRound } from './money';
  */
 export type XsgdPerXusdRate = bigint;
 
-/**
- * The scale of `app.world.xsgd_per_xusd_e6`. The ledger's own conversion in
- * db/post.sql divides by the same number, so a screen's preview and the debit
- * the ledger takes are one arithmetic rather than two that happen to agree.
- */
+/** The scale of `app.world.xsgd_per_xusd_e6`. */
 export const RATE_SCALE = 1_000_000n;
 
 /** The seeded rate. PRD section 6. */

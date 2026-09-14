@@ -32,7 +32,6 @@ export function FundingPanel({
   balances: Record<string, string>;
   xsgdPerXusdE6: string;
 }) {
-  // The obligation is in XUSD, so paying in XUSD is the common case and leads.
   const [asset, setAsset] = useState<Asset>('XUSD');
 
   const outstanding = BigInt(outstandingBase) as BaseUnits;
@@ -40,7 +39,6 @@ export function FundingPanel({
   const debit = convert(outstanding, asset, rate).sourceDebit;
   const available = BigInt(balances[asset] ?? '0') as BaseUnits;
   const short = available < debit;
-  // Only a conversion can produce fractions of a cent, so only XSGD shows four.
   const decimals = asset === 'XSGD' ? 4 : 2;
   const holders = holderCount === 1 ? 'the holder' : `all ${holderCount} holders`;
 

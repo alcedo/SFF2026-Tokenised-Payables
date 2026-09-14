@@ -45,8 +45,6 @@ DECLARE
   PAYABLE uuid := '9a000000-0000-0000-0000-000000000141';
   FACE   bigint := 2500000000;          -- 250,000.0000 XUSD
   PRICE  bigint := 2446250000;          -- 97.85% of face
-  -- Four more payables for the funded-settlement cases in 11b to 11e, matured
-  -- by a second clock advance.
   ANCHOR_ID uuid := 'e0000000-0000-0000-0000-0000000000a1';
   SUPP_ID   uuid := 'e0000000-0000-0000-0000-0000000000a2';
   PAY_XSGD  uuid := '9a000000-0000-0000-0000-000000000161';
@@ -528,8 +526,7 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS  a split payable paid in XSGD converts the total once and debits ADATA once';
 
-  -- A settlement names its funding asset. Without one the command is
-  -- malformed and refused before any lock is taken.
+  -- A settlement names its funding asset.
   SELECT pg_temp.cash(SUPP, 'XUSD') AS holder_xusd,
          pg_temp.cash(ANCHOR, 'XUSD') + pg_temp.cash(ANCHOR, 'USDC')
            + pg_temp.cash(ANCHOR, 'USDT') + pg_temp.cash(ANCHOR, 'XSGD') AS anchor_cash

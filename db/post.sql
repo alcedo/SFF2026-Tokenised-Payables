@@ -187,11 +187,6 @@ END $$;
 -- payer's side of such an entry looks like, so a trade and a redemption charge
 -- the same asset the same way.
 --
--- XSGD is converted at the world rate and rounded half up to a base unit; the
--- other three assets are 1:1. system_fx takes in what the payer paid and gives
--- out the XUSD owed, so the entry still balances per asset. XUSD itself needs
--- no conversion, so the payer is debited directly.
---
 -- The rate applied comes back alongside the legs because PRD §10 requires the
 -- receipt to state it, and a later world reset must not change what a receipt
 -- says. The 1:1 assets record 1000000, a rate of exactly one, which is also
@@ -200,8 +195,8 @@ DROP TYPE IF EXISTS ledger.payment CASCADE;
 CREATE TYPE ledger.payment AS (
   funding ledger.cash_code,
   legs    ledger.leg_spec[],
-  source  bigint,          -- what left the payer, in the funding asset
-  rate_e6 bigint           -- XSGD per XUSD scaled by 1e6; 1000000 for the 1:1 assets
+  source  bigint,
+  rate_e6 bigint
 );
 
 CREATE OR REPLACE FUNCTION ledger.payer_legs(
@@ -212,17 +207,19 @@ DECLARE
   v_payer uuid := ledger.wallet_account(p_payer, 'wallet_free');
   v_xusd  uuid := ledger.cash_asset('XUSD');
   v_fx    uuid;
+  v_fund  uuid;
 BEGIN
   v_pay.funding := p_funding;
   v_pay.rate_e6 := CASE WHEN p_funding = 'XSGD' THEN p_rate_e6 ELSE 1000000 END;
-  v_pay.source  := (p_xusd * v_pay.rate_e6 + 500000) / 1000000;   -- round half up
+  v_pay.source  := (p_xusd * v_pay.rate_e6 + 500000) / 1000000;
   IF p_funding = 'XUSD' THEN
     v_pay.legs := ARRAY[ROW(v_payer, v_xusd, -p_xusd)::ledger.leg_spec];
   ELSE
-    v_fx := ledger.system_account('system_fx');
+    v_fx   := ledger.system_account('system_fx');
+    v_fund := ledger.cash_asset(p_funding);
     v_pay.legs := ARRAY[
-      ROW(v_payer, ledger.cash_asset(p_funding), -v_pay.source)::ledger.leg_spec,
-      ROW(v_fx, ledger.cash_asset(p_funding), v_pay.source)::ledger.leg_spec,
+      ROW(v_payer, v_fund, -v_pay.source)::ledger.leg_spec,
+      ROW(v_fx, v_fund, v_pay.source)::ledger.leg_spec,
       ROW(v_fx, v_xusd, -p_xusd)::ledger.leg_spec
     ];
   END IF;
@@ -645,8 +642,6 @@ BEGIN
     v_price := v_bid.price_base;
     v_cash  := ledger.cash_asset('XUSD');
 
-    -- The seller is credited XUSD whatever the buyer paid with. Only the
-    -- payer's side varies, and ledger.payer_legs decides it.
     v_payment := ledger.payer_legs(v_bid.bidder_wallet, v_bid.funding_code, v_price, v_world.xsgd_per_xusd_e6);
     v_legs := v_payment.legs || ARRAY[
       ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_free'), v_cash, v_price)::ledger.leg_spec
@@ -715,10 +710,8 @@ BEGIN
       END LOOP;
     END LOOP;
 
-    -- Each current holder is credited XUSD for the face of the quantity they
-    -- hold, and the tokens burn back to system_unissued. Because face and
-    -- quantity are the same number of base units, each holder's credit IS
-    -- their quantity, and no pro-rata rounding is possible.
+    -- Because face and quantity are the same number of base units, each
+    -- holder's credit IS their quantity, and no pro-rata rounding is possible.
     v_total_qty := 0;
     FOR v_holder IN
       SELECT a.wallet_address, SUM(b.balance)::bigint AS qty
@@ -736,11 +729,9 @@ BEGIN
       ];
     END LOOP;
 
-    -- ADATA pays the total once, in the asset it chose. The total is converted
-    -- rather than each holder's share, so rounding happens once and the XSGD
-    -- debit is what the whole obligation costs, not the sum of N rounded parts.
-    -- The XUSD legs net to zero by construction: minus the total on the payer
-    -- side against plus each holder's quantity here.
+    -- The total is converted rather than each holder's share, so rounding
+    -- happens once and the XSGD debit is what the whole obligation costs, not
+    -- the sum of N rounded parts.
     v_payment := ledger.payer_legs(v_anchor_wallet, v_funding, v_total_qty, v_world.xsgd_per_xusd_e6);
     v_legs := v_legs || v_payment.legs;
 
@@ -1010,8 +1001,7 @@ BEGIN
   END IF;
 
   -- Record how the XUSD owed was paid, for the receipt and the explorer (PRD
-  -- §10). Here rather than in each paying branch so no branch can forget it,
-  -- and before the chain stamp below, after which the entry is append-only.
+  -- §10).
   IF v_payment IS NOT NULL THEN
     UPDATE ledger.journal_entry
        SET funding_code = v_payment.funding, source_amount_base = v_payment.source,
