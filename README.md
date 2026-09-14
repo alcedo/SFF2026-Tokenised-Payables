@@ -20,9 +20,29 @@ npm run dev                  # or: scripts/serve.sh  (build + serve on :3100)
 ```
 
 Then open the app and use the **Demo controls** bar at the top to switch
-persona, move the clock, top up a wallet, or reset the world.
+persona, move the clock, top up a wallet, create a new account, or reset the
+world.
 
 `docs/RUNBOOK.md` is the five-minute presenter script.
+
+## What is in it
+
+Nineteen screens across five personas — ADATA preparer and checker, supplier,
+lender, and the StraitsX admin — covering every screen PRD §8 lists:
+
+| | |
+|---|---|
+| **ADATA** | outstanding obligations · create payable, by ERP import or by hand · maker-checker approval queue · settlement |
+| **Supplier** | inbox and holdings with the financing comparison · request financing, whole or part, with an optional buy-now price · offers received |
+| **Lender** | marketplace, filtered by maturity, tenor, grade, ticket size and yield · payable detail with series expansion · bid or buy now in any of four funding assets · portfolio with realised returns |
+| **Admin** | issuer certification · grading · accounts · programme oversight · overdue and recovery |
+| **Anyone** | onboarding with a custodial wallet · transfer · mock chain explorer · reset |
+
+The demo world seeds itself with 26 organisations, 19 accounts, 29 payables
+across all three grades and 30 to 180 day tenors, nine open listings with live
+bids, a 12-invoice series lot, a settled position, an overdue one, and a
+24-invoice ERP register. T0 is the day the world was seeded, so the tenors stay
+realistic however long the URL stays up.
 
 ## Verify it
 

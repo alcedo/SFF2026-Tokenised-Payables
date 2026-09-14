@@ -1,17 +1,22 @@
 # Five-minute demo runbook
 
-The PRD's headline acceptance criterion (section 2) reads: "A viewer can issue →
-list → bid → accept → advance time → settle within five minutes, following §19."
-Section 19 does not exist; the PRD ends at section 15. This runbook is written
-from the flow the rest of the document describes. If a real section 19 turns up,
-reconcile the two before the dry runs.
+The PRD's headline acceptance criterion (section 2): "A viewer can issue → list
+→ bid → accept → advance time → settle within five minutes." This is that run,
+written from the flow the rest of the document describes.
 
-The run uses the seeded unissued ERP invoice from section 12, which exists
-precisely so the pitch can issue and list a new position without colliding with
-the three payables already listed at T0.
+It uses a seeded unissued ERP invoice from section 12, which exists precisely so
+the pitch can issue and list a new position without colliding with the payables
+already on the market at T0.
 
-**Before starting:** press **Reset world** in the demo controls. Every step below
-assumes the clock is at T0 and balances are seeded.
+`scripts/runbook.mjs` drives every step below through the real UI in about 45
+seconds of machine time, and fails if any of it stops working. If you are about
+to present, run it first.
+
+**Before starting:** switch to **StraitsX admin**, press **Reset world**, type
+RESET and confirm. Every step below assumes the clock is at T0 and balances are
+seeded. Reset is the administrator's control only — a lender or supplier
+persona cannot see it, because the URL is public and a reset lands on every
+connected session.
 
 ---
 
@@ -62,6 +67,11 @@ for:
 
 Switch to **lender** (the bank, funded mostly in USDC).
 
+Before opening the new listing, use the **filters** if the room is a credit
+audience: grade AAA, tenor 30 days or less, yield 10% or more. The filter is in
+the URL, so a narrowed book is a link you can send afterwards. Press **Clear**
+to bring the whole market back.
+
 1. Open the new listing from the marketplace. The detail screen leads with ADATA
    as the anchor obligor, not with the supplier.
 2. **Place bid** at 97.85%. Select **USDC** as the funding asset.
@@ -73,6 +83,12 @@ Switch to **lender** (the bank, funded mostly in USDC).
 
 Optionally switch to the second lender and bid slightly lower, so the seller has
 a choice to make on the next screen.
+
+**If you are short on time, use buy-now instead.** Six seeded listings carry a
+buy-now price. Opening one shows the price, the debit in the chosen funding
+asset and the balance it comes out of, and one confirmation settles the whole
+lot without the seller having to accept. It is the same settlement path, so the
+receipt and the portfolio entry are identical.
 
 ## 4. Accept (30 seconds)
 
@@ -115,6 +131,41 @@ marked **Settled** and cannot move or settle again.
 
 ---
 
+## The series lot (add 30 seconds if asked)
+
+One marketplace row is a **series**: twelve tier-2 supplier invoices against the
+same anchor, sharing one maturity, traded as a single lot. Open it and expand
+**Series members** to show all twelve, each with its own invoice reference and
+its holder.
+
+> "A bank does not want twelve 15,000 tickets. It wants one 180,000 ticket. The
+> grade is assigned to the lot, and every member is wholly held by one wallet,
+> so the lot moves as one thing."
+
+## A new participant (add 45 seconds if asked)
+
+**New account** in the demo controls, or `/onboarding`. Pick supplier or lender,
+enter a company name and your name, submit. The platform mints a custodial
+wallet, marks the account KYC verified, and switches this session to it — so you
+are immediately acting as a company that did not exist a moment ago.
+
+> "No document upload, no wallet to connect. A real launch needs both; this
+> shows the shape of the flow."
+
+As **StraitsX admin**, **Accounts** lists every account with its persona, wallet
+and the number of audit entries it authored. Adding a user assigns a persona
+that must match the organisation. Removing one deactivates it — it leaves the
+switcher and cannot act again, but its history stays readable, because every
+journal entry names the person who made it.
+
+## Manual entry (add 30 seconds if asked)
+
+**Create payable → Manual entry** is the path for an invoice the ERP register
+does not have. Supplier, invoice reference, face, terms; maturity is derived and
+shown before you commit. Entering the same invoice for the same supplier twice
+is refused: one invoice backs one payable, which is the control that stops the
+same receivable being financed by two lenders.
+
 ## The partial-quantity variation (add 60 seconds if asked)
 
 The seeded listings are whole holdings so the story above stays a clean
@@ -143,9 +194,13 @@ operational recovery workflow behind it, and the screen says so.
 
 - **A figure looks wrong.** Every yield on screen comes from one function. Check
   the days remaining first; the clock is the usual culprit.
-- **The world looks wrong.** Reset restores everything including the clock and
-  the FX rate. It affects every connected session, so warn anyone else on a
-  second screen first.
+- **The world looks wrong.** Switch to StraitsX admin, open Reset, type RESET.
+  It restores everything including the clock and the FX rate, and takes a few
+  seconds. It affects every connected session, so warn anyone else on a second
+  screen first.
+- **Someone else reset it mid-demo.** Only the admin persona can, and the URL is
+  public, so if the room is large set `ADATA_RESET_PIN` in the deployment
+  environment before the day.
 - **An action is refused.** The refusal states its reason inline. Insufficient
   balance and a stale listing are the two that come up; neither changes any
   balance or position.
