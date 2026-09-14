@@ -30,7 +30,8 @@ VALUES ('9a000000-0000-0000-0000-000000000141', 'TP-2026-0141',
         'INV-TW-88213', 2500000000, '2026-12-30', 'AA',
         'Anchor obligor investment grade. Sample value, not an external rating.', 'certified');
 
--- Fund the two lenders and the anchor, then issue the payable to the supplier.
+-- Fund the two lenders, and the anchor in XUSD plus the XSGD and USDC the
+-- funded-settlement cases pay with, then issue the payable to the supplier.
 SELECT ledger.post(jsonb_build_object(
   'idempotencyKey','00000000-0000-0000-0000-00000000f001','actorUserId','11111111-0000-0000-0000-000000000004',
   'intent', jsonb_build_object('kind','top_up','wallet','0x1e4de40000000000000000000000000000004b13',
@@ -43,6 +44,14 @@ SELECT ledger.post(jsonb_build_object(
   'idempotencyKey','00000000-0000-0000-0000-00000000f002','actorUserId','11111111-0000-0000-0000-000000000001',
   'intent', jsonb_build_object('kind','top_up','wallet','0xada7a0000000000000000000000000000000c21d',
                                'cashCode','XUSD','amountBase', 5000000000)));
+SELECT ledger.post(jsonb_build_object(
+  'idempotencyKey','00000000-0000-0000-0000-00000000f004','actorUserId','11111111-0000-0000-0000-000000000001',
+  'intent', jsonb_build_object('kind','top_up','wallet','0xada7a0000000000000000000000000000000c21d',
+                               'cashCode','XSGD','amountBase', 5000000000)));
+SELECT ledger.post(jsonb_build_object(
+  'idempotencyKey','00000000-0000-0000-0000-00000000f005','actorUserId','11111111-0000-0000-0000-000000000001',
+  'intent', jsonb_build_object('kind','top_up','wallet','0xada7a0000000000000000000000000000000c21d',
+                               'cashCode','USDC','amountBase', 1000000000)));
 SELECT ledger.post(jsonb_build_object(
   'idempotencyKey','00000000-0000-0000-0000-000000000001','actorUserId','11111111-0000-0000-0000-000000000001',
   'intent', jsonb_build_object('kind','issue_payable','payableId','9a000000-0000-0000-0000-000000000141',
