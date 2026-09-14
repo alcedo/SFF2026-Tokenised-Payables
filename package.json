@@ -1,0 +1,27 @@
+{
+  "name": "adata-tokenised-payables",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "next": "16.3.5",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.1",
+    "@types/pg": "8.15.5",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.1",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}
