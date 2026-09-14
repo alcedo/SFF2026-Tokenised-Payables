@@ -84,6 +84,7 @@ export function navFor(persona: Persona): NavItem[] {
         { href: '/admin', label: 'Programme oversight' },
         { href: '/admin/certification', label: 'Issuer certification' },
         { href: '/admin/grading', label: 'Grading' },
+        { href: '/admin/accounts', label: 'Accounts' },
         { href: '/explorer', label: 'Explorer' },
       ];
   }

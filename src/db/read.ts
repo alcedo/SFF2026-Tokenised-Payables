@@ -140,6 +140,66 @@ export async function readEntities(
   }));
 }
 
+export interface UserRow {
+  userId: string;
+  name: string;
+  role: 'adata_preparer' | 'adata_checker' | 'supplier' | 'lender' | 'straitsx_admin';
+  entityId: string;
+  entityName: string;
+  entityType: 'anchor' | 'supplier' | 'lender' | 'platform';
+  wallet: string | null;
+  kycVerified: boolean;
+  institutionalEligible: boolean;
+  /** Journal entries this user is the actor on. PRD §5's delete needs it. */
+  actions: number;
+  /** Whether removing this account would strand its organisation's wallet. */
+  isOnlyUserOfEntity: boolean;
+}
+
+/** Everyone with an account. PRD §5's admin view, which readPersonas is not. */
+export async function readUsers(): Promise<UserRow[]> {
+  return (
+    await query<{
+      user_id: string;
+      name: string;
+      role: UserRow['role'];
+      entity_id: string;
+      entity_name: string;
+      entity_type: UserRow['entityType'];
+      wallet: string | null;
+      mock_kyc_verified: boolean;
+      institutional_eligible: boolean;
+      actions: bigint;
+      peers: bigint;
+    }>(`
+    SELECT u.id AS user_id, u.name, u.role, e.id AS entity_id, e.name AS entity_name,
+           e.entity_type, u.mock_kyc_verified, u.institutional_eligible,
+           (SELECT w.address FROM app.wallet w WHERE w.entity_id = e.id LIMIT 1) AS wallet,
+           (SELECT count(*) FROM ledger.journal_entry j
+             WHERE j.actor_user_id = u.id)::bigint AS actions,
+           (SELECT count(*) FROM app.app_user p
+             WHERE p.entity_id = e.id AND p.id <> u.id AND p.deactivated_at IS NULL)::bigint AS peers
+      FROM app.app_user u
+      JOIN app.entity e ON e.id = u.entity_id
+     WHERE u.deactivated_at IS NULL
+     ORDER BY CASE e.entity_type
+                WHEN 'anchor' THEN 1 WHEN 'supplier' THEN 2
+                WHEN 'lender' THEN 3 ELSE 4 END, e.name, u.name`)
+  ).map((r) => ({
+    userId: r.user_id,
+    name: r.name,
+    role: r.role,
+    entityId: r.entity_id,
+    entityName: r.entity_name,
+    entityType: r.entity_type,
+    wallet: r.wallet,
+    kycVerified: r.mock_kyc_verified,
+    institutionalEligible: r.institutional_eligible,
+    actions: Number(r.actions),
+    isOnlyUserOfEntity: Number(r.peers) === 0,
+  }));
+}
+
 // --- wallets ----------------------------------------------------------------
 
 export type Balances = Record<Asset, BaseUnits>;

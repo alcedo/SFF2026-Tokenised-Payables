@@ -259,7 +259,49 @@ try {
   await expectText('already been financed for this supplier', 'the duplicate refusal');
   await say('entering the same invoice again is refused, not silently duplicated');
 
-  // ------------------------------------------------------- 8. reset guards
+  // ----------------------------------------------------- 8. a new account
+  // PRD §5: create a user, assign a persona, then find them in the switcher
+  // and act as them. The whole point is that the account is real, so this
+  // onboards one and immediately uses it.
+  await page.goto(`${BASE}/onboarding`, { waitUntil: 'domcontentloaded' });
+  const personasBefore = await page.getByLabel('Switch persona').locator('option').count();
+  await page.getByRole('button', { name: 'Lender', exact: false }).first().click();
+  await page.getByLabel('Company name').fill('Northwind Credit Partners');
+  await page.getByLabel('Your name').fill('Priya Raghavan');
+  await page.waitForTimeout(300);
+  await shot('onboarding');
+  await clickThrough('Create account');
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+  const acting = await page.getByLabel('Switch persona').locator('option:checked').innerText();
+  if (!acting.includes('Priya Raghavan')) {
+    throw new Error(`onboarding did not switch to the new account, acting as ${acting}`);
+  }
+  const personasAfter = await page.getByLabel('Switch persona').locator('option').count();
+  if (personasAfter !== personasBefore + 1) {
+    throw new Error('the new account did not reach the persona switcher');
+  }
+  await say('a visitor onboards as a lender and the session becomes that account');
+
+  await page.goto(`${BASE}/lender`, { waitUntil: 'domcontentloaded' });
+  await expectText('Marketplace', 'the new lender\'s first screen');
+  await say('the new account has a custodial wallet and full marketplace access');
+
+  // PRD §5: "The admin account can delete all other users from the platform."
+  await become('Nadia Rahman');
+  await page.goto(`${BASE}/admin/accounts`, { waitUntil: 'domcontentloaded' });
+  await shot('accounts');
+  const removable = page.locator('tr', { hasText: 'Tomás Iglesias' });
+  await removable.getByRole('button', { name: 'Remove' }).click();
+  await page.waitForTimeout(300);
+  await removable.getByRole('button', { name: 'Confirm: Remove' }).click();
+  await page.waitForTimeout(1500);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  if ((await page.locator('body').innerText()).includes('Tomás Iglesias')) {
+    throw new Error('the removed account is still listed');
+  }
+  await say('the administrator removes an account, and it leaves the switcher');
+
+  // ------------------------------------------------------- 9. reset guards
   // The demo runs on a public URL, so the one control that destroys everyone
   // else's session is checked here rather than trusted. Last, because a
   // successful reset is also how the world is handed to the next presenter.

@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 
 import { ERROR_MESSAGE, type Intent, post } from '@/db/post';
-import { readPayables, readWorld } from '@/db/read';
+import { readPayables, readPersonas, readWorld } from '@/db/read';
 import { currentPersona, setPersona } from './session';
 
 export interface ActionResult {
@@ -259,6 +259,56 @@ export async function transferQuantity(
     { kind: 'transfer', payableId, fromWallet, toWallet, quantityBase: BigInt(quantityBase) as never },
     key,
   );
+}
+
+// --- accounts (PRD §5, §8 screen 5) -----------------------------------------
+
+/**
+ * Onboard a counterparty and switch to it. PRD §8 screen 5, §5.
+ *
+ * Switching afterwards is the point of the flow, not a convenience: §5 asks to
+ * "create a user, assign a persona, then view this newly created user in the
+ * drop down and switch to the user". Landing on the new persona's own screen
+ * is what shows the account is real.
+ */
+export async function onboardEntity(
+  name: string,
+  entityType: string,
+  userName: string,
+  key?: string,
+): Promise<ActionResult> {
+  const result = await run(
+    {
+      kind: 'onboard_entity',
+      name,
+      entityType: entityType as never,
+      userName,
+      // A supplier company gets a supplier persona and a lender company a
+      // lender one. The database refuses any other pairing, so there is
+      // nothing here for a form to get wrong.
+      role: entityType as never,
+    },
+    key,
+  );
+  if (result.ok) {
+    const created = (await readPersonas()).find((p) => p.name === userName.trim());
+    if (created) await setPersona(created.userId);
+    revalidatePath('/', 'layout');
+  }
+  return result;
+}
+
+export async function createUser(
+  entityId: string,
+  userName: string,
+  role: string,
+  key?: string,
+): Promise<ActionResult> {
+  return run({ kind: 'create_user', entityId, userName, role: role as never }, key);
+}
+
+export async function removeUser(userId: string, key?: string): Promise<ActionResult> {
+  return run({ kind: 'remove_user', userId }, key);
 }
 
 /**

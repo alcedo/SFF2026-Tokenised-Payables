@@ -136,3 +136,50 @@ prevents the realistic failure — someone clicking a red button mid-presentatio
 to see what it does. The PIN is the only real lock, and it is optional so a
 laptop demo is not made tedious. When no PIN is set the screen says so rather
 than implying a protection it does not have.
+
+## Removing a user, when the PRD says "delete"
+
+Section 5 says "the admin account can delete all other users from the platform"
+and does not say what happens to what they did.
+
+**Built:** removal deactivates the account rather than deleting the row. Every
+journal entry names the user who made it, so deleting the row would break the
+audit trail at the first entry that person authored — and section 10 requires a
+receipt reopened from history to be identical to the one shown at confirmation.
+A removed account leaves the persona switcher, cannot act again, and its history
+stays readable under its name. The accounts screen shows how many entries each
+account authored, so an admin can see what they are leaving behind.
+
+**Two removals are refused.** The StraitsX administrator, because section 5 says
+there is exactly one. And the last live account of an organisation, because a
+wallet is reached through its users: removing the last one would leave whatever
+that organisation holds on the books with nobody able to act on it. The seed
+gives four organisations a second account so the control is demonstrable on a
+fresh world.
+
+## Suppliers on the ERP register versus suppliers on the platform
+
+Not every supplier ADATA buys from has an account. The seed has twelve tier-2
+suppliers who originated the invoices in the series lot, sold their whole
+position, and have no live account — which is a real state, not a broken one.
+
+**Built:** manual entry only offers suppliers with a live account, and
+`ledger.post()` refuses a payable raised against one without. A payable issues
+to its supplier's wallet and then waits for that supplier to accept delivery
+(section 3 question 7), so a supplier who cannot sign in could never take it and
+the payable would strand at issuance. The ERP import path cannot reach this,
+because the register only names onboarded suppliers.
+
+## Onboarding without documents
+
+Section 8 screen 5 says "mark the account KYC verified on submit. No document
+upload and no external wallet connection required," and notes that real
+production would need documents.
+
+**Built:** onboarding creates the organisation, mints a custodial wallet in the
+same shape as every seeded address, marks the account verified, and switches the
+session to it. The screen says plainly that a real launch would require
+documents and that this marks the account verified on submit so the flow can be
+shown end to end. Only a supplier or a lender can be onboarded; the anchor and
+the platform are fixtures of this programme, and section 5 names exactly one of
+each.

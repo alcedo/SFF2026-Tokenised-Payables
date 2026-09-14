@@ -35,6 +35,12 @@ export default async function CreatePayablePage({
 
   const manual = mode === 'manual';
 
+  // A payable issues to its supplier's wallet and waits for that supplier to
+  // accept delivery, so only suppliers with a live account can be offered.
+  // The seed includes tier-2 counterparties who sold everything and no longer
+  // have one; they are real history, not candidates for a new payable.
+  const onboarded = suppliers.filter((s) => s.userCount > 0);
+
   // References are sequential within the year, continuing the seeded series.
   const highest = payables
     .map((p) => Number(p.ref.match(/TP-2026-(\d+)$/)?.[1] ?? 0))
@@ -65,7 +71,7 @@ export default async function CreatePayablePage({
           <ManualEntry
             worldDate={world.today}
             nextSequence={highest + 1}
-            suppliers={suppliers.map((s) => ({
+            suppliers={onboarded.map((s) => ({
               id: s.id,
               name: s.name,
               certification: s.certification,

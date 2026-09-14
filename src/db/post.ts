@@ -13,6 +13,7 @@
 
 import { query } from './client';
 import type { Asset, BaseUnits } from '@/core/money';
+import type { Role } from '@/core/lifecycle';
 
 // --- intents ----------------------------------------------------------------
 
@@ -60,6 +61,17 @@ export type Intent =
   | { kind: 'withdraw_bid'; bidId: string }
   | { kind: 'accept_bid'; listingId: string; bidId: string }
   | { kind: 'buy_now'; listingId: string; buyerWallet: string; fundingCode: Asset }
+  // PRD §5 and §8 screen 5. Onboarding creates an organisation, its custodial
+  // wallet and its first user; create_user adds another to one that exists.
+  | {
+      kind: 'onboard_entity';
+      name: string;
+      entityType: 'supplier' | 'lender';
+      userName: string;
+      role: 'supplier' | 'lender';
+    }
+  | { kind: 'create_user'; entityId: string; userName: string; role: Role }
+  | { kind: 'remove_user'; userId: string }
   | { kind: 'settle_maturity'; payableId: string }
   | { kind: 'advance_clock'; days: number }
   | { kind: 'submit'; payableId: string }
@@ -130,6 +142,11 @@ export type PostErrorCode =
   | 'unknown_supplier'
   | 'missing_invoice_ref'
   | 'duplicate_reference'
+  | 'duplicate_entity'
+  | 'missing_name'
+  | 'role_mismatch'
+  | 'last_user'
+  | 'supplier_not_onboarded'
   | 'unknown';
 
 export interface PostError {
@@ -169,6 +186,11 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA24: 'unknown_supplier',
   ADA25: 'missing_invoice_ref',
   ADA26: 'duplicate_reference',
+  ADA27: 'duplicate_entity',
+  ADA28: 'missing_name',
+  ADA29: 'role_mismatch',
+  ADA30: 'last_user',
+  ADA31: 'supplier_not_onboarded',
   ADA20: 'insufficient_funds',
   ADA21: 'insufficient_quantity',
   '23505': 'duplicate_listing',
@@ -275,5 +297,12 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
   unknown_supplier: 'That supplier is not on the platform.',
   missing_invoice_ref: 'Enter the invoice reference this payable is backed by.',
   duplicate_reference: 'That payable reference is already in use. Reload and try again.',
+  duplicate_entity: 'An organisation with that name is already on the platform.',
+  missing_name: 'Enter a name.',
+  role_mismatch: 'That persona does not belong in that kind of organisation.',
+  last_user:
+    'That is the only account for this organisation. Removing it would strand the wallet it holds, so add another account first.',
+  supplier_not_onboarded:
+    'That supplier has no account yet, so nobody could accept the payable. Onboard them first.',
   unknown: 'That did not go through. Nothing was changed.',
 };

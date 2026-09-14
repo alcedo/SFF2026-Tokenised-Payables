@@ -96,7 +96,16 @@ INSERT INTO app.app_user (id, entity_id, name, role, mock_kyc_verified, institut
   ('11111111-0000-0000-0000-000000000007', 'e0000000-0000-0000-0000-00000000fd21', 'Sébastien Baptiste', 'lender',         true,  true),
   ('11111111-0000-0000-0000-00000000000e', 'e0000000-0000-0000-0000-00000000ca93', 'Aiko Tanabe',        'lender',         true,  true),
   ('11111111-0000-0000-0000-00000000000f', 'e0000000-0000-0000-0000-00000000b755', 'Dolores Marchetti',  'lender',         true,  true),
-  ('11111111-0000-0000-0000-000000000008', 'e0000000-0000-0000-0000-000000005787', 'Nadia Rahman',       'straitsx_admin', true,  false);
+  ('11111111-0000-0000-0000-000000000008', 'e0000000-0000-0000-0000-000000005787', 'Nadia Rahman',       'straitsx_admin', true,  false),
+  -- Second accounts at four organisations. A finance team is more than one
+  -- person, and PRD §5 gives the admin the power to remove a user: without a
+  -- company that has two, every row on the accounts screen would read "cannot
+  -- remove", because removing the last account would strand that company's
+  -- wallet. These make the control demonstrable on a fresh world.
+  ('11111111-0000-0000-0000-000000000010', 'e0000000-0000-0000-0000-000000000c41', 'Chou Yi-Hsuan',      'supplier',       true,  false),
+  ('11111111-0000-0000-0000-000000000011', 'e0000000-0000-0000-0000-000000000c43', 'Weng Pei-Shan',      'supplier',       true,  false),
+  ('11111111-0000-0000-0000-000000000012', 'e0000000-0000-0000-0000-00000000ba17', 'Tomás Iglesias',     'lender',         true,  true),
+  ('11111111-0000-0000-0000-000000000013', 'e0000000-0000-0000-0000-00000000ca93', 'Harumi Sato',        'lender',         true,  true);
 
 -- ============================================================================
 --  Funding

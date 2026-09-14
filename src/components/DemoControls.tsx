@@ -134,6 +134,18 @@ export function DemoControls({
         </button>
 
         {/*
+          PRD §5 asks a visitor to be able to create an account, be assigned a
+          persona, and then find themselves in this switcher. The way in has to
+          sit next to the switcher for that to read as one flow.
+        */}
+        <a
+          href="/onboarding"
+          className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-0.5 text-[11px] hover:bg-surface-sunken"
+        >
+          New account
+        </a>
+
+        {/*
           PRD §11 "Trigger overdue": open or activate the designated overdue
           example without requiring a live default workflow. The seeded case is
           already past due at T0, so triggering it means opening it rather than

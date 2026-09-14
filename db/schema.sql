@@ -89,6 +89,11 @@ CREATE TABLE app.entity (
                                                  OR programme_limit_base >= 0)
 );
 
+-- INVARIANT (PRD §5): the persona switcher is a list of names, so two
+-- organisations with the same name would be two indistinguishable rows in it.
+-- Onboarding (§8 screen 5) lets anyone add one, so the name is unique.
+CREATE UNIQUE INDEX entity_name_unique ON app.entity(lower(name));
+
 CREATE TABLE app.wallet (
   address     text PRIMARY KEY,
   entity_id   uuid NOT NULL REFERENCES app.entity(id),
@@ -434,6 +439,7 @@ CREATE TYPE ledger.entry_kind AS ENUM (
   'payable_created', 'submitted_for_approval', 'approved', 'certified',
   'graded', 'listing_published', 'listing_cancelled', 'bid_placed',
   'bid_withdrawn', 'clock_advanced', 'world_reset', 'receipt_accepted',
+  'entity_onboarded', 'user_created', 'user_removed',
   -- legged: chain-relevant actions
   'issuance', 'receipt_rejected', 'top_up', 'transfer', 'trade_settlement', 'redemption'
 );
@@ -860,7 +866,9 @@ BEGIN
   --   ADA15 not_permitted        ADA16 already_settled
   --   ADA22 duplicate_invoice    ADA23 invalid_terms
   --   ADA24 unknown_supplier     ADA25 missing_invoice_ref
-  --   ADA26 duplicate_reference
+  --   ADA26 duplicate_reference  ADA27 duplicate_entity
+  --   ADA28 missing_name         ADA29 role_mismatch
+  --   ADA30 last_user           ADA31 supplier_not_onboarded
   -- ADA22 to ADA26 exist because PRD §8 screen 2's manual entry is the first
   -- form a person types into freely. Folding them into not_permitted would
   -- tell a preparer who mistyped an invoice number that they lack permission,

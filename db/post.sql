@@ -251,6 +251,10 @@ DECLARE
   v_erp         app.erp_invoice;
   v_supplier_id uuid;
   v_invoice_ref text;
+  v_entity      app.entity;
+  v_user        app.app_user;
+  v_role        app.user_role;
+  v_name        text;
 BEGIN
   IF v_key IS NULL THEN
     RAISE EXCEPTION 'every command needs an idempotencyKey' USING ERRCODE = 'ADA17';
@@ -280,6 +284,9 @@ BEGIN
     WHEN 'approve'        THEN 'approved'
     WHEN 'certify'        THEN 'certified'
     WHEN 'grade'          THEN 'graded'
+    WHEN 'onboard_entity' THEN 'entity_onboarded'
+    WHEN 'create_user'    THEN 'user_created'
+    WHEN 'remove_user'    THEN 'user_removed'
     ELSE NULL END;
 
   IF v_entry_kind IS NULL THEN
@@ -699,6 +706,16 @@ BEGIN
       IF NOT FOUND THEN
         RAISE EXCEPTION 'no such supplier' USING ERRCODE = 'ADA24';
       END IF;
+      -- A payable issues to its supplier's wallet and then waits for that
+      -- supplier to accept delivery (PRD §3 q7). A supplier with no live
+      -- account can never do that, so the payable would strand at issuance.
+      -- The ERP path cannot reach this: its register only names onboarded
+      -- suppliers. Manual entry can, which is why the check lives here.
+      PERFORM 1 FROM app.app_user
+       WHERE entity_id = v_supplier_id AND deactivated_at IS NULL;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'no account exists for this supplier yet' USING ERRCODE = 'ADA31';
+      END IF;
       IF v_invoice_ref = '' THEN
         RAISE EXCEPTION 'an invoice reference is required' USING ERRCODE = 'ADA25';
       END IF;
@@ -738,6 +755,104 @@ BEGIN
       UPDATE app.erp_invoice SET consumed_by = v_payable.id WHERE id = v_erp.id;
     END IF;
     UPDATE ledger.journal_entry SET payable_id = v_payable.id WHERE id = v_entry.id;
+
+  ELSIF v_kind IN ('onboard_entity', 'create_user') THEN
+    -- PRD §5 and §8 screen 5. Onboarding a counterparty and adding a user to
+    -- one are the same act at different depths: onboarding creates the
+    -- organisation, its custodial wallet and its first user; create_user adds
+    -- another user to an organisation that already exists. Sharing the branch
+    -- keeps one set of role rules rather than two that drift.
+    v_name := btrim(COALESCE(v_intent->>'userName', ''));
+    IF v_name = '' THEN
+      RAISE EXCEPTION 'a user name is required' USING ERRCODE = 'ADA28';
+    END IF;
+
+    IF v_kind = 'onboard_entity' THEN
+      IF btrim(COALESCE(v_intent->>'name', '')) = '' THEN
+        RAISE EXCEPTION 'an organisation name is required' USING ERRCODE = 'ADA28';
+      END IF;
+      IF (v_intent->>'entityType') NOT IN ('supplier', 'lender') THEN
+        -- The anchor and the platform are fixtures of this programme, not
+        -- things a visitor onboards. PRD §5 names exactly one of each.
+        RAISE EXCEPTION 'only a supplier or a lender can be onboarded here'
+          USING ERRCODE = 'ADA29';
+      END IF;
+
+      BEGIN
+        INSERT INTO app.entity (name, entity_type, certification_status)
+        VALUES (btrim(v_intent->>'name'), (v_intent->>'entityType')::app.entity_type,
+                -- PRD §8 screen 5: "Mark the account KYC verified on submit."
+                -- No document upload; certification here is the demo's stand-in.
+                'certified')
+        RETURNING * INTO v_entity;
+      EXCEPTION WHEN unique_violation THEN
+        RAISE EXCEPTION 'an organisation called % is already on the platform',
+          btrim(v_intent->>'name') USING ERRCODE = 'ADA27';
+      END;
+
+      -- Custodial wallet. PRD §8 screen 5 is explicit that no external wallet
+      -- is connected, so the platform mints one in the same shape as every
+      -- seeded address: 0x and 40 hex characters.
+      INSERT INTO app.wallet (address, entity_id)
+      VALUES ('0x' || encode(gen_random_bytes(20), 'hex'), v_entity.id);
+    ELSE
+      SELECT * INTO v_entity FROM app.entity WHERE id = (v_intent->>'entityId')::uuid;
+      IF v_entity.id IS NULL THEN
+        RAISE EXCEPTION 'no such organisation' USING ERRCODE = 'ADA24';
+      END IF;
+    END IF;
+
+    v_role := (v_intent->>'role')::app.user_role;
+    -- A persona is a role inside an organisation, and the two have to agree.
+    -- Without this a "lender" could be created inside a supplier company and
+    -- would see a marketplace they cannot trade in, holding that company's
+    -- wallet. The database refuses rather than the form remembering.
+    IF NOT (
+      (v_entity.entity_type = 'supplier' AND v_role = 'supplier')
+      OR (v_entity.entity_type = 'lender' AND v_role = 'lender')
+      OR (v_entity.entity_type = 'anchor' AND v_role IN ('adata_preparer', 'adata_checker'))
+      OR (v_entity.entity_type = 'platform' AND v_role = 'straitsx_admin')
+    ) THEN
+      RAISE EXCEPTION 'a % cannot hold the % role', v_entity.entity_type, v_role
+        USING ERRCODE = 'ADA29';
+    END IF;
+
+    BEGIN
+      INSERT INTO app.app_user (entity_id, name, role, mock_kyc_verified, institutional_eligible)
+      VALUES (v_entity.id, v_name, v_role, true, v_role = 'lender')
+      RETURNING * INTO v_user;
+    EXCEPTION WHEN unique_violation THEN
+      -- The only unique index on this table is the one-admin rule.
+      RAISE EXCEPTION 'the platform already has a StraitsX administrator'
+        USING ERRCODE = 'ADA29';
+    END;
+
+  ELSIF v_kind = 'remove_user' THEN
+    -- PRD §5: "The admin account can delete all other users from the platform."
+    -- Deactivation rather than DELETE, because every journal entry names the
+    -- user who made it and the audit trail has to keep working.
+    SELECT * INTO v_user FROM app.app_user
+     WHERE id = (v_intent->>'userId')::uuid AND deactivated_at IS NULL
+     FOR UPDATE;
+    IF v_user.id IS NULL THEN
+      RAISE EXCEPTION 'no such user' USING ERRCODE = 'ADA15';
+    END IF;
+    IF v_user.role = 'straitsx_admin' THEN
+      RAISE EXCEPTION 'the StraitsX administrator cannot be removed' USING ERRCODE = 'ADA15';
+    END IF;
+
+    -- A wallet is reached through its users, so removing the last one would
+    -- strand whatever that organisation holds: the balance stays on the books
+    -- and nobody can act on it. PRD §5 asks for user deletion, not for a way
+    -- to orphan a position.
+    PERFORM 1 FROM app.app_user
+     WHERE entity_id = v_user.entity_id AND id <> v_user.id AND deactivated_at IS NULL;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'that is the only account for %, which still holds a wallet',
+        (SELECT name FROM app.entity WHERE id = v_user.entity_id) USING ERRCODE = 'ADA30';
+    END IF;
+
+    UPDATE app.app_user SET deactivated_at = now() WHERE id = v_user.id;
 
   ELSIF v_kind IN ('submit','approve','certify','grade') THEN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
