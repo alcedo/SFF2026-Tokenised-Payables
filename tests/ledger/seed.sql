@@ -17,14 +17,17 @@ DECLARE
   v_n      bigint;
   v_yield  numeric;
 BEGIN
+  -- T0 is the day the world was seeded, not a date written into the seed. The
+  -- demo runs on a public URL indefinitely, so a fixed T0 would be stale within
+  -- weeks: every tenor short and every maturity already passed.
   SELECT t0 + offset_days INTO v_world FROM app.world;
-  IF v_world <> DATE '2026-10-01' THEN
-    RAISE EXCEPTION 'FAIL: T0 is %, expected 2026-10-01', v_world;
+  IF v_world <> CURRENT_DATE THEN
+    RAISE EXCEPTION 'FAIL: T0 is %, expected today (%)', v_world, CURRENT_DATE;
   END IF;
   IF (SELECT offset_days FROM app.world) <> 0 THEN
     RAISE EXCEPTION 'FAIL: the demo starts at a non-zero clock offset';
   END IF;
-  RAISE NOTICE 'PASS  the world starts at T0 = 2026-10-01 with the clock at zero';
+  RAISE NOTICE 'PASS  the world starts at T0 = today with the clock at zero';
 
   -- PRD §12, the four live rows. Face, tenor, grade and ask are stated; the
   -- yield is "calculated from the remaining days and asks above, rounded to one
@@ -98,18 +101,37 @@ BEGIN
   IF v_n <> 1 THEN RAISE EXCEPTION 'FAIL: the series has % holders, expected 1', v_n; END IF;
   RAISE NOTICE 'PASS  the series bundles 12 invoices under a single holder';
 
-  -- PRD §12: two competing bids so the bid book is visible on arrival.
+  -- PRD §12: at least two competing bids so the bid book is visible on arrival.
   SELECT count(*) INTO v_n FROM app.bid b
     JOIN app.listing li ON li.id = b.listing_id
     JOIN app.payable p ON p.id = li.target_payable_id
    WHERE b.status = 'placed' AND p.ref = 'TP-2026-0142';
-  IF v_n <> 2 THEN RAISE EXCEPTION 'FAIL: TP-2026-0142 has % open bids, expected 2', v_n; END IF;
-  RAISE NOTICE 'PASS  a seeded listing already carries two competing bids';
+  IF v_n < 2 THEN RAISE EXCEPTION 'FAIL: TP-2026-0142 has % open bids, expected 2 or more', v_n; END IF;
+  RAISE NOTICE 'PASS  a seeded listing already carries competing bids';
+
+  -- A public demo is judged on whether the data looks like a real programme.
+  SELECT count(*) INTO v_n FROM app.payable WHERE series_id IS NULL;
+  IF v_n < 12 THEN RAISE EXCEPTION 'FAIL: only % standalone payables seeded', v_n; END IF;
+  SELECT count(DISTINCT grade) INTO v_n FROM app.payable WHERE grade IS NOT NULL;
+  IF v_n <> 3 THEN RAISE EXCEPTION 'FAIL: % grades seeded, expected all of AAA, AA and A', v_n; END IF;
+  SELECT count(*) INTO v_n FROM app.payable WHERE lifecycle_status = 'settled';
+  IF v_n < 3 THEN RAISE EXCEPTION 'FAIL: only % settled payables for portfolio history', v_n; END IF;
+  RAISE NOTICE 'PASS  the seed has depth: payables across all three grades, with history';
+
+  -- PRD §6's partial-quantity story needs a split holding to exist on arrival.
+  SELECT count(*) INTO v_n FROM (
+    SELECT payable_id FROM ledger.v_holding GROUP BY payable_id HAVING count(*) > 1) split;
+  IF v_n < 1 THEN
+    RAISE EXCEPTION 'FAIL: no payable has more than one current holder';
+  END IF;
+  RAISE NOTICE 'PASS  a payable with multiple current holders exists on arrival';
 
   -- PRD §12: an unissued ERP invoice for the runbook, distinct from the listed
   -- example so issuing it cannot collide.
+  -- The PRD asks for ten. More are seeded because every visitor to the public
+  -- URL who issues a payable consumes one.
   SELECT count(*) INTO v_n FROM app.erp_invoice WHERE consumed_by IS NULL;
-  IF v_n <> 10 THEN RAISE EXCEPTION 'FAIL: the ERP picker offers % invoices, expected 10', v_n; END IF;
+  IF v_n < 10 THEN RAISE EXCEPTION 'FAIL: the ERP picker offers only % invoices', v_n; END IF;
   SELECT count(*) INTO v_n FROM app.erp_invoice
    WHERE amount_base = 2500000000 AND terms_days = 90 AND consumed_by IS NULL;
   IF v_n < 1 THEN

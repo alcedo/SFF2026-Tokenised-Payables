@@ -5,21 +5,18 @@ section that does not exist. Each one records what was built and what it would
 cost to change. Nothing here was decided to save effort; these are all cases
 where the document ran out before the build did.
 
-## Dangling cross-references in the PRD
+## Dangling cross-references in the PRD — resolved
 
-The PRD ends at section 15 plus the appendix. Three references point past it.
+The PRD used to point at a §16 and a §19 that were never written. Confirmed with
+the author that both were left in by mistake; the references have been removed
+from the PRD itself.
 
-| Reference | Where | What it promises |
-|---|---|---|
-| §19 | line 35 | The five-minute runbook that the "Complete story" acceptance criterion is defined against |
-| §16 | line 11 | "Demo defaults and outstanding decisions" |
-| §16 | line 226 | The advance-rate / LTV mapping for grading |
+The five-minute presenter script the "Complete story" criterion needs is
+`docs/RUNBOOK.md`, written from the flow the rest of the PRD describes and
+verified end to end by `npm run verify:runbook`.
 
-The §19 runbook matters most: the PRD's own headline acceptance criterion is
-"a viewer can issue, list, bid, accept, advance time, and settle within five
-minutes, following §19". A runbook has been written at `docs/RUNBOOK.md` from
-the flow the rest of the PRD describes. If a real §19 exists elsewhere, compare
-the two before the dry runs.
+The advance-rate / LTV mapping is still genuinely undefined. Nothing displays
+one.
 
 ## Supplier acceptance of receipt
 
@@ -51,20 +48,12 @@ gives a number.
 the day after its due date. Section 11's "Trigger overdue" control activates the
 seeded example directly, which is how the demo is meant to reach this screen.
 
-## Direct purchase, not a lending pool
+## Direct purchase, not a lending pool — settled
 
-Section 9 records this as unresolved: the draft demonstrates direct
-institutional purchase, while earlier source notes describe lending through a
-pool with licensed intermediaries, and section 9 defers the choice to the
-missing §16.
-
-**Built:** direct institutional purchase, which is what section 9 instructs
-("Keep the direct-purchase flow as an explicit demo assumption until legal and
-commercial owners confirm the structure"). Flagging it here rather than treating
-it as settled.
-
-**If wrong:** this is the one assumption on this page that is not a small change.
-A pool structure replaces the bid-and-accept marketplace entirely.
+No longer an assumption. Confirmed with the author: a lender buys the payable
+and holds it, and ADATA pays whoever holds it at maturity. Lending through a
+pool with licensed intermediaries is **not** being built, now or later. The PRD
+§9 text has been updated to say so.
 
 ## Advance rate / LTV
 

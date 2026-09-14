@@ -56,8 +56,10 @@ afterAll(async () => {
 });
 
 describe('the world', () => {
-  it('starts at T0 with the clock at zero', () => {
-    expect(world.today).toBe('2026-10-01');
+  it('starts at T0, which is the day it was seeded, with the clock at zero', () => {
+    // Not a fixed date. The demo runs on a public URL indefinitely, so anchoring
+    // T0 to a constant would make every tenor look short within weeks.
+    expect(world.today).toBe(new Date().toISOString().slice(0, 10));
     expect(world.clock.offsetDays).toBe(0);
   });
 
@@ -121,9 +123,9 @@ describe('payables', () => {
 });
 
 describe('the marketplace', () => {
-  it('lists the four open lots sorted by yield', async () => {
+  it('lists the open lots sorted by yield', async () => {
     const listings = await readMarketplace(world);
-    expect(listings).toHaveLength(4);
+    expect(listings.length).toBeGreaterThanOrEqual(4);
     const yields = listings.map((l) => l.quote.lenderYieldPercent ?? 0);
     expect([...yields]).toEqual([...yields].sort((a, b) => b - a));
   });
@@ -153,12 +155,12 @@ describe('the marketplace', () => {
     expect(formatUnits(series.listedFaceBase, 2)).toBe('180,000.00');
   });
 
-  it('surfaces the two competing bids the PRD seeds', async () => {
+  it('surfaces the competing bids the PRD seeds', async () => {
     const listings = await readMarketplace(world);
     const tp142 = listings.find((l) => l.targetRef === 'TP-2026-0142')!;
-    expect(tp142.bidCount).toBe(2);
+    expect(tp142.bidCount).toBeGreaterThanOrEqual(2);
     const bids = await readBids(tp142.id, tp142.listedFaceBase, tp142.quote.daysRemaining);
-    expect(bids.filter((b) => b.status === 'placed')).toHaveLength(2);
+    expect(bids.filter((b) => b.status === 'placed').length).toBeGreaterThanOrEqual(2);
     expect(bids[0]!.quote.lenderYieldPercent).toBeGreaterThan(0);
   });
 });
@@ -230,17 +232,28 @@ describe('audit history', () => {
 });
 
 describe('programme totals', () => {
-  it('adds up without double counting series members', async () => {
+  it('counts a series once, as its members, never on top of them', async () => {
     const totals = await readProgrammeTotals(world);
-    // Live face: 1,200,000 + 250,000 + 48,000 + 180,000 series + 75,000 overdue.
-    expect(formatUnits(totals.issuedFaceBase, 2)).toBe('1,753,000.00');
-    expect(formatUnits(totals.settledFaceBase, 2)).toBe('320,000.00');
-    expect(formatUnits(totals.overdueFaceBase, 2)).toBe('75,000.00');
+    const payables = await readPayables(world);
+    // readPayables excludes series members, so the totals must exceed it by
+    // exactly the series face rather than by twice the series face.
+    const standaloneLive = payables
+      .filter((p) => ['issued', 'matured', 'overdue'].includes(p.status))
+      .reduce((acc, p) => acc + p.faceBase, 0n);
+    const seriesFace = 1_800_000_000n; // 180,000.0000 XUSD across 12 members
+    expect(totals.issuedFaceBase).toBe(standaloneLive + seriesFace);
   });
 
-  it('names the next settlement date', async () => {
+  it('reports the overdue showcase and settled history', async () => {
     const totals = await readProgrammeTotals(world);
-    expect(totals.nextSettlementDate).toBe('2026-10-31');
+    expect(formatUnits(totals.overdueFaceBase, 2)).toBe('75,000.00');
+    expect(totals.settledFaceBase).toBeGreaterThan(0n);
+  });
+
+  it('names a next settlement date in the future', async () => {
+    const totals = await readProgrammeTotals(world);
+    expect(totals.nextSettlementDate).not.toBeNull();
+    expect(totals.nextSettlementDate! >= world.today).toBe(true);
   });
 
   it('reports zero book drift, which is the admin proof panel', async () => {
@@ -250,9 +263,11 @@ describe('programme totals', () => {
 });
 
 describe('the ERP inbox', () => {
-  it('offers ten invoices, none consumed yet', async () => {
+  it('offers at least the ten the PRD asks for, none consumed yet', async () => {
+    // More than ten, because every visitor to the public URL who issues a
+    // payable consumes one and the picker must not run dry.
     const inbox = await readErpInbox();
-    expect(inbox).toHaveLength(10);
+    expect(inbox.length).toBeGreaterThanOrEqual(10);
     expect(inbox.every((i) => !i.consumed)).toBe(true);
   });
 
