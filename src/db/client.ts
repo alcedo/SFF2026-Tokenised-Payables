@@ -39,6 +39,8 @@ types.setTypeParser(PG_NUMERIC, (value) => BigInt(value));
 declare global {
   // eslint-disable-next-line no-var
   var __adataPool: Pool | undefined;
+  // eslint-disable-next-line no-var
+  var __adataEnsure: Promise<void> | undefined;
 }
 
 function connectionString(): string {
@@ -76,10 +78,16 @@ export function pool(): Pool {
   return globalThis.__adataPool;
 }
 
+async function ensureReady(): Promise<void> {
+  const { ensureWorld } = await import('./ensure');
+  await ensureWorld();
+}
+
 export async function query<R extends QueryResultRow>(
   text: string,
   params: readonly unknown[] = [],
 ): Promise<R[]> {
+  await ensureReady();
   const result = await pool().query<R>(text, params as unknown[]);
   return result.rows;
 }
@@ -100,6 +108,7 @@ export async function queryOne<R extends QueryResultRow>(
  * need to hold a lock open deliberately.
  */
 export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  await ensureReady();
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
@@ -115,6 +124,7 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
 }
 
 export async function closePool(): Promise<void> {
+  globalThis.__adataEnsure = undefined;
   if (globalThis.__adataPool) {
     await globalThis.__adataPool.end();
     globalThis.__adataPool = undefined;

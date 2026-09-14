@@ -54,7 +54,7 @@ async function assertCoreProgrammeWorks() {
       role: 'supplier',
     },
   });
-  expect(onboard, JSON.stringify(onboard)).toMatchObject({ ok: true });
+  expect(onboard.ok).toBe(true);
 
   const supplier = (await readEntities('supplier')).find((e) => e.name === company);
   expect(supplier).toBeTruthy();
@@ -71,10 +71,20 @@ async function assertCoreProgrammeWorks() {
       termsDays: 90,
     },
   });
-  expect(created, JSON.stringify(created)).toMatchObject({ ok: true });
+  expect(created.ok).toBe(true);
 
   const payables = await readPayables(world);
   expect(payables.some((p) => p.supplierName === company)).toBe(true);
+
+  const advanced = await post({
+    key: randomUUID(),
+    actorUserId: actor.userId,
+    intent: { kind: 'advance_clock', days: 4 },
+  });
+  expect(advanced.ok).toBe(true);
+  await closePool();
+  const again = await readWorld();
+  expect(again.clock.offsetDays).toBe(world.clock.offsetDays + 4);
 }
 
 describe('a hosted database with no schema and no seed', () => {

@@ -4,6 +4,7 @@
 #   scripts/db.sh up      start the server (idempotent)
 #   scripts/db.sh reset   drop, recreate, reload the schema and seed
 #   scripts/db.sh bare    the same without the seed, for tests with their own fixture
+#   scripts/db.sh ensure  schema + fixtures only if app.world is missing
 #   scripts/db.sh psql    open a shell on the dev database
 #   scripts/db.sh url     print the connection string
 #
@@ -59,12 +60,47 @@ reset() {
 	echo "${DB_NAME} reset"
 }
 
+ensure() {
+	local url="${DATABASE_URL:-}"
+	if [ -z "$url" ]; then
+		up
+		url="$DEV_URL"
+	fi
+	local has_world
+	has_world="$(psql "$url" -t -A -v ON_ERROR_STOP=1 -c "SELECT EXISTS (
+		SELECT 1 FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'app' AND c.relname = 'world'
+	)")"
+	if [ "$has_world" != "t" ]; then
+		psql "$url" -q -v ON_ERROR_STOP=1 -1 \
+			-f "$ROOT/db/schema.sql" -f "$ROOT/db/post.sql" >/tmp/ensure-schema.log 2>&1 || {
+			echo "ensure failed to load schema:" >&2
+			grep -E 'ERROR|FATAL' /tmp/ensure-schema.log >&2 | head -20
+			exit 1
+		}
+	fi
+	local has_row
+	has_row="$(psql "$url" -t -A -v ON_ERROR_STOP=1 -c "SELECT EXISTS (SELECT 1 FROM app.world)")"
+	if [ "$has_row" = "t" ]; then
+		echo "world already present; skip"
+		return 0
+	fi
+	psql "$url" -q -v ON_ERROR_STOP=1 -1 -f "$ROOT/db/fixtures.sql" >/tmp/ensure-fixtures.log 2>&1 || {
+		echo "ensure failed to load fixtures:" >&2
+		grep -E 'ERROR|FATAL' /tmp/ensure-fixtures.log >&2 | head -20
+		exit 1
+	}
+	echo "loaded programme fixtures into empty database"
+}
+
 case "${1:-up}" in
 up) up ;;
 reset) reset ;;
 bare)
 	SKIP_SEED=1 reset
 	;;
+ensure) ensure ;;
 psql)
 	up
 	shift
@@ -72,7 +108,7 @@ psql)
 	;;
 url) echo "$DEV_URL" ;;
 *)
-	echo "usage: scripts/db.sh {up|reset|bare|psql|url}" >&2
+	echo "usage: scripts/db.sh {up|reset|bare|ensure|psql|url}" >&2
 	exit 1
 	;;
 esac

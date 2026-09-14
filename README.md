@@ -60,19 +60,21 @@ The last two need the app running (`scripts/serve.sh`).
    **pooled** connection string, because each serverless instance opens its own
    pool and instances scale out under load.
 2. **Set `DATABASE_URL`** in the Vercel project's environment variables.
-3. **Load the schema once**, against that database:
-   ```bash
-   psql "$DATABASE_URL" -f db/schema.sql -f db/post.sql -f db/seed.sql
-   ```
-   Reset world does the same thing from inside the app afterwards.
+3. **Deploy.** The first request against a database with no `app.world` row
+   loads `db/schema.sql` and `db/post.sql` if the schema is missing, then
+   `db/fixtures.sql` (ADATA, StraitsX, and the three acting accounts). It does
+   not load the demo catalogue. You can create payables and onboard
+   counterparties from there. Reset world still loads `db/seed.sql` when you
+   want the PRD §12 demo. There is no `psql` step.
 4. **Set `ADATA_RESET_PIN`** if the URL is going to be public. Reset restores
    the seed for *everyone* connected, so it is already restricted to the
    StraitsX admin persona and needs the word RESET typed to arm. But the
    persona switcher is open by design (PRD §11), so anyone can become the
    admin. The PIN is the only gate a stranger cannot walk through. Leave it
    unset for a laptop demo and the screen says so plainly.
-5. **Deploy.** No build-time database access is needed; every route is
-   server-rendered on demand.
+
+No build-time database access is needed. Every route is server-rendered on
+demand.
 
 ### Notes for Neon
 
@@ -88,7 +90,10 @@ scale-to-zero on the branch.
 
 `Reset world` replays `db/schema.sql`, `db/post.sql` and `db/seed.sql` through
 the driver in one transaction, which takes a few seconds on Neon and needs no
-`psql` on the server.
+`psql` on the server. The first request against a database with no world row
+loads the schema (if needed) and `db/fixtures.sql` instead, so a freshly
+provisioned Neon opens without a laptop `psql` step and without the demo
+catalogue.
 
 `PG_POOL_MAX` defaults to 1 connection per instance. Raise it only if you have
 measured a need and the database can take the total.
@@ -99,7 +104,7 @@ measured a need and the database can take the total.
 src/core/      pure domain: money, pricing, lifecycle, clock. No I/O, no React.
 src/db/        the only way in and out. post() writes, read() reads.
 src/app/       routes and server actions. Thin shells over the two above.
-db/            schema.sql, post.sql (the write surface), seed.sql
+db/            schema.sql, post.sql (the write surface), fixtures.sql, seed.sql
 tests/         SQL suites against a real Postgres, plus browser drivers
 ```
 
