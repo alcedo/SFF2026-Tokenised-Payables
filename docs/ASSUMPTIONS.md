@@ -243,3 +243,24 @@ anything not `certified`; and the `graded_before_certified` constraint means a
 payable past `approved` always carries a grade. A check at `publish_listing`
 would be a second opinion that can disagree with the first. There is a comment
 where a reader would otherwise look for it.
+
+## Which asset funds a settlement, and which one the screen offers first
+
+Section 8 screen 4 asks Fund settlement to open "the funding-asset picker,
+conversion, source debit, and per-holder XUSD credits before confirmation", and
+section 3 question 13 says redemption is denominated in XUSD with the funding
+asset "selected only for payment". Neither says which asset the picker starts
+on, or whether the anchor holds anything but XUSD.
+
+**Built:** the picker starts on XUSD, the currency the obligation is in, so the
+common case needs no click and the source debit equals the face until ADATA
+chooses otherwise. The seed funds ADATA with 5,000,000 XSGD as well as its
+XUSD, so the conversion can be shown on a fresh world without a top-up first.
+The holders' credits do not depend on the choice: each is paid XUSD for the
+quantity it holds, and only ADATA's side of the entry changes. A settlement
+that names no asset is refused rather than defaulted, because the choice is
+made on the screen and a command without one is a bug, not a preference.
+
+**If wrong:** the default is one line in `FundingPanel.tsx`, and the XSGD
+balance is one top-up in `db/seed.sql` with one assertion in
+`tests/ledger/seed.sql`.

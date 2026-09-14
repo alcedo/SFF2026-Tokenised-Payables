@@ -32,7 +32,7 @@ lender, and the StraitsX admin — covering every screen PRD §8 lists:
 
 | | |
 |---|---|
-| **ADATA** | outstanding obligations · create payable, by ERP import or by hand · maker-checker approval queue · settlement |
+| **ADATA** | outstanding obligations · create payable, by ERP import or by hand · maker-checker approval queue · settlement, funded in any of the four assets |
 | **Supplier** | inbox and holdings with the financing comparison · request financing, whole or part, with an optional buy-now price · offers received |
 | **Lender** | marketplace, filtered by maturity, tenor, grade, ticket size and yield · payable detail with series expansion · bid or buy now in any of four funding assets · portfolio with realised returns |
 | **Admin** | issuer certification · grading · accounts · programme oversight · overdue and recovery |
