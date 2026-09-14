@@ -633,7 +633,7 @@ BEGIN
              WHEN 'approve' THEN 'approved'::app.obligation_state
              WHEN 'certify' THEN 'certified'::app.obligation_state
              ELSE v_payable.lifecycle_status END,
-           grade = COALESCE(v_intent->>'grade', grade),
+           grade = COALESCE((v_intent->>'grade')::app.credit_grade, grade),
            grade_rationale = COALESCE(v_intent->>'gradeRationale', grade_rationale)
      WHERE id = v_payable.id;
   END IF;
