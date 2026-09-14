@@ -8,7 +8,7 @@ import {
   Panel,
   StatusChip,
 } from '@/components/primitives';
-import { readBalances, readHolders, readPayables, readWorld } from '@/db/read';
+import { readBalances, readHolders, readPayables, readWorld, serializeBalances } from '@/db/read';
 
 /**
  * PRD §8 screen 4. Settlement.
@@ -26,6 +26,7 @@ export default async function SettlementPage() {
   const due = payables.filter((p) => p.status === 'matured' || p.status === 'overdue');
   const anchorWallet = '0xada7a0000000000000000000000000000000c21d';
   const balances = await readBalances(anchorWallet);
+  const cashBalances = serializeBalances(balances);
 
   const withHolders = await Promise.all(
     due.map(async (p) => ({ payable: p, holders: await readHolders(p.id) })),
@@ -127,12 +128,7 @@ export default async function SettlementPage() {
                     payableId={payable.id}
                     outstandingBase={payable.outstandingBase.toString()}
                     holderCount={holders.length}
-                    balances={{
-                      XUSD: balances.XUSD.toString(),
-                      USDC: balances.USDC.toString(),
-                      USDT: balances.USDT.toString(),
-                      XSGD: balances.XSGD.toString(),
-                    }}
+                    balances={cashBalances}
                     xsgdPerXusdE6={world.xsgdPerXusdE6.toString()}
                   />
                 </div>

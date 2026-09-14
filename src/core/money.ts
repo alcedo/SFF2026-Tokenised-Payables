@@ -185,15 +185,22 @@ export function max(a: BaseUnits, b: BaseUnits): BaseUnits {
  * rounded result, and this function guarantees the result is a whole base unit.
  */
 export function mulDivRound(value: BaseUnits, numerator: bigint, denominator: bigint): BaseUnits {
+  return brand(roundDiv(value * numerator, denominator));
+}
+
+/**
+ * The same rounding on a plain bigint, for a scaled value that is not money.
+ * A rate rendered to fewer decimals than it carries rounds by this rule too.
+ */
+export function roundDiv(product: bigint, denominator: bigint): bigint {
   if (denominator === 0n) {
     throw new RangeError('division by zero');
   }
-  const product = value * numerator;
   const negative = product < 0n !== denominator < 0n;
   const absProduct = product < 0n ? -product : product;
   const absDenominator = denominator < 0n ? -denominator : denominator;
   const quotient = (absProduct * 2n + absDenominator) / (absDenominator * 2n);
-  return brand(negative ? -quotient : quotient);
+  return negative ? -quotient : quotient;
 }
 
 /**

@@ -58,9 +58,9 @@ async function clickThrough(name, within = page) {
   await page.waitForTimeout(900);
 }
 
-async function expectText(needle, where) {
-  const body = await page.locator('body').innerText();
-  if (!body.includes(needle)) throw new Error(`expected "${needle}" on ${where}`);
+async function expectText(needle, where, within = page.locator('body')) {
+  const text = await within.innerText();
+  if (!text.includes(needle)) throw new Error(`expected "${needle}" on ${where}`);
 }
 
 try {
@@ -260,10 +260,8 @@ try {
   const due = page.locator('section', { hasText: created }).first();
   await due.getByRole('button', { name: 'XSGD', exact: true }).click();
   await page.waitForTimeout(300);
-  const offered = await due.innerText();
-  for (const needle of ['1 XUSD = 1.3100 XSGD', '327,500.0000 XSGD']) {
-    if (!offered.includes(needle)) throw new Error(`expected "${needle}" on the settlement panel`);
-  }
+  await expectText('1 XUSD = 1.3100 XSGD', 'the settlement panel', due);
+  await expectText('327,500.0000 XSGD', 'the settlement panel', due);
   await shot('settlement');
   await say('ADATA chooses XSGD and reads the conversion: 250,000 XUSD of face is 327,500.0000 XSGD at 1.31');
 
@@ -277,18 +275,14 @@ try {
   await become('Rina Okafor');
   await page.goto(`${BASE}/lender/portfolio`, { waitUntil: 'domcontentloaded' });
   await expectText('6,770,000.00', "the lender's XUSD balance after settlement");
-  const realised = await page.locator('tr', { hasText: created }).first().innerText();
-  if (!realised.includes('250,000.00')) {
-    throw new Error(`${created} is not realised at 250,000.00 in the portfolio`);
-  }
+  await expectText('250,000.00', `${created}'s portfolio row`, page.locator('tr', { hasText: created }).first());
   await say('the lender holds 250,000 XUSD more, and the portfolio shows the position realised at face');
 
   await page.goto(`${BASE}/explorer`, { waitUntil: 'domcontentloaded' });
   await expectText('Balanced', 'the explorer');
-  const redemption = await page.locator('tr', { hasText: '327,500.0000' }).first().innerText();
-  if (!redemption.includes('redemption') || !redemption.includes('XSGD')) {
-    throw new Error('the explorer does not show the redemption funded with 327,500.0000 XSGD');
-  }
+  const redemption = page.locator('tr', { hasText: '327,500.0000' }).first();
+  await expectText('redemption', 'the explorer row debiting 327,500.0000', redemption);
+  await expectText('XSGD', 'the explorer row debiting 327,500.0000', redemption);
   await shot('explorer');
   await say('the explorer records the redemption funded in XSGD, and the books still reconcile');
 

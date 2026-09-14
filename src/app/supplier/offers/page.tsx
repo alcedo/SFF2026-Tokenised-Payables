@@ -34,8 +34,8 @@ export default async function OffersPage() {
       const funded = await Promise.all(
         open.map(async (b) => {
           const balances = await readBalances(b.bidderWallet);
-          const needed = convert(b.priceBase, b.fundingAsset, world.xsgdPerXusdE6).sourceDebit;
-          return { bid: b, canPay: balances[b.fundingAsset] >= needed, needed };
+          const conversion = convert(b.priceBase, b.fundingAsset, world.xsgdPerXusdE6);
+          return { bid: b, canPay: balances[b.fundingAsset] >= conversion.sourceDebit, conversion };
         }),
       );
       return { listing: l, bids: funded };
@@ -95,7 +95,7 @@ export default async function OffersPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {bids.map(({ bid, canPay, needed }) => (
+                    {bids.map(({ bid, canPay, conversion }) => (
                       <tr key={bid.id}>
                         <td className="font-medium">{bid.bidderName}</td>
                         <td>
@@ -113,11 +113,11 @@ export default async function OffersPage() {
                         </td>
                         <td>
                           {bid.fundingAsset}
-                          {bid.fundingAsset === 'XSGD' ? (
+                          {conversion.rate === null ? null : (
                             <span className="ml-1 text-[10.5px] text-ink-faint">
-                              {formatUnits(needed, 2)} debited
+                              {formatUnits(conversion.sourceDebit, 2)} debited
                             </span>
-                          ) : null}
+                          )}
                         </td>
                         <td>
                           {canPay ? (

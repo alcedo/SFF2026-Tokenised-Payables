@@ -17,6 +17,7 @@ import { ActionButton } from '@/components/ActionButton';
 import { AssetPicker } from '@/components/AssetPicker';
 import { Notice, Panel } from '@/components/primitives';
 import { buyNow, placeBid } from '@/app/actions';
+import type { SerialBalances } from '@/db/read';
 import { convert, formatRate } from '@/core/fx';
 import { type Asset, formatUnits, type BaseUnits } from '@/core/money';
 import { formatPercent, priceFromPercent, quote } from '@/core/pricing';
@@ -40,7 +41,7 @@ export function BidPanel({
   daysRemaining: number;
   wallet: string;
   eligible: boolean;
-  balances: Record<string, string>;
+  balances: SerialBalances;
   xsgdPerXusdE6: string;
   isSeller: boolean;
 }) {
@@ -62,11 +63,11 @@ export function BidPanel({
     const bps = Math.round(parsed * 100);
     const price = priceFromPercent(face, bps);
     const q = quote(face, price, daysRemaining);
-    const debit = convert(price, asset, rate).sourceDebit;
-    return { price, q, debit };
+    const conversion = convert(price, asset, rate);
+    return { price, q, debit: conversion.sourceDebit, applied: conversion.rate };
   }, [valid, parsed, face, daysRemaining, asset, rate]);
 
-  const available = BigInt(balances[asset] ?? '0');
+  const available = BigInt(balances[asset]);
   const short = priced !== null && available < priced.debit;
 
   // Buy-now is charged at the seller's published price, not at whatever is
@@ -206,7 +207,9 @@ export function BidPanel({
               {formatPercent(priced.q.lenderYieldPercent, 1)} over {daysRemaining} days
             </Line>
             <div className="my-1 border-t border-rule" />
-            <Line label="Conversion">{asset === 'XSGD' ? formatRate(rate) : '1:1 with XUSD'}</Line>
+            <Line label="Conversion">
+              {priced.applied === null ? '1:1 with XUSD' : formatRate(priced.applied)}
+            </Line>
             <Line label={`Debited from you (${asset})`}>
               <strong>{formatUnits(priced.debit, 4)}</strong> {asset}
             </Line>

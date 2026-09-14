@@ -204,6 +204,17 @@ export async function readUsers(): Promise<UserRow[]> {
 
 export type Balances = Record<Asset, BaseUnits>;
 
+/**
+ * The same four balances as strings, for a client component. bigint cannot
+ * cross the server-to-client boundary, and typing the map by Asset means a
+ * panel cannot be handed three balances and quietly read the fourth as zero.
+ */
+export type SerialBalances = Record<Asset, string>;
+
+export function serializeBalances(b: Balances): SerialBalances {
+  return { XUSD: b.XUSD.toString(), USDC: b.USDC.toString(), USDT: b.USDT.toString(), XSGD: b.XSGD.toString() };
+}
+
 const ZERO_BALANCES = (): Balances => ({
   XUSD: 0n as BaseUnits,
   USDC: 0n as BaseUnits,

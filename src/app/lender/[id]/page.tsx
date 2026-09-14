@@ -22,6 +22,7 @@ import {
   readListing,
   readSeriesMembers,
   readWorld,
+  serializeBalances,
 } from '@/db/read';
 
 /**
@@ -302,12 +303,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
             daysRemaining={listing.quote.daysRemaining}
             wallet={persona.wallet}
             eligible={persona.institutionalEligible}
-            balances={{
-              XUSD: balances.XUSD.toString(),
-              USDC: balances.USDC.toString(),
-              USDT: balances.USDT.toString(),
-              XSGD: balances.XSGD.toString(),
-            }}
+            balances={serializeBalances(balances)}
             xsgdPerXusdE6={world.xsgdPerXusdE6.toString()}
             isSeller={persona.wallet === listing.sellerWallet}
           />

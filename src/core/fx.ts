@@ -11,7 +11,7 @@
  * instance.
  */
 
-import { type Asset, type BaseUnits, mulDivRound } from './money';
+import { type Asset, type BaseUnits, mulDivRound, roundDiv } from './money';
 
 /**
  * XSGD per 1 XUSD, scaled by {@link RATE_SCALE}.
@@ -66,7 +66,7 @@ export interface Conversion {
 export function convert(
   obligationXusd: BaseUnits,
   fundingAsset: Asset,
-  rate: XsgdPerXusdRate = DEFAULT_XSGD_PER_XUSD,
+  rate: XsgdPerXusdRate,
 ): Conversion {
   if (fundingAsset !== 'XSGD') {
     return {
@@ -93,6 +93,6 @@ export function convert(
 
 /** Render a scaled rate to four decimals, e.g. "1 XUSD = 1.3100 XSGD". */
 export function formatRate(rate: XsgdPerXusdRate): string {
-  const e4 = (rate + 50n) / 100n;
+  const e4 = roundDiv(rate, 100n);
   return `1 XUSD = ${e4 / 10_000n}.${(e4 % 10_000n).toString().padStart(4, '0')} XSGD`;
 }

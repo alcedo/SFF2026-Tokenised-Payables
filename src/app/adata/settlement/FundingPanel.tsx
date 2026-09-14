@@ -14,10 +14,11 @@ import { useState } from 'react';
 
 import { ActionButton } from '@/components/ActionButton';
 import { AssetPicker } from '@/components/AssetPicker';
-import { Field, Notice } from '@/components/primitives';
+import { Amount, Field, Notice } from '@/components/primitives';
 import { settleMaturity } from '@/app/actions';
 import { convert, formatRate } from '@/core/fx';
 import { type Asset, type BaseUnits, formatUnits } from '@/core/money';
+import type { SerialBalances } from '@/db/read';
 
 export function FundingPanel({
   payableId,
@@ -29,17 +30,16 @@ export function FundingPanel({
   payableId: string;
   outstandingBase: string;
   holderCount: number;
-  balances: Record<string, string>;
+  balances: SerialBalances;
   xsgdPerXusdE6: string;
 }) {
   const [asset, setAsset] = useState<Asset>('XUSD');
 
   const outstanding = BigInt(outstandingBase) as BaseUnits;
-  const rate = BigInt(xsgdPerXusdE6);
-  const debit = convert(outstanding, asset, rate).sourceDebit;
-  const available = BigInt(balances[asset] ?? '0') as BaseUnits;
+  const conversion = convert(outstanding, asset, BigInt(xsgdPerXusdE6));
+  const debit = conversion.sourceDebit;
+  const available = BigInt(balances[asset]) as BaseUnits;
   const short = available < debit;
-  const decimals = asset === 'XSGD' ? 4 : 2;
   const holders = holderCount === 1 ? 'the holder' : `all ${holderCount} holders`;
 
   return (
@@ -47,14 +47,15 @@ export function FundingPanel({
       <div className="py-1.5">
         <AssetPicker value={asset} onChange={setAsset} />
       </div>
-      {asset === 'XSGD' ? <Field label="Conversion">{formatRate(rate)}</Field> : null}
+      {conversion.rate === null ? null : <Field label="Conversion">{formatRate(conversion.rate)}</Field>}
       <Field label="Source debit">
-        <strong>{formatUnits(debit, decimals)}</strong> {asset}
+        <strong>
+          <Amount value={debit} decimals={4} />
+        </strong>{' '}
+        {asset}
       </Field>
       <Field label={`ADATA ${asset} balance`}>
-        <span className={short ? 'text-critical' : ''}>
-          {formatUnits(available, 2)} {asset}
-        </span>
+        <Amount value={available} decimals={2} className={short ? 'text-critical' : ''} /> {asset}
       </Field>
 
       {short ? (
@@ -69,8 +70,8 @@ export function FundingPanel({
           label="Fund settlement"
           confirm={
             <>
-              Debits ADATA {formatUnits(debit, decimals)} {asset} and credits {holders}{' '}
-              {formatUnits(outstanding, 2)} XUSD in one operation. The payable is then settled
+              Debits ADATA {formatUnits(debit, 4)} {asset} and credits {holders}{' '}
+              {formatUnits(outstanding, 4)} XUSD in one operation. The payable is then settled
               and cannot move again.
             </>
           }
