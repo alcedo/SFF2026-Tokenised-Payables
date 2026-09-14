@@ -76,7 +76,7 @@ export default async function SettlementPage() {
                 </span>
               }
             >
-              <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
                 <div>
                   <p className="mb-2 text-[11.5px] text-ink-muted">
                     {holders.length === 1

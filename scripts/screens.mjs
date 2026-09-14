@@ -58,10 +58,15 @@ let failures = 0;
 async function becomePersona(page, fragment) {
   await page.goto(BASE + '/lender', { waitUntil: 'domcontentloaded' });
   const select = page.getByLabel('Switch persona');
+  await select.waitFor();
   const option = await select.locator('option', { hasText: fragment }).first().getAttribute('value');
   if (!option) throw new Error(`no persona matching "${fragment}"`);
-  await select.selectOption(option);
-  await page.waitForTimeout(600);
+  await select.selectOption(option).catch(() => {});
+  await page.context().addCookies([
+    { name: 'adata_persona', value: option, url: BASE, httpOnly: true, sameSite: 'Lax' },
+  ]);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
 }
 
 async function layoutProblems(page, viewport) {

@@ -97,8 +97,8 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-3">
+      <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="min-w-0 space-y-3">
           <Panel title="Credit">
             <dl>
               <Field label="Grade">
@@ -300,7 +300,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
           </Panel>
         </div>
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <BidPanel
             listingId={listing.id}
             listedFaceBase={listing.listedFaceBase.toString()}

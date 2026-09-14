@@ -53,7 +53,7 @@ export default async function CertificationPage() {
 
         return (
           <Panel key={i.id} title={i.name}>
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
               <dl>
                 <Field label="Entity type">Anchor buyer / issuer</Field>
                 <Field label="Certification status">

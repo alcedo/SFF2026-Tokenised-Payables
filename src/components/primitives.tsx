@@ -197,9 +197,9 @@ export function Stat({
 /** A field in a detail panel. */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-rule py-1.5 last:border-b-0">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-b border-rule py-1.5 last:border-b-0">
       <dt className="shrink-0 text-[11.5px] text-ink-muted">{label}</dt>
-      <dd className="min-w-0 text-right text-[12.5px] text-ink">{children}</dd>
+      <dd className="min-w-0 max-w-full text-right text-[12.5px] break-words text-ink">{children}</dd>
     </div>
   );
 }
