@@ -53,8 +53,8 @@ BEGIN
       'intent', jsonb_build_object('kind','transfer','payableId',PAYABLE,'fromWallet',SUPP,
                                    'toWallet',BANK,'quantityBase', FACE + 1)));
     RAISE EXCEPTION 'FAIL: transferred more than the holder owns';
-  EXCEPTION WHEN check_violation THEN
-    RAISE NOTICE 'PASS  over-quantity transfer refused by the balance CHECK';
+  EXCEPTION WHEN sqlstate 'ADA21' OR check_violation THEN
+    RAISE NOTICE 'PASS  over-quantity transfer refused, naming the shortfall';
   END;
   SELECT SUM(balance) INTO v_after FROM ledger.account_balance b
     JOIN ledger.account a ON a.id=b.account_id WHERE a.wallet_address=SUPP;
@@ -87,7 +87,7 @@ BEGIN
                                    'payableId',PAYABLE,'sellerWallet',SUPP,
                                    'quantityBase', 2000000000, 'minPriceBase', 1957000000)));
     RAISE EXCEPTION 'FAIL: listed more than the seller holds free';
-  EXCEPTION WHEN check_violation OR unique_violation THEN
+  EXCEPTION WHEN sqlstate 'ADA21' OR check_violation OR unique_violation THEN
     RAISE NOTICE 'PASS  over-committing beyond the free balance is refused';
   END;
 

@@ -122,6 +122,7 @@ END $$;
 -- the only rows two operations contend for is what makes deadlock impossible.
 CREATE OR REPLACE FUNCTION ledger.post_legs(p_entry uuid, p_legs ledger.leg_spec[])
 RETURNS void LANGUAGE plpgsql AS $$
+DECLARE v_short RECORD;
 BEGIN
   INSERT INTO ledger.account_balance (account_id, asset_id, class, balance)
   SELECT DISTINCT l.account_id, l.asset_id, a.class, 0
@@ -134,6 +135,36 @@ BEGIN
    WHERE (b.account_id, b.asset_id) IN (SELECT l.account_id, l.asset_id FROM unnest(p_legs) l)
    ORDER BY b.account_id, b.asset_id
      FOR UPDATE;
+
+  -- Under the locks just taken, the resulting balances are knowable, so a
+  -- shortfall can be named precisely. The wallet_balance_non_negative CHECK
+  -- would catch it either way, but one CHECK covers every asset, so a bare
+  -- constraint violation cannot say whether a wallet ran out of dollars or ran
+  -- out of payable. The caller has to tell a lender "you no longer have the
+  -- funds" apart from "that is more than you hold", so the distinction is drawn
+  -- here, where the asset kind is in hand. The CHECK stays as the backstop for
+  -- anything that reaches the table by another route.
+  SELECT a.wallet_address, s.kind, b.balance, d.delta
+    INTO v_short
+    FROM (SELECT account_id, asset_id, SUM(amount) AS delta
+            FROM unnest(p_legs) GROUP BY 1, 2) d
+    JOIN ledger.account_balance b ON b.account_id = d.account_id AND b.asset_id = d.asset_id
+    JOIN ledger.account a ON a.id = d.account_id
+    JOIN ledger.asset   s ON s.id = d.asset_id
+   WHERE a.class = 'wallet' AND b.balance + d.delta < 0
+   ORDER BY a.wallet_address
+   LIMIT 1;
+  IF FOUND THEN
+    IF v_short.kind = 'cash' THEN
+      RAISE EXCEPTION 'wallet % is short % of the funding asset',
+        v_short.wallet_address, -(v_short.balance + v_short.delta)
+        USING ERRCODE = 'ADA20';
+    ELSE
+      RAISE EXCEPTION 'wallet % holds % unlisted, needs %',
+        v_short.wallet_address, v_short.balance, -v_short.delta
+        USING ERRCODE = 'ADA21';
+    END IF;
+  END IF;
 
   -- Legs carrying the same (account, asset) are summed rather than inserted
   -- separately: a maturity settlement where one wallet holds two slices of the
