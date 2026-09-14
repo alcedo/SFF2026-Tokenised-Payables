@@ -47,4 +47,8 @@ SELECT ledger.post(jsonb_build_object(
   'idempotencyKey','00000000-0000-0000-0000-000000000001','actorUserId','11111111-0000-0000-0000-000000000001',
   'intent', jsonb_build_object('kind','issue_payable','payableId','9a000000-0000-0000-0000-000000000141',
                                'toWallet','0x509911000000000000000000000000000000f88a','tokenId', 141)));
+-- PRD section 3 question 7: the supplier takes delivery from the inbox.
+SELECT ledger.post(jsonb_build_object(
+  'idempotencyKey','00000000-0000-0000-0000-0000000000ac','actorUserId','11111111-0000-0000-0000-000000000003',
+  'intent', jsonb_build_object('kind','accept_receipt','payableId','9a000000-0000-0000-0000-000000000141')));
 \set QUIET off

@@ -27,12 +27,13 @@ Section 3 question 7 says the supplier "will have an option to accept the
 tokenised payable or reject it". The section 7 lifecycle diagram has no state
 for it, and no section says what a rejection does to the obligation.
 
-**Built:** acceptance is receipt state on the first holding (`pending`,
-`accepted`, `rejected`), not a lifecycle state, so the obligation diagram stays
-exactly as section 7 draws it. A pending payable is visible in the inbox but not
-listable or transferable. Rejection returns the full quantity to the ADATA
-treasury wallet and records an event; the obligation stays `issued` with ADATA as
-the holder.
+**Built:** `app.payable.receipt_status` (`pending`, `accepted`, `rejected`), set
+to `pending` at issuance. It is delivery state on the payable, not a lifecycle
+state, so the section 7 obligation diagram stays exactly as the PRD draws it. A
+pending payable appears in the supplier's inbox with Accept and Decline, and
+cannot be listed or transferred until accepted. Declining returns the full
+quantity to the anchor's wallet and records an event; the obligation stays
+`issued`, held by ADATA.
 
 **Why this way:** returning the quantity keeps the section 13 rule that holdings
 sum to outstanding face. Burning it would break that rule, and section 4 puts

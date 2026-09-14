@@ -11,6 +11,8 @@ import {
   Stat,
   StatusChip,
 } from '@/components/primitives';
+import { ActionButton } from '@/components/ActionButton';
+import { acceptReceipt, rejectReceipt } from '@/app/actions';
 import { currentPersona } from '@/app/session';
 import { formatUnits } from '@/core/money';
 import { priceFromPercent, quote } from '@/core/pricing';
@@ -89,7 +91,7 @@ export default async function SupplierPage() {
                 </span>
               }
               action={
-                live && h.freeBase > 0n ? (
+                h.receipt === 'pending' ? null : live && h.freeBase > 0n ? (
                   <Link
                     href={`/supplier/finance/${h.payable.id}`}
                     className="rounded-[3px] bg-accent px-2 py-1 text-[11.5px] font-medium text-white hover:bg-accent-hover"
@@ -99,6 +101,32 @@ export default async function SupplierPage() {
                 ) : null
               }
             >
+              {/* PRD §3 question 7 and §8 screen 6: the inbox. A payable the
+                  supplier has not taken delivery of is visible but not yet
+                  actionable, and they may decline it. */}
+              {h.receipt === 'pending' ? (
+                <div className="mb-3 rounded-[4px] border border-caution/30 bg-caution-soft p-3">
+                  <h3 className="text-[12.5px] font-semibold text-caution">
+                    Awaiting your acceptance
+                  </h3>
+                  <p className="mt-0.5 mb-2 text-[12px] text-ink">
+                    {h.payable.anchorName} has issued this payable to your wallet. Accept it to hold
+                    or finance it. Declining returns the full quantity to {h.payable.anchorName};
+                    the obligation itself does not go away.
+                  </p>
+                  <div className="flex flex-wrap items-start gap-3">
+                    <ActionButton label="Accept" action={acceptReceipt} args={[h.payable.id]} />
+                    <ActionButton
+                      label="Decline"
+                      variant="secondary"
+                      confirm={`Returns all ${formatUnits(h.quantityBase, 2)} XUSD of face to ${h.payable.anchorName}. You cannot undo this.`}
+                      action={rejectReceipt}
+                      args={[h.payable.id, persona.wallet]}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
               <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
                 <div>
                   <table className="ledger">

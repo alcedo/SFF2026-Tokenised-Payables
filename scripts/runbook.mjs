@@ -113,6 +113,13 @@ try {
   // ----------------------------------------------------------------- 2. list
   await become('Tang Mei-Hua');
   await page.goto(`${BASE}/supplier`, { waitUntil: 'domcontentloaded' });
+  // PRD §3 question 7: the payable lands in an inbox and must be accepted.
+  await expectText('Awaiting your acceptance', 'the supplier inbox');
+  await shot('supplier-inbox');
+  await clickThrough('Accept');
+  await say('supplier takes delivery from the inbox');
+
+  await page.goto(`${BASE}/supplier`, { waitUntil: 'domcontentloaded' });
   await expectText('8.7%', 'the supplier dashboard');
   await expectText('244,625.00', 'the supplier dashboard');
   await expectText('18.0%', 'the supplier dashboard');

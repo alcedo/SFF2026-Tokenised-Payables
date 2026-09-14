@@ -288,6 +288,24 @@ ALTER TABLE ledger.asset
 -- illegal transition a database error; core/lifecycle.ts makes it a type error.
 -- Two layers on purpose: the type stops the contributor, the trigger stops the
 -- migration script and the psql session.
+-- PRD §3 question 7: "Supplier will have an option to accept the tokenised
+-- payable or reject it." The section 7 lifecycle diagram has no state for this
+-- and the PRD never says what a rejection does to the obligation, so acceptance
+-- is modelled as delivery state on the payable rather than as a lifecycle state.
+-- That keeps the obligation diagram exactly as the PRD draws it.
+--
+-- A rejection returns the full quantity to the anchor's wallet. Burning it
+-- would break the section 13 rule that holdings sum to outstanding face, and
+-- section 4 puts operational cancellation out of scope, so there is no
+-- cancelled state to move to.
+CREATE TYPE app.receipt_status AS ENUM ('pending', 'accepted', 'rejected');
+ALTER TABLE app.payable ADD COLUMN receipt_status app.receipt_status;
+-- INVARIANT: receipt state exists exactly for a payable that has been issued.
+ALTER TABLE app.payable ADD CONSTRAINT receipt_only_once_issued CHECK (
+  (lifecycle_status IN ('draft','pending_approval','approved','certified') AND receipt_status IS NULL)
+  OR (lifecycle_status IN ('issued','settled') AND receipt_status IS NOT NULL)
+);
+
 CREATE TABLE app.lifecycle_edge (
   from_state  app.obligation_state NOT NULL,
   to_state    app.obligation_state NOT NULL,
@@ -409,9 +427,9 @@ CREATE TYPE ledger.entry_kind AS ENUM (
   -- legless: application events
   'payable_created', 'submitted_for_approval', 'approved', 'certified',
   'graded', 'listing_published', 'listing_cancelled', 'bid_placed',
-  'bid_withdrawn', 'clock_advanced', 'world_reset',
+  'bid_withdrawn', 'clock_advanced', 'world_reset', 'receipt_accepted',
   -- legged: chain-relevant actions
-  'issuance', 'top_up', 'transfer', 'trade_settlement', 'redemption'
+  'issuance', 'receipt_rejected', 'top_up', 'transfer', 'trade_settlement', 'redemption'
 );
 CREATE TYPE ledger.chain_status AS ENUM ('not_applicable', 'pending', 'confirmed', 'failed');
 

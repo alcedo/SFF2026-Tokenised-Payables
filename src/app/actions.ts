@@ -141,6 +141,19 @@ export async function issuePayable(
   return run({ kind: 'issue_payable', payableId, toWallet, tokenId }, key);
 }
 
+/** PRD §3 question 7: the supplier decides whether to take delivery. */
+export async function acceptReceipt(payableId: string, key?: string): Promise<ActionResult> {
+  return run({ kind: 'accept_receipt', payableId }, key);
+}
+
+export async function rejectReceipt(
+  payableId: string,
+  holderWallet: string,
+  key?: string,
+): Promise<ActionResult> {
+  return run({ kind: 'reject_receipt', payableId, holderWallet }, key);
+}
+
 export async function settleMaturity(payableId: string, key?: string): Promise<ActionResult> {
   // A deterministic key, because a settlement sweep has no dialog to mint one
   // and a retry after a crash must not pay twice.

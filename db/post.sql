@@ -260,6 +260,8 @@ BEGIN
   -- asks for; kinds are what the journal records.
   v_entry_kind := CASE v_kind
     WHEN 'issue_payable'  THEN 'issuance'
+    WHEN 'accept_receipt' THEN 'receipt_accepted'
+    WHEN 'reject_receipt' THEN 'receipt_rejected'
     WHEN 'top_up'         THEN 'top_up'
     WHEN 'transfer'       THEN 'transfer'
     WHEN 'publish_listing' THEN 'listing_published'
@@ -318,7 +320,10 @@ BEGIN
       ROW(ledger.system_account('system_unissued'), v_asset, -v_payable.face_base)::ledger.leg_spec,
       ROW(ledger.wallet_account(v_intent->>'toWallet', 'wallet_free'), v_asset, v_payable.face_base)::ledger.leg_spec
     ];
-    UPDATE app.payable SET lifecycle_status = 'issued', issue_date = v_world.t0 + v_world.offset_days
+    UPDATE app.payable
+       SET lifecycle_status = 'issued',
+           issue_date = v_world.t0 + v_world.offset_days,
+           receipt_status = 'pending'
      WHERE id = v_payable.id;
 
   ELSIF v_kind = 'top_up' THEN
@@ -341,6 +346,10 @@ BEGIN
     END IF;
     IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
       RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
+    END IF;
+    IF v_payable.receipt_status = 'pending' THEN
+      RAISE EXCEPTION 'payable % has not been accepted by its supplier yet', v_payable.ref
+        USING ERRCODE = 'ADA15';
     END IF;
     v_legs := ARRAY[
       ROW(ledger.wallet_account(v_intent->>'fromWallet', 'wallet_free'), v_asset, -v_qty)::ledger.leg_spec,
@@ -396,6 +405,12 @@ BEGIN
       END IF;
       IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
         RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
+      END IF;
+      -- PRD §8 screen 6 presents an inbox: a payable the supplier has not yet
+      -- accepted is visible but not yet actionable.
+      IF v_payable.receipt_status = 'pending' THEN
+        RAISE EXCEPTION 'payable % has not been accepted by its supplier yet', v_payable.ref
+          USING ERRCODE = 'ADA15';
       END IF;
       INSERT INTO app.listing (id, target_kind, target_payable_id, seller_wallet,
                                min_price_base, buy_now_price_base, status)
@@ -597,6 +612,32 @@ BEGIN
       RAISE EXCEPTION 'the demo clock only moves forward' USING ERRCODE = 'ADA19';
     END IF;
     UPDATE app.world SET offset_days = offset_days + v_days WHERE only_row;
+
+  ELSIF v_kind IN ('accept_receipt', 'reject_receipt') THEN
+    SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
+    IF v_payable.receipt_status <> 'pending' THEN
+      RAISE EXCEPTION 'payable % was already %', v_payable.ref, v_payable.receipt_status
+        USING ERRCODE = 'ADA15';
+    END IF;
+    v_asset := ledger.payable_asset(v_payable.id);
+
+    IF v_kind = 'accept_receipt' THEN
+      UPDATE app.payable SET receipt_status = 'accepted' WHERE id = v_payable.id;
+    ELSE
+      -- Return the whole quantity to the anchor. The obligation still exists
+      -- and still matures; it is simply held by ADATA rather than the supplier.
+      SELECT address INTO v_anchor_wallet FROM app.wallet WHERE entity_id = v_payable.anchor_id LIMIT 1;
+      SELECT COALESCE(b.balance, 0) INTO v_qty
+        FROM ledger.account_balance b
+        JOIN ledger.account a ON a.id = b.account_id
+       WHERE a.wallet_address = v_intent->>'holderWallet'
+         AND a.purpose = 'wallet_free' AND b.asset_id = v_asset;
+      UPDATE app.payable SET receipt_status = 'rejected' WHERE id = v_payable.id;
+      v_legs := ARRAY[
+        ROW(ledger.wallet_account(v_intent->>'holderWallet', 'wallet_free'), v_asset, -v_qty)::ledger.leg_spec,
+        ROW(ledger.wallet_account(v_anchor_wallet, 'wallet_free'), v_asset, v_qty)::ledger.leg_spec
+      ];
+    END IF;
 
   ELSIF v_kind = 'create_payable' THEN
     -- Importing from the ERP mock rather than typing an invoice by hand is the

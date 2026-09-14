@@ -97,6 +97,57 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS  the full face issues to the supplier wallet';
 
+  -- PRD §3 question 7: the payable lands in an inbox, not in a tradeable
+  -- position, and the supplier decides whether to take delivery.
+  IF (SELECT receipt_status FROM app.payable WHERE id=v_id) <> 'pending' THEN
+    RAISE EXCEPTION 'FAIL: an issued payable should await acceptance';
+  END IF;
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','aaaa0000-0000-0000-0000-000000000009','actorUserId',PREP,
+      'intent', jsonb_build_object('kind','publish_listing','payableId',v_id,
+        'sellerWallet',SUPP,'quantityBase',1000000000,'minPriceBase',970000000)));
+    RAISE EXCEPTION 'FAIL: an unaccepted payable was listed';
+  EXCEPTION WHEN sqlstate 'ADA15' THEN
+    RAISE NOTICE 'PASS  a payable awaiting acceptance cannot be listed';
+  END;
+
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','aaaa0000-0000-0000-0000-00000000000a','actorUserId',PREP,
+    'intent', jsonb_build_object('kind','accept_receipt','payableId',v_id)));
+  IF (SELECT receipt_status FROM app.payable WHERE id=v_id) <> 'accepted' THEN
+    RAISE EXCEPTION 'FAIL: acceptance did not take';
+  END IF;
+  RAISE NOTICE 'PASS  the supplier accepts delivery and the payable becomes tradeable';
+
+  -- Declining returns the whole quantity to the anchor rather than burning it,
+  -- so holdings still sum to outstanding face.
+  DECLARE
+    v_other uuid;
+    v_anchor text;
+  BEGIN
+    -- TP-2026-0119 is held outright; the other seeded payables have their
+    -- quantity escrowed against an open listing, which cannot be declined.
+    SELECT id INTO v_other FROM app.payable WHERE ref = 'TP-2026-0119';
+    SELECT address INTO v_anchor FROM app.wallet w JOIN app.entity e ON e.id = w.entity_id
+     WHERE e.entity_type = 'anchor';
+    -- Reset that payable's receipt so the decline path can be exercised.
+    UPDATE app.payable SET receipt_status = 'pending' WHERE id = v_other;
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','aaaa0000-0000-0000-0000-00000000000b','actorUserId',ADMIN,
+      'intent', jsonb_build_object('kind','reject_receipt','payableId',v_other,
+        'holderWallet','0x5f0451000000000000000000000000000000c119')));
+    IF (SELECT SUM(quantity_base) FROM ledger.v_holding WHERE payable_id = v_other)
+       <> (SELECT face_base FROM app.payable WHERE id = v_other) THEN
+      RAISE EXCEPTION 'FAIL: a declined payable no longer sums to its face';
+    END IF;
+    IF (SELECT quantity_base FROM ledger.v_holding
+         WHERE payable_id = v_other AND wallet_address = v_anchor) IS NULL THEN
+      RAISE EXCEPTION 'FAIL: a declined payable did not return to the anchor';
+    END IF;
+    RAISE NOTICE 'PASS  declining returns the full quantity to the anchor, face intact';
+  END;
+
   -- Every step above is attributable, which PRD section 14 requires.
   IF (SELECT count(*) FROM ledger.journal_entry e
        WHERE e.payable_id = v_id AND e.actor_user_id IS NOT NULL) < 6 THEN

@@ -135,6 +135,8 @@ export interface PayableRow {
   seriesRef: string | null;
   /** Stored state, before the clock is applied. */
   storedStatus: LifecycleStatus;
+  /** Whether the first holder has taken delivery. PRD section 3 question 7. */
+  receipt: ReceiptStatus | null;
   /** What the clock says it is now. This is what a screen shows. */
   status: LifecycleStatus;
   daysRemaining: number;
@@ -143,7 +145,7 @@ export interface PayableRow {
 
 const PAYABLE_SELECT = `
   SELECT p.id, p.ref, p.invoice_ref, p.face_base, p.issue_date, p.maturity_date,
-         p.grade, p.grade_rationale, p.lifecycle_status,
+         p.grade, p.grade_rationale, p.lifecycle_status, p.receipt_status,
          anchor.name AS anchor_name, supplier.name AS supplier_name,
          ast.token_id::text AS token_id, s.ref AS series_ref,
          COALESCE(sup.outstanding_base, 0) AS outstanding_base
@@ -164,6 +166,7 @@ interface RawPayable {
   grade: 'AAA' | 'AA' | 'A' | null;
   grade_rationale: string | null;
   lifecycle_status: LifecycleStatus;
+  receipt_status: ReceiptStatus | null;
   anchor_name: string;
   supplier_name: string;
   token_id: string | null;
@@ -195,6 +198,7 @@ function toPayable(r: RawPayable, world: World): PayableRow {
     tokenId: r.token_id,
     seriesRef: r.series_ref,
     storedStatus: r.lifecycle_status,
+    receipt: r.receipt_status,
     status,
     daysRemaining: days,
     tenorDays: issue ? daysBetween(issue, maturity) : null,
@@ -281,9 +285,7 @@ export async function readHoldings(wallet: string, world: World): Promise<Holdin
     freeBase: fromBaseUnits(r.free_base),
     listedBase: fromBaseUnits(r.listed_base),
     costBase: r.cost_base === null ? null : fromBaseUnits(r.cost_base),
-    // Acceptance is not yet wired to a column; the first holder of an issued
-    // payable is treated as having accepted. See docs/ASSUMPTIONS.md.
-    receipt: 'accepted' as ReceiptStatus,
+    receipt: r.receipt_status ?? 'accepted',
   }));
 }
 

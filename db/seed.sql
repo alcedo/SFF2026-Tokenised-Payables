@@ -107,9 +107,13 @@ INSERT INTO app.payable (id, ref, anchor_id, original_supplier_id, invoice_ref,
 SELECT pg_temp.act('issue-0128', '11111111-0000-0000-0000-000000000008',
   jsonb_build_object('kind','issue_payable','payableId','9a000000-0000-0000-0000-000000000128',
                      'toWallet','0x7009e5000000000000000000000000000000d128','tokenId', 128));
+SELECT pg_temp.act('receipt-0128', '11111111-0000-0000-0000-000000000004',
+  jsonb_build_object('kind','accept_receipt','payableId',(SELECT id FROM app.payable WHERE ref='TP-2026-0128')));
 SELECT pg_temp.act('issue-0119', '11111111-0000-0000-0000-000000000008',
   jsonb_build_object('kind','issue_payable','payableId','9a000000-0000-0000-0000-000000000119',
                      'toWallet','0x5f0451000000000000000000000000000000c119','tokenId', 119));
+SELECT pg_temp.act('receipt-0119', '11111111-0000-0000-0000-000000000003',
+  jsonb_build_object('kind','accept_receipt','payableId',(SELECT id FROM app.payable WHERE ref='TP-2026-0119')));
 
 -- 17 June: Yung Sheng finances TP-2026-0128, 90 days out, at 97.78% of face.
 -- 312,900 against 320,000 face over 90 days is a 9.2% realised yield, which is
@@ -162,12 +166,18 @@ INSERT INTO app.payable (id, ref, anchor_id, original_supplier_id, invoice_ref,
 SELECT pg_temp.act('issue-0143', '11111111-0000-0000-0000-000000000008',
   jsonb_build_object('kind','issue_payable','payableId','9a000000-0000-0000-0000-000000000143',
                      'toWallet','0x6d1470000000000000000000000000000000b43c','tokenId', 143));
+SELECT pg_temp.act('receipt-0143', '11111111-0000-0000-0000-000000000004',
+  jsonb_build_object('kind','accept_receipt','payableId',(SELECT id FROM app.payable WHERE ref='TP-2026-0143')));
 SELECT pg_temp.act('issue-0141', '11111111-0000-0000-0000-000000000008',
   jsonb_build_object('kind','issue_payable','payableId','9a000000-0000-0000-0000-000000000141',
                      'toWallet','0x509911000000000000000000000000000000f88a','tokenId', 141));
+SELECT pg_temp.act('receipt-0141', '11111111-0000-0000-0000-000000000003',
+  jsonb_build_object('kind','accept_receipt','payableId',(SELECT id FROM app.payable WHERE ref='TP-2026-0141')));
 SELECT pg_temp.act('issue-0142', '11111111-0000-0000-0000-000000000008',
   jsonb_build_object('kind','issue_payable','payableId','9a000000-0000-0000-0000-000000000142',
                      'toWallet','0x4851ca000000000000000000000000000000e42d','tokenId', 142));
+SELECT pg_temp.act('receipt-0142', '11111111-0000-0000-0000-000000000005',
+  jsonb_build_object('kind','accept_receipt','payableId',(SELECT id FROM app.payable WHERE ref='TP-2026-0142')));
 
 -- The seeded asks from PRD §12. Yields follow from the remaining days.
 SELECT pg_temp.act('list-0143', '11111111-0000-0000-0000-000000000004',
@@ -245,6 +255,9 @@ BEGIN
     PERFORM pg_temp.act('issue-series-' || i, '11111111-0000-0000-0000-000000000008',
       jsonb_build_object('kind','issue_payable','payableId', v_payable,
                          'toWallet', v_holder, 'tokenId', 500 + i));
+    -- The holder takes delivery, as a supplier would from their inbox.
+    PERFORM pg_temp.act('receipt-series-' || i, '11111111-0000-0000-0000-000000000004',
+      jsonb_build_object('kind','accept_receipt','payableId', v_payable));
   END LOOP;
 END $$;
 

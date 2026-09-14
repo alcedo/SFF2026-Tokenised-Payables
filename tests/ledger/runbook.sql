@@ -68,6 +68,11 @@ SELECT ledger.post(jsonb_build_object(
                                'tokenId', 141)
 )) -> 'receipt' -> 'simulated' AS issue_has_simulated_receipt;
 
+-- PRD section 3 question 7: the supplier takes delivery from the inbox.
+SELECT ledger.post(jsonb_build_object(
+  'idempotencyKey','00000000-0000-0000-0000-0000000000ac','actorUserId','11111111-0000-0000-0000-000000000003',
+  'intent', jsonb_build_object('kind','accept_receipt','payableId','9a000000-0000-0000-0000-000000000141')));
+
 \echo '-- supplier holds the full face --'
 SELECT wallet_address, quantity_base, free_base, listed_base FROM ledger.v_holding;
 

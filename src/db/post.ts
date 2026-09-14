@@ -24,6 +24,8 @@ import type { Asset, BaseUnits } from '@/core/money';
 export type Intent =
   | { kind: 'create_payable'; erpInvoiceId: string; ref: string; payableId?: string }
   | { kind: 'issue_payable'; payableId: string; toWallet: string; tokenId: number }
+  | { kind: 'accept_receipt'; payableId: string }
+  | { kind: 'reject_receipt'; payableId: string; holderWallet: string }
   | { kind: 'top_up'; wallet: string; cashCode: Asset; amountBase: BaseUnits }
   | { kind: 'transfer'; payableId: string; fromWallet: string; toWallet: string; quantityBase: BaseUnits }
   | {
