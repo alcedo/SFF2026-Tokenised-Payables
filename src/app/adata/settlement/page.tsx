@@ -5,6 +5,7 @@ import {
   DaysRemaining,
   EmptyState,
   Field,
+  LedgerScroll,
   Panel,
   StatusChip,
 } from '@/components/primitives';
@@ -75,13 +76,14 @@ export default async function SettlementPage() {
                 </span>
               }
             >
-              <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
                 <div>
                   <p className="mb-2 text-[11.5px] text-ink-muted">
                     {holders.length === 1
                       ? 'One current holder.'
                       : `${holders.length} current holders. Each is credited the face of the quantity they hold.`}
                   </p>
+                  <LedgerScroll label="Holders">
                   <table className="ledger">
                     <thead>
                       <tr>
@@ -111,6 +113,7 @@ export default async function SettlementPage() {
                       ))}
                     </tbody>
                   </table>
+                  </LedgerScroll>
                 </div>
 
                 <div className="space-y-2">

@@ -5,6 +5,7 @@ import {
   DaysRemaining,
   EmptyState,
   GradeBadge,
+  LedgerScroll,
   MarketChip,
   Panel,
   Percent,
@@ -128,7 +129,8 @@ export default async function SupplierPage() {
               ) : null}
 
               <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-                <div>
+                <div className="min-w-0">
+                  <LedgerScroll label="Holding facts">
                   <table className="ledger">
                     <tbody>
                       <tr>
@@ -175,6 +177,7 @@ export default async function SupplierPage() {
                       </tr>
                     </tbody>
                   </table>
+                  </LedgerScroll>
                 </div>
 
                 {/* The financing comparison PRD §2 requires on this screen. */}

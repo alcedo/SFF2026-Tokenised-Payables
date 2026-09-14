@@ -6,6 +6,11 @@
  * compile perfectly. This drives the real app in a real browser and treats a
  * console error, a failed request or a non-200 as a failure.
  *
+ * Viewports are set with `newContext({ viewport })` and never `isMobile`.
+ * Playwright's mobile flag lies about innerWidth. Phone, tablet, and desktop
+ * each get a real width so a document pan cannot hide behind a desktop-only
+ * check. html/body must not clip overflow-x; the layout has to fit instead.
+ *
  *   node scripts/screens.mjs            check every screen
  *   node scripts/screens.mjs --shots    also write a PNG of each
  */
@@ -17,7 +22,19 @@ const BASE = process.env.APP_URL ?? 'http://127.0.0.1:3100';
 const SHOTS = process.argv.includes('--shots');
 const OUT = 'out/screens';
 
-const EXECUTABLE = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const CHROMIUM_CANDIDATES = [
+  process.env.CHROMIUM_PATH,
+  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  '/usr/bin/google-chrome',
+].filter(Boolean);
+
+const EXECUTABLE = CHROMIUM_CANDIDATES.find((p) => existsSync(p));
+
+const VIEWPORTS = [
+  { name: 'phone', width: 375, height: 812 },
+  { name: 'tablet', width: 768, height: 1024 },
+  { name: 'desktop', width: 1440, height: 950 },
+];
 
 /** Persona name fragment -> the screens that persona can reach. */
 const TOURS = [
@@ -31,10 +48,9 @@ const TOURS = [
 if (SHOTS) await mkdir(OUT, { recursive: true });
 
 const browser = await chromium.launch({
-  executablePath: existsSync(EXECUTABLE) ? EXECUTABLE : undefined,
+  executablePath: EXECUTABLE,
   args: ['--no-sandbox'],
 });
-const context = await browser.newContext({ viewport: { width: 1440, height: 950 } });
 
 let failures = 0;
 
@@ -42,55 +58,101 @@ let failures = 0;
 async function becomePersona(page, fragment) {
   await page.goto(BASE + '/lender', { waitUntil: 'domcontentloaded' });
   const select = page.getByLabel('Switch persona');
+  await select.waitFor();
   const option = await select.locator('option', { hasText: fragment }).first().getAttribute('value');
   if (!option) throw new Error(`no persona matching "${fragment}"`);
-  await select.selectOption(option);
-  await page.waitForTimeout(600);
+  await select.selectOption(option).catch(() => {});
+  await page.context().addCookies([
+    { name: 'adata_persona', value: option, url: BASE, httpOnly: true, sameSite: 'Lax' },
+  ]);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
 }
 
-for (const tour of TOURS) {
-  const page = await context.newPage();
-  const problems = [];
-  page.on('console', (m) => {
-    if (m.type() === 'error') problems.push(`console: ${m.text().slice(0, 160)}`);
+async function layoutProblems(page, viewport) {
+  const metrics = await page.evaluate(() => {
+    const html = getComputedStyle(document.documentElement);
+    const body = getComputedStyle(document.body);
+    return {
+      innerWidth: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      htmlOverflowX: html.overflowX,
+      bodyOverflowX: body.overflowX,
+      bodyFontSize: body.fontSize,
+    };
   });
-  page.on('pageerror', (e) => problems.push(`pageerror: ${e.message.slice(0, 160)}`));
-
-  try {
-    await becomePersona(page, tour.persona);
-  } catch (e) {
-    console.log(`FAIL  ${tour.label}: could not switch persona — ${e.message}`);
-    failures++;
-    await page.close();
-    continue;
+  const problems = [];
+  if (metrics.scrollWidth > metrics.innerWidth + 1) {
+    problems.push(
+      `document pan: scrollWidth ${metrics.scrollWidth} > innerWidth ${metrics.innerWidth}`,
+    );
   }
+  if (metrics.htmlOverflowX === 'hidden' || metrics.htmlOverflowX === 'clip') {
+    problems.push(`html overflow-x is ${metrics.htmlOverflowX}`);
+  }
+  if (metrics.bodyOverflowX === 'hidden' || metrics.bodyOverflowX === 'clip') {
+    problems.push(`body overflow-x is ${metrics.bodyOverflowX}`);
+  }
+  if (viewport.width === 1440 && metrics.bodyFontSize !== '13px') {
+    problems.push(`desktop fontSize is ${metrics.bodyFontSize}, expected 13px`);
+  }
+  return problems;
+}
 
-  for (const path of tour.paths) {
-    problems.length = 0;
-    const response = await page.goto(BASE + path, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(400);
+for (const viewport of VIEWPORTS) {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+  });
 
-    const status = response?.status() ?? 0;
-    // A prefetch of a redirecting route is not a page failure.
-    const real = problems.filter((p) => !p.includes('_rsc='));
+  for (const tour of TOURS) {
+    const page = await context.newPage();
+    const problems = [];
+    page.on('console', (m) => {
+      if (m.type() === 'error') problems.push(`console: ${m.text().slice(0, 160)}`);
+    });
+    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message.slice(0, 160)}`));
 
-    if (status !== 200 || real.length > 0) {
+    try {
+      await becomePersona(page, tour.persona);
+    } catch (e) {
+      console.log(`FAIL  ${viewport.name} ${tour.label}: could not switch persona — ${e.message}`);
       failures++;
-      console.log(`FAIL  ${tour.label} ${path} (${status})`);
-      for (const p of real.slice(0, 3)) console.log(`        ${p}`);
-    } else {
-      const heading = await page.locator('h1').first().textContent().catch(() => null);
-      console.log(`  ok  ${tour.label.padEnd(15)} ${path.padEnd(24)} ${heading?.trim() ?? ''}`);
+      await page.close();
+      continue;
     }
 
-    if (SHOTS) {
-      await page.screenshot({
-        path: `${OUT}/${tour.label}${path.replace(/\//g, '-') || '-home'}.png`,
-        fullPage: true,
-      });
+    for (const path of tour.paths) {
+      problems.length = 0;
+      const response = await page.goto(BASE + path, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(400);
+
+      const status = response?.status() ?? 0;
+      const real = problems.filter((p) => !p.includes('_rsc='));
+      const layout = await layoutProblems(page, viewport);
+      real.push(...layout);
+
+      if (status !== 200 || real.length > 0) {
+        failures++;
+        console.log(`FAIL  ${viewport.name} ${tour.label} ${path} (${status})`);
+        for (const p of real.slice(0, 5)) console.log(`        ${p}`);
+      } else {
+        const heading = await page.locator('h1').first().textContent().catch(() => null);
+        console.log(
+          `  ok  ${viewport.name.padEnd(8)} ${tour.label.padEnd(15)} ${path.padEnd(24)} ${heading?.trim() ?? ''}`,
+        );
+      }
+
+      if (SHOTS) {
+        await page.screenshot({
+          path: `${OUT}/${viewport.name}-${tour.label}${path.replace(/\//g, '-') || '-home'}.png`,
+          fullPage: true,
+        });
+      }
     }
+    await page.close();
   }
-  await page.close();
+
+  await context.close();
 }
 
 await browser.close();

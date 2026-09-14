@@ -3,6 +3,7 @@ import {
   Amount,
   EmptyState,
   GradeBadge,
+  LedgerScroll,
   Panel,
   StatusChip,
 } from '@/components/primitives';
@@ -79,8 +80,9 @@ export default async function ApprovalsPage() {
                 </span>
               }
             >
-              <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px]">
-                <div>
+              <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="min-w-0">
+                  <LedgerScroll label="Payable facts">
                   <table className="ledger">
                     <tbody>
                       <tr>
@@ -107,6 +109,7 @@ export default async function ApprovalsPage() {
                       </tr>
                     </tbody>
                   </table>
+                  </LedgerScroll>
 
                   {history.length > 0 ? (
                     <div className="mt-3">

@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 import { AddUser } from './AddUser';
 import { ActionButton } from '@/components/ActionButton';
-import { Address, EmptyState, Notice, Panel } from '@/components/primitives';
+import { Address, EmptyState, LedgerScroll, Notice, Panel } from '@/components/primitives';
 import { removeUser } from '@/app/actions';
 import { currentPersona } from '@/app/session';
 import { readEntities, readUsers } from '@/db/read';
@@ -83,7 +83,7 @@ export default async function AccountsPage() {
         {users.length === 0 ? (
           <EmptyState title="No accounts." />
         ) : (
-          <div className="overflow-x-auto">
+          <LedgerScroll label="Accounts">
             <table className="ledger">
               <thead>
                 <tr>
@@ -155,7 +155,7 @@ export default async function AccountsPage() {
                 })}
               </tbody>
             </table>
-          </div>
+          </LedgerScroll>
         )}
       </Panel>
 

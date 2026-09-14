@@ -138,15 +138,30 @@ export function Panel({
   dense?: boolean;
 }) {
   return (
-    <section className="rounded-[4px] border border-rule bg-surface">
+    <section className="min-w-0 rounded-[4px] border border-rule bg-surface">
       {title ? (
-        <header className="flex items-center justify-between gap-3 border-b border-rule px-3 py-2">
-          <h2 className="text-[12px] font-semibold tracking-wide text-ink uppercase">{title}</h2>
+        <header className="panel-head border-b border-rule px-3 py-2">
+          <h2 className="min-w-0 text-[12px] font-semibold tracking-wide text-ink uppercase">{title}</h2>
           {action}
         </header>
       ) : null}
-      <div className={dense ? '' : 'p-3'}>{children}</div>
+      <div className={dense ? 'panel-body' : 'panel-body p-3'}>{children}</div>
     </section>
+  );
+}
+
+/** Local clip for `table.ledger`. Wide columns scroll here, not the document. */
+export function LedgerScroll({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label?: string;
+}) {
+  return (
+    <div className="ledger-clip" role="region" aria-label={label} tabIndex={0}>
+      {children}
+    </div>
   );
 }
 
@@ -182,9 +197,9 @@ export function Stat({
 /** A field in a detail panel. */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-rule py-1.5 last:border-b-0">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-b border-rule py-1.5 last:border-b-0">
       <dt className="shrink-0 text-[11.5px] text-ink-muted">{label}</dt>
-      <dd className="min-w-0 text-right text-[12.5px] text-ink">{children}</dd>
+      <dd className="min-w-0 max-w-full text-right text-[12.5px] break-words text-ink">{children}</dd>
     </div>
   );
 }

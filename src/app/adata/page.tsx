@@ -4,6 +4,7 @@ import {
   Amount,
   DaysRemaining,
   GradeBadge,
+  LedgerScroll,
   Panel,
   Stat,
   StatusChip,
@@ -90,7 +91,7 @@ export default async function AdataDashboard() {
 
 function PayableTable({ rows }: { rows: Awaited<ReturnType<typeof readPayables>> }) {
   return (
-    <div className="overflow-x-auto">
+    <LedgerScroll label="Payables">
       <table className="ledger">
         <thead>
           <tr>
@@ -129,6 +130,6 @@ function PayableTable({ rows }: { rows: Awaited<ReturnType<typeof readPayables>>
           ))}
         </tbody>
       </table>
-    </div>
+    </LedgerScroll>
   );
 }

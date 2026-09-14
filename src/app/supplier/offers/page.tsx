@@ -3,6 +3,7 @@ import {
   Amount,
   DaysRemaining,
   EmptyState,
+  LedgerScroll,
   Panel,
   Percent,
 } from '@/components/primitives';
@@ -79,7 +80,7 @@ export default async function OffersPage() {
             {bids.length === 0 ? (
               <EmptyState title="No offers yet on this listing." />
             ) : (
-              <div className="overflow-x-auto">
+              <LedgerScroll label="Offers">
                 <table className="ledger">
                   <thead>
                     <tr>
@@ -147,7 +148,7 @@ export default async function OffersPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </LedgerScroll>
             )}
           </Panel>
         ))

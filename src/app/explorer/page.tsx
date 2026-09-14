@@ -1,6 +1,7 @@
 import {
   Amount,
   EmptyState,
+  LedgerScroll,
   MockTxRef,
   Panel,
   Stat,
@@ -49,7 +50,7 @@ export default async function ExplorerPage() {
         {events.length === 0 ? (
           <EmptyState title="Nothing has happened yet." />
         ) : (
-          <div className="overflow-x-auto">
+          <LedgerScroll label="Transaction log">
             <table className="ledger">
               <thead>
                 <tr>
@@ -92,7 +93,7 @@ export default async function ExplorerPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </LedgerScroll>
         )}
       </Panel>
     </div>

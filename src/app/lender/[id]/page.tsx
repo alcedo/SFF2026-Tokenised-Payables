@@ -8,6 +8,7 @@ import {
   DaysRemaining,
   Field,
   GradeBadge,
+  LedgerScroll,
   MockTxRef,
   Panel,
   Percent,
@@ -97,8 +98,8 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-3">
+      <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="min-w-0 space-y-3">
           <Panel title="Credit">
             <dl>
               <Field label="Grade">
@@ -171,6 +172,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
                   </span>
                   <span className="hidden group-open:inline">Hide the member invoices</span>
                 </summary>
+                <LedgerScroll label="Series members">
                 <table className="ledger">
                   <thead>
                     <tr>
@@ -220,6 +222,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
                     </tr>
                   </tfoot>
                 </table>
+                </LedgerScroll>
               </details>
               <p className="px-3 py-2 text-[10.5px] text-ink-faint">
                 A series is a lot-grouping mechanism, not a new instrument. Every member shares one
@@ -231,6 +234,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
 
           {holders.length > 0 ? (
             <Panel title="Current holders" dense>
+              <LedgerScroll label="Current holders">
               <table className="ledger">
                 <thead>
                   <tr>
@@ -261,10 +265,12 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
                   ))}
                 </tbody>
               </table>
+              </LedgerScroll>
             </Panel>
           ) : null}
 
           <Panel title="Event history" dense>
+            <LedgerScroll label="Event history">
             <table className="ledger">
               <thead>
                 <tr>
@@ -291,10 +297,11 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
                 ))}
               </tbody>
             </table>
+            </LedgerScroll>
           </Panel>
         </div>
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <BidPanel
             listingId={listing.id}
             listedFaceBase={listing.listedFaceBase.toString()}
@@ -310,6 +317,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
 
           {openBids.length > 0 ? (
             <Panel title={`Bids (${openBids.length})`} dense>
+              <LedgerScroll label="Bids">
               <table className="ledger">
                 <thead>
                   <tr>
@@ -336,6 +344,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
                   ))}
                 </tbody>
               </table>
+              </LedgerScroll>
               <p className="px-3 py-2 text-[10.5px] text-ink-faint">
                 Bids do not reserve funds. Balance and ownership are rechecked when the seller
                 accepts.

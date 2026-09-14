@@ -58,17 +58,17 @@ export function DemoControls({
 
   return (
     <div className="border-b border-rule-strong bg-surface-raised">
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-3 py-1.5">
+      <div className="chrome-tools mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-3 py-1.5">
         <span className="text-[10px] font-semibold tracking-[0.08em] text-ink-muted uppercase">
           Demo controls
         </span>
 
         {/* Persona switcher. PRD §11 includes preparer/checker within ADATA. */}
-        <label className="flex items-center gap-1.5">
-          <span className="text-[11px] text-ink-muted">Acting as</span>
+        <label className="control-fit flex items-center gap-1.5">
+          <span className="shrink-0 text-[11px] text-ink-muted">Acting as</span>
           <select
             aria-label="Switch persona"
-            className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-1 text-[12px]"
+            className="control-fit rounded-[3px] border border-rule-strong bg-surface px-1.5 py-1 text-[12px]"
             value={current.userId}
             disabled={pending}
             onChange={(e) => {
@@ -89,7 +89,7 @@ export function DemoControls({
         <span className="h-4 w-px bg-rule-strong" />
 
         {/* Fast-forward. Advancing time never funds an obligation (PRD §11). */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="num text-[12px] font-medium" title="The demo clock">
             {worldDate}
           </span>
