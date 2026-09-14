@@ -997,4 +997,8 @@ BEGIN
   RETURN ledger.render_entry(v_entry);
 END $$;
 
-GRANT EXECUTE ON FUNCTION ledger.post(jsonb) TO adata_app;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'adata_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION ledger.post(jsonb) TO adata_app';
+  END IF;
+END $$;

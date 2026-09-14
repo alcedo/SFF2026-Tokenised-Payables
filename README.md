@@ -88,6 +88,11 @@ query after that pays a cold start of a second or two. For a demo that must
 open instantly in front of a room, either keep a tab open or disable
 scale-to-zero on the branch.
 
+The database owner often cannot `CREATE ROLE`. Schema load skips the
+`adata_app` nologin role in that case; the connecting user owns the objects
+and the app still runs. `adata_app` is created when the owner has
+`CREATEROLE`, which is how a laptop `psql` against local Postgres behaves.
+
 `Reset world` replays `db/schema.sql`, `db/post.sql` and `db/seed.sql` through
 the driver in one transaction, which takes a few seconds on Neon and needs no
 `psql` on the server. The first request against a database with no world row

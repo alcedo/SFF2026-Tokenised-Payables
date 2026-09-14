@@ -900,24 +900,41 @@ END $$;
 -- §11  Grants — what makes §0 true
 -- ----------------------------------------------------------------------------
 -- Roles are cluster-level, so creation must be idempotent across re-seeds.
+--
+-- Hosted Postgres (Neon, Vercel Postgres, Supabase) often gives the database
+-- owner no CREATEROLE. `CREATE ROLE` would abort the first request on a new
+-- site. The application connects as DATABASE_URL's user, who owns these
+-- objects; `adata_app` is the privilege-boundary role from §0, not the
+-- runtime login. Skip creating it and the GRANTs when we cannot.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'adata_app') THEN
-    CREATE ROLE adata_app NOLOGIN;
+    BEGIN
+      CREATE ROLE adata_app NOLOGIN;
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE NOTICE 'skipping CREATE ROLE adata_app (no CREATEROLE)';
+    END;
   END IF;
 END $$;
-GRANT USAGE ON SCHEMA app, ledger TO adata_app;
-GRANT SELECT ON ALL TABLES IN SCHEMA app, ledger TO adata_app;
--- The application may write the things it owns outright...
-GRANT INSERT, UPDATE ON app.entity, app.app_user, app.wallet, app.payable TO adata_app;
--- ...and nothing in the ledger. No INSERT on journal_entry, no UPDATE on
--- account_balance, ever. The only path is ledger.post(), which is
--- SECURITY DEFINER and therefore runs as its owner.
-REVOKE ALL ON ledger.journal_entry, ledger.journal_leg, ledger.account_balance,
-              ledger.account, ledger.asset FROM adata_app;
-GRANT SELECT ON ledger.journal_entry, ledger.journal_leg, ledger.account_balance,
-                ledger.account, ledger.asset TO adata_app;
-GRANT EXECUTE ON FUNCTION ledger.post(jsonb) TO adata_app;
-GRANT EXECUTE ON FUNCTION ledger.prove_books_balance() TO adata_app;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'adata_app') THEN
+    RETURN;
+  END IF;
+  EXECUTE 'GRANT USAGE ON SCHEMA app, ledger TO adata_app';
+  EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA app, ledger TO adata_app';
+  -- The application may write the things it owns outright...
+  EXECUTE 'GRANT INSERT, UPDATE ON app.entity, app.app_user, app.wallet, app.payable TO adata_app';
+  -- ...and nothing in the ledger. No INSERT on journal_entry, no UPDATE on
+  -- account_balance, ever. The only path is ledger.post(), which is
+  -- SECURITY DEFINER and therefore runs as its owner.
+  EXECUTE 'REVOKE ALL ON ledger.journal_entry, ledger.journal_leg, ledger.account_balance,
+                ledger.account, ledger.asset FROM adata_app';
+  EXECUTE 'GRANT SELECT ON ledger.journal_entry, ledger.journal_leg, ledger.account_balance,
+                  ledger.account, ledger.asset TO adata_app';
+  EXECUTE 'GRANT EXECUTE ON FUNCTION ledger.post(jsonb) TO adata_app';
+  EXECUTE 'GRANT EXECUTE ON FUNCTION ledger.prove_books_balance() TO adata_app';
+END $$;
 
 -- ----------------------------------------------------------------------------
 -- §12  Schema self-test — run in CI
@@ -964,4 +981,8 @@ CREATE TABLE app.erp_invoice (
   UNIQUE (consumed_by)                          -- one invoice becomes at most one payable
 );
 CREATE INDEX erp_invoice_available ON app.erp_invoice(doc_no) WHERE consumed_by IS NULL;
-GRANT SELECT, INSERT, UPDATE ON app.erp_invoice TO adata_app;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'adata_app') THEN
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON app.erp_invoice TO adata_app';
+  END IF;
+END $$;
