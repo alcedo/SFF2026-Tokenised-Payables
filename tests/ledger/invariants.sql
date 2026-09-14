@@ -60,6 +60,7 @@ DECLARE
   v_res    jsonb;
   v_res2   jsonb;
   v_n      bigint;
+  v_other  bigint;
   v_caught text;
   v_was    RECORD;
   v_entry  RECORD;
@@ -515,10 +516,14 @@ BEGIN
     RAISE EXCEPTION 'FAIL: ADATA paid % XSGD for the split payable, expected 1965000197 (the total converted once; three rounded shares would be 1965000198)',
       v_was.anchor_xsgd - pg_temp.cash(ANCHOR, 'XSGD');
   END IF;
-  SELECT count(*) INTO v_n FROM ledger.journal_leg l JOIN ledger.account a ON a.id = l.account_id
+  SELECT count(*) FILTER (WHERE s.cash_code = 'XSGD'), count(*) FILTER (WHERE s.cash_code IS DISTINCT FROM 'XSGD')
+    INTO v_n, v_other
+    FROM ledger.journal_leg l
+    JOIN ledger.account a ON a.id = l.account_id
+    JOIN ledger.asset   s ON s.id = l.asset_id
    WHERE l.entry_id = (v_res->>'entryId')::uuid AND a.wallet_address = ANCHOR;
-  IF v_n <> 1 THEN
-    RAISE EXCEPTION 'FAIL: the anchor carries % legs on the split redemption, expected one', v_n;
+  IF v_n <> 1 OR v_other <> 0 THEN
+    RAISE EXCEPTION 'FAIL: the anchor carries % XSGD legs and % in other assets on the split redemption, expected one and none', v_n, v_other;
   END IF;
   IF (v_res->'conversion'->>'sourceDebit')::bigint IS DISTINCT FROM 1965000197 THEN
     RAISE EXCEPTION 'FAIL: the receipt shows a source debit of %, expected 1965000197',

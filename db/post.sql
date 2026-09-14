@@ -193,10 +193,10 @@ END $$;
 -- what lets one source formula serve all four.
 DROP TYPE IF EXISTS ledger.payment CASCADE;
 CREATE TYPE ledger.payment AS (
-  funding ledger.cash_code,
-  legs    ledger.leg_spec[],
-  source  bigint,
-  rate_e6 bigint
+  funding_code        ledger.cash_code,
+  legs                ledger.leg_spec[],
+  source_amount_base  bigint,
+  fx_rate_e6          bigint
 );
 
 CREATE OR REPLACE FUNCTION ledger.payer_legs(
@@ -209,17 +209,17 @@ DECLARE
   v_fx    uuid;
   v_fund  uuid;
 BEGIN
-  v_pay.funding := p_funding;
-  v_pay.rate_e6 := CASE WHEN p_funding = 'XSGD' THEN p_rate_e6 ELSE 1000000 END;
-  v_pay.source  := (p_xusd * v_pay.rate_e6 + 500000) / 1000000;
+  v_pay.funding_code       := p_funding;
+  v_pay.fx_rate_e6         := CASE WHEN p_funding = 'XSGD' THEN p_rate_e6 ELSE 1000000 END;
+  v_pay.source_amount_base := (p_xusd * v_pay.fx_rate_e6 + 500000) / 1000000;
   IF p_funding = 'XUSD' THEN
     v_pay.legs := ARRAY[ROW(v_payer, v_xusd, -p_xusd)::ledger.leg_spec];
   ELSE
     v_fx   := ledger.system_account('system_fx');
     v_fund := ledger.cash_asset(p_funding);
     v_pay.legs := ARRAY[
-      ROW(v_payer, v_fund, -v_pay.source)::ledger.leg_spec,
-      ROW(v_fx, v_fund, v_pay.source)::ledger.leg_spec,
+      ROW(v_payer, v_fund, -v_pay.source_amount_base)::ledger.leg_spec,
+      ROW(v_fx, v_fund, v_pay.source_amount_base)::ledger.leg_spec,
       ROW(v_fx, v_xusd, -p_xusd)::ledger.leg_spec
     ];
   END IF;
@@ -993,19 +993,15 @@ BEGIN
 
   -- Link the entry to whatever market rows this command resolved or created.
   -- Deliberately after the branch: publish_listing and place_bid create the row
-  -- the FK points at, so the gate above cannot reference it yet.
-  IF v_listing.id IS NOT NULL OR v_bid.id IS NOT NULL THEN
+  -- the FK points at, so the gate above cannot reference it yet. The same write
+  -- records how any XUSD owed was paid, for the receipt and the explorer (PRD
+  -- §10); those columns stay NULL for a command that moved no funding.
+  IF v_listing.id IS NOT NULL OR v_bid.id IS NOT NULL OR v_payment.funding_code IS NOT NULL THEN
     UPDATE ledger.journal_entry
-       SET listing_id = v_listing.id, bid_id = v_bid.id
-     WHERE id = v_entry.id;
-  END IF;
-
-  -- Record how the XUSD owed was paid, for the receipt and the explorer (PRD
-  -- §10).
-  IF v_payment IS NOT NULL THEN
-    UPDATE ledger.journal_entry
-       SET funding_code = v_payment.funding, source_amount_base = v_payment.source,
-           fx_rate_e6 = v_payment.rate_e6
+       SET listing_id = v_listing.id, bid_id = v_bid.id,
+           funding_code = v_payment.funding_code,
+           source_amount_base = v_payment.source_amount_base,
+           fx_rate_e6 = v_payment.fx_rate_e6
      WHERE id = v_entry.id;
   END IF;
 
