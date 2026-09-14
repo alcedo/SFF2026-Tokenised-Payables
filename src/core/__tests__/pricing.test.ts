@@ -68,6 +68,26 @@ describe('PRD section 12 seed table', () => {
   }
 });
 
+describe('PRD section 12 rows the document asks us to derive', () => {
+  // "The settled row needs a historical purchase price and holding period that
+  //  support the displayed 9.2%." Derived in docs/ASSUMPTIONS.md and pinned
+  //  here so the seed file and the documented rationale cannot drift apart.
+  it('TP-2026-0128 settled at 9.2% from 312,900 held 90 days', () => {
+    const face = fromWholeUnits(320_000);
+    const purchase = fromWholeUnits(312_900);
+    const q = quote(face, purchase, 90);
+    expect(formatPercent(q.lenderYieldPercent, 1)).toBe('9.2%');
+    expect(q.pricePercent.toFixed(2)).toBe('97.78');
+  });
+
+  it('TP-2026-0119 is past due, so it quotes no forward yield', () => {
+    const face = fromWholeUnits(75_000);
+    const q = quote(face, priceFromPercent(face, 9800), -45);
+    expect(q.maturity).toBe('past-due');
+    expect(q.lenderYieldPercent).toBeNull();
+  });
+});
+
 describe('maturity suppresses forward rates', () => {
   const face = fromWholeUnits(100_000);
   const price = priceFromPercent(face, 9900);
