@@ -310,3 +310,21 @@ removing the last one, the row says that instead of naming nobody.
 
 **If wrong:** `pendingStep` in `src/core/lifecycle.ts` and the notice block in
 `src/app/adata/approvals/page.tsx`.
+
+## Suggesting an invoice reference
+
+Section 8 screen 2 lists the facts manual entry collects and says nothing about
+where the invoice reference comes from. The database is definite about what
+makes one wrong, since `payable_one_per_invoice` guards the pair of supplier and
+invoice reference, and silent about what makes one right.
+
+**Built:** the field opens on the next free number in the `INV-TW-nnnnn` series,
+counting past both the payables already raised and the ERP register waiting to
+be imported, and it stays ordinary editable text. A preparer copying a real
+invoice has its real number and should type it. A presenter creating the tenth
+payable of a demo should not have to invent one. A reference with a non-numeric
+tail, like the runbook's `INV-TW-88Q4A`, is a real invoice number rather than a
+member of the sequence, so it does not count toward the maximum.
+
+**If wrong:** `suggestInvoiceRef` in `src/core/references.ts`, with its cases in
+`src/core/__tests__/references.test.ts`.
