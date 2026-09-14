@@ -5,6 +5,7 @@ import {
   DaysRemaining,
   EmptyState,
   GradeBadge,
+  LedgerScroll,
   Panel,
   Percent,
   Stat,
@@ -79,7 +80,7 @@ export default async function MarketplacePage({
             />
           )
         ) : (
-          <div className="overflow-x-auto">
+          <LedgerScroll label="Open listings">
             <table className="ledger">
               <thead>
                 <tr>
@@ -149,7 +150,7 @@ export default async function MarketplacePage({
                 })}
               </tbody>
             </table>
-          </div>
+          </LedgerScroll>
         )}
       </Panel>
 

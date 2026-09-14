@@ -45,6 +45,12 @@
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
 }
 
+:root {
+  --layout-phone-max: 767px;
+  --layout-tablet-min: 768px;
+  --layout-desktop-min: 1024px;
+}
+
 html {
   color-scheme: light;
 }
@@ -121,6 +127,110 @@ table.ledger tbody tr:last-child td {
 
 table.ledger tbody tr:hover {
   background: var(--color-surface-sunken);
+}
+
+.shell-root,
+main {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chrome-tools,
+.chrome-primary,
+.chrome-primary > * {
+  min-width: 0;
+}
+
+.control-fit {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chrome-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+}
+
+.chrome-nav {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.chrome-balances {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.chrome-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: 0.5rem;
+}
+
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.field-fill {
+  flex: 1 1 12rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ledger-clip,
+.panel-body:has(> table.ledger) {
+  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+
+@media (max-width: 767px) {
+  .chrome-secondary {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chrome-balances {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .control-fit {
+    flex: 1 1 100%;
+  }
+
+  .control-fit select,
+  select.control-fit {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  main :is(input, select, textarea) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .addr {
+    overflow-wrap: anywhere;
+  }
 }
 
 /* Focus stays visible for keyboard use at the booth. */

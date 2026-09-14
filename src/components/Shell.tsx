@@ -25,7 +25,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
   const nav = navFor(persona);
 
   return (
-    <div className="min-h-screen">
+    <div className="shell-root min-h-screen">
       <DemoControls
         personas={personas.map((p) => ({
           userId: p.userId,
@@ -46,7 +46,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
       />
 
       <header className="border-b border-rule bg-surface">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-3 py-2">
+        <div className="chrome-primary mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-3 py-2">
           <div className="flex items-baseline gap-3">
             <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
               ADATA Tokenised Payables
@@ -61,8 +61,8 @@ export async function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-3">
-          <nav className="flex gap-0.5">
+        <div className="chrome-secondary mx-auto max-w-[1600px] px-3">
+          <nav className="chrome-nav gap-0.5">
             {nav.map((item) => (
               <Link
                 key={item.href}
@@ -73,7 +73,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
-          <dl className="flex gap-3 pb-1.5">
+          <dl className="chrome-balances pb-1.5">
             {(['XUSD', 'USDC', 'USDT', 'XSGD'] as const).map((asset) => (
               <div key={asset} className="text-right">
                 <dt className="text-[10px] tracking-wide text-ink-faint uppercase">{asset}</dt>
@@ -86,7 +86,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1600px] p-3">{children}</main>
+      <main className="mx-auto min-w-0 max-w-[1600px] p-3">{children}</main>
     </div>
   );
 }

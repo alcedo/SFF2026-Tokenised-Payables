@@ -2,6 +2,7 @@ import {
   Amount,
   DaysRemaining,
   GradeBadge,
+  LedgerScroll,
   Notice,
   Panel,
   Stat,
@@ -64,7 +65,7 @@ export default async function AdminPage() {
       </Panel>
 
       <Panel title="All payables" dense>
-        <div className="overflow-x-auto">
+        <LedgerScroll label="All payables">
           <table className="ledger">
             <thead>
               <tr>
@@ -93,7 +94,7 @@ export default async function AdminPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </LedgerScroll>
       </Panel>
 
       {overdue.map((p) => (

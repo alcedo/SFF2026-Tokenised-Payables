@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 import { ActionButton } from '@/components/ActionButton';
-import { Notice } from '@/components/primitives';
+import { LedgerScroll, Notice } from '@/components/primitives';
 import { createPayableFromErp } from '@/app/actions';
 import { addDays, parseIsoDate } from '@/core/clock';
 import { type BaseUnits, formatUnits } from '@/core/money';
@@ -44,7 +44,7 @@ export function ErpPicker({
         </span>
       </div>
 
-      <div className="overflow-x-auto">
+      <LedgerScroll label="Approved invoices">
         <table className="ledger">
           <thead>
             <tr>
@@ -88,7 +88,7 @@ export function ErpPicker({
             ))}
           </tbody>
         </table>
-      </div>
+      </LedgerScroll>
 
       <div className="border-t border-rule p-3">
         {chosen ? (

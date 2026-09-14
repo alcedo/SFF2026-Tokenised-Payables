@@ -5,6 +5,7 @@ import {
   DaysRemaining,
   EmptyState,
   GradeBadge,
+  LedgerScroll,
   MarketChip,
   Panel,
   Percent,
@@ -88,7 +89,7 @@ export default async function PortfolioPage() {
             hint="Buy a payable from the marketplace to build a portfolio."
           />
         ) : (
-          <div className="overflow-x-auto">
+          <LedgerScroll label="Holdings">
             <table className="ledger">
               <thead>
                 <tr>
@@ -152,13 +153,14 @@ export default async function PortfolioPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </LedgerScroll>
         )}
       </Panel>
 
       {/* PRD §8 screen 12 asks for the maturity ladder explicitly. */}
       {priced.length > 0 ? (
         <Panel title="Maturity ladder" dense>
+          <LedgerScroll label="Maturity ladder">
           <table className="ledger">
             <thead>
               <tr>
@@ -196,6 +198,7 @@ export default async function PortfolioPage() {
                 ))}
             </tbody>
           </table>
+          </LedgerScroll>
         </Panel>
       ) : null}
 
@@ -211,6 +214,7 @@ export default async function PortfolioPage() {
 
       {settled.length > 0 ? (
         <Panel title="Realised" dense>
+          <LedgerScroll label="Realised">
           <table className="ledger">
             <thead>
               <tr>
@@ -235,6 +239,7 @@ export default async function PortfolioPage() {
               ))}
             </tbody>
           </table>
+          </LedgerScroll>
         </Panel>
       ) : null}
     </div>

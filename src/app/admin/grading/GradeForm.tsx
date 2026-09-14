@@ -35,7 +35,7 @@ export function GradeForm({ payableId, payableRef }: { payableId: string; payabl
           ))}
         </div>
       </label>
-      <label className="flex min-w-[320px] flex-1 flex-col gap-0.5">
+      <label className="field-fill flex flex-1 flex-col gap-0.5">
         <span className="text-[10.5px] tracking-wide text-ink-muted uppercase">Rationale</span>
         <input
           className="w-full rounded-[3px] border border-rule-strong bg-surface px-2 py-1.5 text-[12px]"

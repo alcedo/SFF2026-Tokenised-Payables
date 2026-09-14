@@ -11,8 +11,9 @@ export const metadata: Metadata = {
 };
 
 /**
- * PRD §14: "Desktop first, usable down to iPad." The layout never scales below
- * a readable figure size, so the viewport is left at its natural scale.
+ * Phone, tablet, and desktop share device-width. Chrome wraps and stacks
+ * below 768px rather than leaving a document pan. Do not set overflow-x
+ * hidden on html or body. That would hide overflow instead of fitting it.
  */
 export const viewport: Viewport = {
   width: 'device-width',

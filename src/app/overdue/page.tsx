@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { Address, Amount, Field, Notice, Panel, StatusChip } from '@/components/primitives';
+import { Address, Amount, Field, LedgerScroll, Notice, Panel, StatusChip } from '@/components/primitives';
 import { readEvents, readHolders, readPayables, readWorld } from '@/db/read';
 
 /**
@@ -97,6 +97,7 @@ export default async function OverduePage() {
                 <h3 className="mb-1 text-[10.5px] tracking-wide text-ink-muted uppercase">
                   Current holders, still owed
                 </h3>
+                <LedgerScroll label="Current holders">
                 <table className="ledger">
                   <thead>
                     <tr>
@@ -123,6 +124,7 @@ export default async function OverduePage() {
                     ))}
                   </tbody>
                 </table>
+                </LedgerScroll>
               </div>
 
               <div className="mt-3">

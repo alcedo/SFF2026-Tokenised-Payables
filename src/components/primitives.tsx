@@ -138,15 +138,30 @@ export function Panel({
   dense?: boolean;
 }) {
   return (
-    <section className="rounded-[4px] border border-rule bg-surface">
+    <section className="min-w-0 rounded-[4px] border border-rule bg-surface">
       {title ? (
-        <header className="flex items-center justify-between gap-3 border-b border-rule px-3 py-2">
-          <h2 className="text-[12px] font-semibold tracking-wide text-ink uppercase">{title}</h2>
+        <header className="panel-head border-b border-rule px-3 py-2">
+          <h2 className="min-w-0 text-[12px] font-semibold tracking-wide text-ink uppercase">{title}</h2>
           {action}
         </header>
       ) : null}
-      <div className={dense ? '' : 'p-3'}>{children}</div>
+      <div className={dense ? 'panel-body' : 'panel-body p-3'}>{children}</div>
     </section>
+  );
+}
+
+/** Local clip for `table.ledger`. Wide columns scroll here, not the document. */
+export function LedgerScroll({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label?: string;
+}) {
+  return (
+    <div className="ledger-clip" role="region" aria-label={label} tabIndex={0}>
+      {children}
+    </div>
   );
 }
 

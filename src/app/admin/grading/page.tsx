@@ -1,5 +1,5 @@
 import { GradeForm } from './GradeForm';
-import { Amount, EmptyState, GradeBadge, Notice, Panel, StatusChip } from '@/components/primitives';
+import { Amount, EmptyState, GradeBadge, LedgerScroll, Notice, Panel, StatusChip } from '@/components/primitives';
 import { readPayables, readWorld } from '@/db/read';
 
 /**
@@ -41,7 +41,7 @@ export default async function GradingPage() {
           <div className="space-y-3">
             {ungraded.map((p) => (
               <div key={p.id} className="border-b border-rule pb-3 last:border-b-0 last:pb-0">
-                <div className="mb-1.5 flex items-center gap-2">
+                <div className="chrome-meta mb-1.5">
                   <span className="text-[13px] font-medium">{p.ref}</span>
                   <StatusChip status={p.storedStatus} />
                   <span className="text-[11.5px] text-ink-muted">
@@ -57,6 +57,7 @@ export default async function GradingPage() {
       </Panel>
 
       <Panel title="Graded" dense>
+        <LedgerScroll label="Graded payables">
         <table className="ledger">
           <thead>
             <tr>
@@ -79,6 +80,7 @@ export default async function GradingPage() {
             ))}
           </tbody>
         </table>
+        </LedgerScroll>
       </Panel>
     </div>
   );
