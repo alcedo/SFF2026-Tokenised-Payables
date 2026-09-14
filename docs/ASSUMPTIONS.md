@@ -39,8 +39,8 @@ quantity to the anchor's wallet and records an event; the obligation stays
 sum to outstanding face. Burning it would break that rule, and section 4 puts
 operational cancellation out of scope, so there is no cancelled state to move to.
 
-**If wrong:** the change is confined to the reject handler and one lifecycle
-constant.
+**If wrong:** the change is confined to the `reject_receipt` branch of
+`ledger.post()` and the two acceptance gates on listing and transfer.
 
 ## Overdue grace period
 

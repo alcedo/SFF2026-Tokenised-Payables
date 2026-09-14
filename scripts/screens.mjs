@@ -25,7 +25,7 @@ const TOURS = [
   { persona: 'Hsu Po-Chun', label: 'adata-checker', paths: ['/adata/approvals'] },
   { persona: 'Tang Mei-Hua', label: 'supplier', paths: ['/supplier', '/supplier/offers', '/transfer'] },
   { persona: 'Rina Okafor', label: 'lender', paths: ['/lender', '/lender/portfolio', '/transfer'] },
-  { persona: 'Nadia Rahman', label: 'admin', paths: ['/admin', '/admin/certification', '/admin/grading', '/explorer'] },
+  { persona: 'Nadia Rahman', label: 'admin', paths: ['/admin', '/admin/certification', '/admin/grading', '/overdue', '/explorer'] },
 ];
 
 if (SHOTS) await mkdir(OUT, { recursive: true });

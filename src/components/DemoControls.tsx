@@ -133,6 +133,20 @@ export function DemoControls({
           Simulate top-up
         </button>
 
+        {/*
+          PRD §11 "Trigger overdue": open or activate the designated overdue
+          example without requiring a live default workflow. The seeded case is
+          already past due at T0, so triggering it means opening it rather than
+          manufacturing a default, which is exactly what §7 asks for when it
+          calls recovery "a read-only scenario, not an operational workflow".
+        */}
+        <a
+          href="/overdue"
+          className="rounded-[3px] border border-caution/30 bg-caution-soft px-1.5 py-0.5 text-[11px] text-caution hover:bg-caution/10"
+        >
+          Trigger overdue
+        </a>
+
         <a
           href="/reset"
           className="rounded-[3px] border border-critical/30 bg-critical-soft px-1.5 py-0.5 text-[11px] text-critical hover:bg-critical/10"
