@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   allocateProRata,
   formatUnits,
+  fromBaseUnits,
   fromWholeUnits,
   parseUnits,
   sum,
@@ -169,7 +170,7 @@ describe('funding conversion', () => {
 
   for (const asset of ['XUSD', 'USDC', 'USDT'] as const) {
     it(`funds 1:1 from ${asset}`, () => {
-      const c = convert(obligation, asset);
+      const c = convert(obligation, asset, DEFAULT_XSGD_PER_XUSD);
       expect(c.sourceDebit).toBe(obligation);
       expect(c.rounded).toBe(false);
       expect(c.rate).toBeNull();
@@ -178,19 +179,27 @@ describe('funding conversion', () => {
 
   it('charges 1.31 XSGD per XUSD of obligation', () => {
     // 244,625 XUSD * 1.31 = 320,458.75 XSGD
-    const c = convert(obligation, 'XSGD');
+    const c = convert(obligation, 'XSGD', DEFAULT_XSGD_PER_XUSD);
     expect(formatUnits(c.sourceDebit, 4)).toBe('320,458.7500');
     expect(c.obligationXusd).toBe(obligation);
   });
 
   it('states the rate it applied', () => {
     expect(formatRate(DEFAULT_XSGD_PER_XUSD)).toBe('1 XUSD = 1.3100 XSGD');
+    expect(formatRate(1_310_050n)).toBe('1 XUSD = 1.3101 XSGD');
   });
 
   it('flags rounding when the conversion does not land on a base unit', () => {
-    const c = convert(parseUnits('0.0001'), 'XSGD');
+    const c = convert(parseUnits('0.0001'), 'XSGD', DEFAULT_XSGD_PER_XUSD);
     expect(c.rounded).toBe(true);
     expect(c.sourceDebit).toBe(1n);
+  });
+
+  it('rounds half up at the world rate, as the ledger does', () => {
+    // 12345 * 1310000 = 16171950000, which is 16171.95 base units.
+    const c = convert(fromBaseUnits(12345n), 'XSGD', 1_310_000n);
+    expect(c.sourceDebit).toBe(16172n);
+    expect(c.rounded).toBe(true);
   });
 });
 

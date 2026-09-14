@@ -11,19 +11,22 @@
  * instance.
  */
 
-import { type Asset, type BaseUnits, BASE_UNITS_PER_UNIT, mulDivRound } from './money';
+import { type Asset, type BaseUnits, mulDivRound, roundDiv } from './money';
 
 /**
- * XSGD per 1 XUSD, scaled by {@link BASE_UNITS_PER_UNIT}.
+ * XSGD per 1 XUSD, scaled by {@link RATE_SCALE}.
  *
  * PRD section 6 states the mocked rate as "1XUSD = 1.31 XSGD", so the seeded
- * value is 1.31 * 10_000 = 13_100. Stored scaled and integral so that conversion
- * never touches a float.
+ * value is 1.31 * 1_000_000 = 1_310_000. Stored scaled and integral so that
+ * conversion never touches a float.
  */
 export type XsgdPerXusdRate = bigint;
 
+/** The scale of `app.world.xsgd_per_xusd_e6`. */
+export const RATE_SCALE = 1_000_000n;
+
 /** The seeded rate. PRD section 6. */
-export const DEFAULT_XSGD_PER_XUSD: XsgdPerXusdRate = 13_100n;
+export const DEFAULT_XSGD_PER_XUSD: XsgdPerXusdRate = 1_310_000n;
 
 /**
  * What a payer is actually charged to discharge an XUSD obligation.
@@ -39,8 +42,8 @@ export interface Conversion {
   /** What leaves the payer's wallet, in `fundingAsset`. */
   readonly sourceDebit: BaseUnits;
   /**
-   * XSGD per 1 XUSD, scaled by 10,000, or null for the 1:1 assets. Present so
-   * the confirmation screen can state the rate it applied.
+   * XSGD per 1 XUSD, scaled by {@link RATE_SCALE}, or null for the 1:1 assets.
+   * Present so the confirmation screen can state the rate it applied.
    */
   readonly rate: XsgdPerXusdRate | null;
   /** True when {@link sourceDebit} was rounded to the nearest base unit. */
@@ -63,7 +66,7 @@ export interface Conversion {
 export function convert(
   obligationXusd: BaseUnits,
   fundingAsset: Asset,
-  rate: XsgdPerXusdRate = DEFAULT_XSGD_PER_XUSD,
+  rate: XsgdPerXusdRate,
 ): Conversion {
   if (fundingAsset !== 'XSGD') {
     return {
@@ -77,20 +80,19 @@ export function convert(
   if (rate <= 0n) {
     throw new RangeError('the XSGD rate must be positive');
   }
-  const sourceDebit = mulDivRound(obligationXusd, rate, BASE_UNITS_PER_UNIT);
+  const sourceDebit = mulDivRound(obligationXusd, rate, RATE_SCALE);
   const exact = obligationXusd * rate;
   return {
     obligationXusd,
     fundingAsset,
     sourceDebit,
     rate,
-    rounded: exact % BASE_UNITS_PER_UNIT !== 0n,
+    rounded: exact % RATE_SCALE !== 0n,
   };
 }
 
-/** Render a scaled rate for display, e.g. "1 XUSD = 1.3100 XSGD". */
+/** Render a scaled rate to four decimals, e.g. "1 XUSD = 1.3100 XSGD". */
 export function formatRate(rate: XsgdPerXusdRate): string {
-  const whole = rate / BASE_UNITS_PER_UNIT;
-  const fraction = (rate % BASE_UNITS_PER_UNIT).toString().padStart(4, '0');
-  return `1 XUSD = ${whole}.${fraction} XSGD`;
+  const e4 = roundDiv(rate, 100n);
+  return `1 XUSD = ${e4 / 10_000n}.${(e4 % 10_000n).toString().padStart(4, '0')} XSGD`;
 }

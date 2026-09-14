@@ -10,6 +10,28 @@
 \set ON_ERROR_STOP on
 \i tests/ledger/fixture.sql
 
+-- A wallet's free balance in a cash asset, and system_fx's, zero when no row
+-- exists yet. The funded-settlement cases compare many of these before and
+-- after, and a missing row must read as zero rather than as a NULL that makes
+-- every comparison silently true.
+CREATE FUNCTION pg_temp.cash(p_wallet text, p_code ledger.cash_code) RETURNS bigint
+LANGUAGE sql AS $$
+  SELECT COALESCE((SELECT b.balance
+                     FROM ledger.account_balance b
+                     JOIN ledger.account a ON a.id = b.account_id
+                     JOIN ledger.asset   s ON s.id = b.asset_id
+                    WHERE a.wallet_address = p_wallet AND a.purpose = 'wallet_free'
+                      AND s.cash_code = p_code), 0)
+$$;
+CREATE FUNCTION pg_temp.fx(p_code ledger.cash_code) RETURNS bigint
+LANGUAGE sql AS $$
+  SELECT COALESCE((SELECT b.balance
+                     FROM ledger.account_balance b
+                     JOIN ledger.account a ON a.id = b.account_id
+                     JOIN ledger.asset   s ON s.id = b.asset_id
+                    WHERE a.purpose = 'system_fx' AND s.cash_code = p_code), 0)
+$$;
+
 \echo '=============================================================='
 \echo ' INVARIANTS'
 \echo '=============================================================='
@@ -23,12 +45,26 @@ DECLARE
   PAYABLE uuid := '9a000000-0000-0000-0000-000000000141';
   FACE   bigint := 2500000000;          -- 250,000.0000 XUSD
   PRICE  bigint := 2446250000;          -- 97.85% of face
+  ANCHOR_ID uuid := 'e0000000-0000-0000-0000-0000000000a1';
+  SUPP_ID   uuid := 'e0000000-0000-0000-0000-0000000000a2';
+  PAY_XSGD  uuid := '9a000000-0000-0000-0000-000000000161';
+  PAY_USDC  uuid := '9a000000-0000-0000-0000-000000000162';
+  PAY_SPLIT uuid := '9a000000-0000-0000-0000-000000000163';
+  PAY_SHORT uuid := '9a000000-0000-0000-0000-000000000164';
+  FACE_XSGD  bigint := 2000000000;      -- 200,000.0000 XUSD, 262,000.0000 XSGD at 1.31
+  FACE_USDC  bigint := 600000000;       -- 60,000.0000 XUSD
+  FACE_SPLIT bigint := 1500000150;      -- 150,000.0150 XUSD, held as three lots of 50,000.0050
+  FACE_SHORT bigint := 400000000;       -- 40,000.0000 XUSD, 52,400 XSGD: more than ADATA has left
   v_before bigint;
   v_after  bigint;
   v_res    jsonb;
   v_res2   jsonb;
   v_n      bigint;
+  v_other  bigint;
   v_caught text;
+  v_was    RECORD;
+  v_entry  RECORD;
+  v_p      RECORD;
 
 BEGIN
   ---------------------------------------------------------------- 1. floats --
@@ -330,11 +366,11 @@ BEGIN
     'intent', jsonb_build_object('kind','advance_clock','days', 90)));
   PERFORM ledger.post(jsonb_build_object(
     'idempotencyKey','00000000-0000-0000-0000-0000000000e8','actorUserId','11111111-0000-0000-0000-000000000001',
-    'intent', jsonb_build_object('kind','settle_maturity','payableId',PAYABLE)));
+    'intent', jsonb_build_object('kind','settle_maturity','payableId',PAYABLE,'fundingCode','XUSD')));
   BEGIN
     PERFORM ledger.post(jsonb_build_object(
       'idempotencyKey','00000000-0000-0000-0000-0000000000e9','actorUserId','11111111-0000-0000-0000-000000000001',
-      'intent', jsonb_build_object('kind','settle_maturity','payableId',PAYABLE)));
+      'intent', jsonb_build_object('kind','settle_maturity','payableId',PAYABLE,'fundingCode','XUSD')));
     RAISE EXCEPTION 'FAIL: the payable settled twice';
   EXCEPTION WHEN sqlstate 'ADA16' THEN
     RAISE NOTICE 'PASS  a settled payable cannot settle again';
@@ -366,6 +402,185 @@ BEGIN
       v_after;
   END IF;
   RAISE NOTICE 'PASS  a split payable pays each holder and debits the anchor once';
+
+  ------------------------------------ 11b. settlement funded in another asset --
+  -- PRD §8 screen 4 and §3 q13: redemption is denominated in XUSD and the
+  -- funding asset is chosen only for payment. Four fresh payables, issued to
+  -- the supplier, one of them split three ways, then matured together.
+  INSERT INTO app.payable (id, ref, anchor_id, original_supplier_id, invoice_ref,
+                           face_base, maturity_date, grade, grade_rationale, lifecycle_status)
+  VALUES
+    (PAY_XSGD,  'TP-2026-0161', ANCHOR_ID, SUPP_ID, 'INV-TW-88261', FACE_XSGD,  '2027-01-29', 'AA', 'Sample value.', 'certified'),
+    (PAY_USDC,  'TP-2026-0162', ANCHOR_ID, SUPP_ID, 'INV-TW-88262', FACE_USDC,  '2027-01-29', 'AA', 'Sample value.', 'certified'),
+    (PAY_SPLIT, 'TP-2026-0163', ANCHOR_ID, SUPP_ID, 'INV-TW-88263', FACE_SPLIT, '2027-01-29', 'AA', 'Sample value.', 'certified'),
+    (PAY_SHORT, 'TP-2026-0164', ANCHOR_ID, SUPP_ID, 'INV-TW-88264', FACE_SHORT, '2027-01-29', 'AA', 'Sample value.', 'certified');
+  FOR v_p IN
+    SELECT id, n FROM unnest(ARRAY[PAY_XSGD, PAY_USDC, PAY_SPLIT, PAY_SHORT]) WITH ORDINALITY AS t(id, n)
+  LOOP
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey',('00000000-0000-0000-0000-0000000001' || lpad(v_p.n::text, 2, '0'))::uuid,
+      'actorUserId','11111111-0000-0000-0000-000000000001',
+      'intent', jsonb_build_object('kind','issue_payable','payableId',v_p.id,'toWallet',SUPP,'tokenId',160 + v_p.n)));
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey',('00000000-0000-0000-0000-0000000002' || lpad(v_p.n::text, 2, '0'))::uuid,
+      'actorUserId','11111111-0000-0000-0000-000000000003',
+      'intent', jsonb_build_object('kind','accept_receipt','payableId',v_p.id)));
+  END LOOP;
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-000000000301','actorUserId','11111111-0000-0000-0000-000000000003',
+    'intent', jsonb_build_object('kind','transfer','payableId',PAY_SPLIT,'fromWallet',SUPP,
+                                 'toWallet',BANK,'quantityBase', FACE_SPLIT / 3)));
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-000000000302','actorUserId','11111111-0000-0000-0000-000000000003',
+    'intent', jsonb_build_object('kind','transfer','payableId',PAY_SPLIT,'fromWallet',SUPP,
+                                 'toWallet',FUND,'quantityBase', FACE_SPLIT / 3)));
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-000000000303','actorUserId','11111111-0000-0000-0000-000000000001',
+    'intent', jsonb_build_object('kind','advance_clock','days', 30)));
+
+  -- Whole-held, paid in XSGD. PRD §6: 1 XUSD = 1.31 XSGD, so 200,000 XUSD of
+  -- face costs 262,000.0000 XSGD. The holder is credited XUSD, ADATA's XUSD
+  -- does not move, and system_fx carries the conversion.
+  SELECT pg_temp.cash(SUPP, 'XUSD') AS holder_xusd, pg_temp.cash(ANCHOR, 'XUSD') AS anchor_xusd,
+         pg_temp.cash(ANCHOR, 'XSGD') AS anchor_xsgd,
+         pg_temp.fx('XSGD') AS fx_xsgd, pg_temp.fx('XUSD') AS fx_xusd
+    INTO v_was;
+  v_res := ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-000000000401','actorUserId','11111111-0000-0000-0000-000000000001',
+    'intent', jsonb_build_object('kind','settle_maturity','payableId',PAY_XSGD,'fundingCode','XSGD')));
+  IF v_was.anchor_xsgd - pg_temp.cash(ANCHOR, 'XSGD') <> 2620000000 THEN
+    RAISE EXCEPTION 'FAIL: settling 200,000 XUSD in XSGD debited % XSGD, expected 2620000000 (262,000.0000)',
+      v_was.anchor_xsgd - pg_temp.cash(ANCHOR, 'XSGD');
+  END IF;
+  IF pg_temp.cash(ANCHOR, 'XUSD') <> v_was.anchor_xusd THEN
+    RAISE EXCEPTION 'FAIL: an XSGD-funded settlement moved ADATA''s XUSD by %',
+      pg_temp.cash(ANCHOR, 'XUSD') - v_was.anchor_xusd;
+  END IF;
+  IF pg_temp.cash(SUPP, 'XUSD') - v_was.holder_xusd <> FACE_XSGD THEN
+    RAISE EXCEPTION 'FAIL: the holder was credited % XUSD, expected the % face',
+      pg_temp.cash(SUPP, 'XUSD') - v_was.holder_xusd, FACE_XSGD;
+  END IF;
+  IF pg_temp.fx('XSGD') - v_was.fx_xsgd <> 2620000000 OR pg_temp.fx('XUSD') - v_was.fx_xusd <> -FACE_XSGD THEN
+    RAISE EXCEPTION 'FAIL: system_fx moved % XSGD and % XUSD, expected +2620000000 and -%',
+      pg_temp.fx('XSGD') - v_was.fx_xsgd, pg_temp.fx('XUSD') - v_was.fx_xusd, FACE_XSGD;
+  END IF;
+  SELECT funding_code::text AS funding, source_amount_base AS source, fx_rate_e6 AS rate INTO v_entry
+    FROM ledger.journal_entry WHERE id = (v_res->>'entryId')::uuid;
+  IF (v_entry.funding, v_entry.source, v_entry.rate) IS DISTINCT FROM ('XSGD', 2620000000::bigint, 1310000::bigint) THEN
+    RAISE EXCEPTION 'FAIL: the redemption entry records (%, %, %), expected (XSGD, 2620000000, 1310000)',
+      v_entry.funding, v_entry.source, v_entry.rate;
+  END IF;
+  IF (v_res->'conversion'->>'sourceDebit')::bigint IS DISTINCT FROM 2620000000 THEN
+    RAISE EXCEPTION 'FAIL: the receipt shows a source debit of %, expected 2620000000',
+      v_res->'conversion'->>'sourceDebit';
+  END IF;
+  RAISE NOTICE 'PASS  an XSGD-funded settlement debits ADATA 1.31x the face and credits the holder XUSD';
+
+  -- Whole-held, paid in USDC: 1:1, so the debit is the face and the rate
+  -- recorded is exactly one.
+  SELECT pg_temp.cash(SUPP, 'XUSD') AS holder_xusd, pg_temp.cash(ANCHOR, 'USDC') AS anchor_usdc INTO v_was;
+  v_res := ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-000000000402','actorUserId','11111111-0000-0000-0000-000000000001',
+    'intent', jsonb_build_object('kind','settle_maturity','payableId',PAY_USDC,'fundingCode','USDC')));
+  IF v_was.anchor_usdc - pg_temp.cash(ANCHOR, 'USDC') <> FACE_USDC
+     OR pg_temp.cash(SUPP, 'XUSD') - v_was.holder_xusd <> FACE_USDC THEN
+    RAISE EXCEPTION 'FAIL: a USDC-funded settlement debited % USDC and credited % XUSD, expected % of each',
+      v_was.anchor_usdc - pg_temp.cash(ANCHOR, 'USDC'), pg_temp.cash(SUPP, 'XUSD') - v_was.holder_xusd, FACE_USDC;
+  END IF;
+  SELECT funding_code::text AS funding, source_amount_base AS source, fx_rate_e6 AS rate INTO v_entry
+    FROM ledger.journal_entry WHERE id = (v_res->>'entryId')::uuid;
+  IF (v_entry.funding, v_entry.source, v_entry.rate) IS DISTINCT FROM ('USDC', FACE_USDC, 1000000::bigint) THEN
+    RAISE EXCEPTION 'FAIL: the redemption entry records (%, %, %), expected (USDC, %, 1000000)',
+      v_entry.funding, v_entry.source, v_entry.rate, FACE_USDC;
+  END IF;
+  RAISE NOTICE 'PASS  a USDC-funded settlement debits the face at par and records a rate of one';
+
+  -- Split three ways, paid in XSGD. Each lot of 50,000.0050 XUSD is
+  -- 65,500.00655 XSGD, which rounds up: converting the three shares
+  -- separately would charge 1965000198, converting the total charges
+  -- 1965000197. ADATA is debited once, for the total.
+  SELECT pg_temp.cash(SUPP, 'XUSD') AS supp, pg_temp.cash(BANK, 'XUSD') AS bank, pg_temp.cash(FUND, 'XUSD') AS fund,
+         pg_temp.cash(ANCHOR, 'XSGD') AS anchor_xsgd
+    INTO v_was;
+  v_res := ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-000000000403','actorUserId','11111111-0000-0000-0000-000000000001',
+    'intent', jsonb_build_object('kind','settle_maturity','payableId',PAY_SPLIT,'fundingCode','XSGD')));
+  IF pg_temp.cash(SUPP, 'XUSD') - v_was.supp <> FACE_SPLIT / 3
+     OR pg_temp.cash(BANK, 'XUSD') - v_was.bank <> FACE_SPLIT / 3
+     OR pg_temp.cash(FUND, 'XUSD') - v_was.fund <> FACE_SPLIT / 3 THEN
+    RAISE EXCEPTION 'FAIL: the three holders were credited %, % and % XUSD, expected % each',
+      pg_temp.cash(SUPP, 'XUSD') - v_was.supp, pg_temp.cash(BANK, 'XUSD') - v_was.bank,
+      pg_temp.cash(FUND, 'XUSD') - v_was.fund, FACE_SPLIT / 3;
+  END IF;
+  IF v_was.anchor_xsgd - pg_temp.cash(ANCHOR, 'XSGD') <> 1965000197 THEN
+    RAISE EXCEPTION 'FAIL: ADATA paid % XSGD for the split payable, expected 1965000197 (the total converted once; three rounded shares would be 1965000198)',
+      v_was.anchor_xsgd - pg_temp.cash(ANCHOR, 'XSGD');
+  END IF;
+  SELECT count(*) FILTER (WHERE s.cash_code = 'XSGD'), count(*) FILTER (WHERE s.cash_code IS DISTINCT FROM 'XSGD')
+    INTO v_n, v_other
+    FROM ledger.journal_leg l
+    JOIN ledger.account a ON a.id = l.account_id
+    JOIN ledger.asset   s ON s.id = l.asset_id
+   WHERE l.entry_id = (v_res->>'entryId')::uuid AND a.wallet_address = ANCHOR;
+  IF v_n <> 1 OR v_other <> 0 THEN
+    RAISE EXCEPTION 'FAIL: the anchor carries % XSGD legs and % in other assets on the split redemption, expected one and none', v_n, v_other;
+  END IF;
+  IF (v_res->'conversion'->>'sourceDebit')::bigint IS DISTINCT FROM 1965000197 THEN
+    RAISE EXCEPTION 'FAIL: the receipt shows a source debit of %, expected 1965000197',
+      v_res->'conversion'->>'sourceDebit';
+  END IF;
+  RAISE NOTICE 'PASS  a split payable paid in XSGD converts the total once and debits ADATA once';
+
+  -- A settlement names its funding asset.
+  SELECT pg_temp.cash(SUPP, 'XUSD') AS holder_xusd,
+         pg_temp.cash(ANCHOR, 'XUSD') + pg_temp.cash(ANCHOR, 'USDC')
+           + pg_temp.cash(ANCHOR, 'USDT') + pg_temp.cash(ANCHOR, 'XSGD') AS anchor_cash
+    INTO v_was;
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','00000000-0000-0000-0000-000000000404','actorUserId','11111111-0000-0000-0000-000000000001',
+      'intent', jsonb_build_object('kind','settle_maturity','payableId',PAY_SHORT)));
+    RAISE EXCEPTION 'FAIL: a settlement with no funding asset was accepted';
+  EXCEPTION WHEN sqlstate 'ADA17' THEN
+    RAISE NOTICE 'PASS  a settlement without a funding asset is refused as malformed';
+  END;
+
+  -- Short of the asset chosen: 52,400 XSGD against the 41,499.9803 left of
+  -- the fixture's 500,000, refused by the shortfall check.
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','00000000-0000-0000-0000-000000000405','actorUserId','11111111-0000-0000-0000-000000000001',
+      'intent', jsonb_build_object('kind','settle_maturity','payableId',PAY_SHORT,'fundingCode','XSGD')));
+    RAISE EXCEPTION 'FAIL: ADATA settled in XSGD it does not hold';
+  EXCEPTION WHEN sqlstate 'ADA20' THEN
+    RAISE NOTICE 'PASS  a settlement in an asset ADATA is short of is refused, naming the shortfall';
+  END;
+
+  IF pg_temp.cash(SUPP, 'XUSD') <> v_was.holder_xusd
+     OR pg_temp.cash(ANCHOR, 'XUSD') + pg_temp.cash(ANCHOR, 'USDC')
+        + pg_temp.cash(ANCHOR, 'USDT') + pg_temp.cash(ANCHOR, 'XSGD') <> v_was.anchor_cash THEN
+    RAISE EXCEPTION 'FAIL: a refused settlement still moved a balance';
+  END IF;
+  PERFORM 1 FROM app.payable WHERE id = PAY_SHORT AND lifecycle_status = 'issued';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'FAIL: a refused settlement changed the payable''s status';
+  END IF;
+  SELECT count(*) INTO v_n FROM ledger.journal_entry
+   WHERE idempotency_key IN ('00000000-0000-0000-0000-000000000404', '00000000-0000-0000-0000-000000000405');
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: % refused settlements left journal entries behind', v_n;
+  END IF;
+  RAISE NOTICE 'PASS  both refusals left every balance, the payable and the journal untouched';
+
+  -- Refused is not stuck: the same payable settles in an asset ADATA holds.
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','00000000-0000-0000-0000-000000000406','actorUserId','11111111-0000-0000-0000-000000000001',
+    'intent', jsonb_build_object('kind','settle_maturity','payableId',PAY_SHORT,'fundingCode','USDC')));
+  PERFORM 1 FROM app.payable WHERE id = PAY_SHORT AND lifecycle_status = 'settled';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'FAIL: the payable did not settle in USDC after the XSGD refusal';
+  END IF;
+  RAISE NOTICE 'PASS  after a refusal the same payable settles in an asset ADATA holds';
 
   ----------------------------------------------------------- 12. the books --
   SELECT count(*) INTO v_n FROM ledger.prove_books_balance();

@@ -183,10 +183,19 @@ export async function rejectReceipt(
   return run({ kind: 'reject_receipt', payableId, holderWallet }, key);
 }
 
-export async function settleMaturity(payableId: string, key?: string): Promise<ActionResult> {
+export async function settleMaturity(
+  payableId: string,
+  fundingCode: string,
+  key?: string,
+): Promise<ActionResult> {
   // A deterministic key, because a settlement sweep has no dialog to mint one
-  // and a retry after a crash must not pay twice.
-  return run({ kind: 'settle_maturity', payableId }, key ?? deterministicKey(`settle:${payableId}`));
+  // and a retry after a crash must not pay twice. The asset is in the seed so
+  // that a retry in a different asset is refused as already settled rather
+  // than as a reused key.
+  return run(
+    { kind: 'settle_maturity', payableId, fundingCode: fundingCode as never },
+    key ?? deterministicKey(`settle:${payableId}:${fundingCode}`),
+  );
 }
 
 // --- market -----------------------------------------------------------------

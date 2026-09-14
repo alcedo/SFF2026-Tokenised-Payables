@@ -137,7 +137,8 @@ SELECT ledger.post(jsonb_build_object(
   'idempotencyKey', '00000000-0000-0000-0000-000000000006',
   'actorUserId',    '11111111-0000-0000-0000-000000000001',
   'intent', jsonb_build_object('kind','settle_maturity',
-                               'payableId','9a000000-0000-0000-0000-000000000141')
+                               'payableId','9a000000-0000-0000-0000-000000000141',
+                               'fundingCode','XUSD')
 )) -> 'kind' AS settled;
 
 \echo '-- final cash. lender should hold 250,000 XUSD against 244,625 USDC paid --'

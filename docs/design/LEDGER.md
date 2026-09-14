@@ -148,7 +148,7 @@ export async function fundSettlement(form: FundSettlementForm) {
     intent: {
       kind: "settle_maturity",
       target: { kind: "payable", payableId: form.payableId },
-      funding: form.fundingAsset,          // "USDC" | "USDT" | "XSGD" | "XUSD"
+      fundingCode: form.fundingAsset,      // "USDC" | "USDT" | "XSGD" | "XUSD"
     },
     // Note what is absent: the holder list and the per-holder amounts.
   });
@@ -157,7 +157,7 @@ export async function fundSettlement(form: FundSettlementForm) {
 
   const { receipt, conversion } = result.value;
   return {
-    sourceDebit: conversion!.sourceDebit,       // e.g. XSGD 320,458.7500 at 1.31
+    sourceDebit: conversion!.sourceDebit,       // e.g. XSGD 327,500.0000 at 1.31 for 250,000 of face
     rate: conversion!.rateE6,
     credits: receipt!.balanceMoves,             // one XUSD credit per current holder
     txHash: receipt!.txHash,

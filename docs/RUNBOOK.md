@@ -129,7 +129,9 @@ Switch to **ADATA preparer** (or checker).
 
 1. **Settlement** lists what is due, with the current holder and quantity.
 2. **Fund settlement**. Choose the funding asset, review the conversion and the
-   per-holder credit, confirm.
+   per-holder credit, confirm. In XSGD, the 250,000 XUSD owed costs
+   327,500.0000 XSGD at the seeded 1.31 rate. The holder is credited XUSD
+   whichever asset ADATA pays with.
 
 The lender receives 250,000 XUSD against the 244,625 they paid. The payable is
 marked **Settled** and cannot move or settle again.

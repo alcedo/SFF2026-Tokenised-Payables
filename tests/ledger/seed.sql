@@ -154,6 +154,18 @@ BEGIN
   END LOOP;
   RAISE NOTICE 'PASS  both lenders are funded in all four assets';
 
+  -- ADATA holds XSGD as well as XUSD, so the settlement screen can show a
+  -- funding-asset choice on a fresh world without a top-up first.
+  SELECT b.balance INTO v_n
+    FROM ledger.account_balance b
+    JOIN ledger.account a ON a.id = b.account_id
+    JOIN ledger.asset s ON s.id = b.asset_id
+   WHERE a.wallet_address = '0xada7a0000000000000000000000000000000c21d' AND s.cash_code = 'XSGD';
+  IF v_n IS DISTINCT FROM 50000000000 THEN
+    RAISE EXCEPTION 'FAIL: ADATA holds % XSGD, expected 50000000000 (5,000,000)', v_n;
+  END IF;
+  RAISE NOTICE 'PASS  ADATA is funded in XSGD as well as XUSD, so settlement can be shown in either';
+
   -- Everything above was produced by real operations, so the books must prove.
   SELECT count(*) INTO v_n FROM ledger.prove_books_balance();
   IF v_n <> 0 THEN RAISE EXCEPTION 'FAIL: seeded books drift on % rows', v_n; END IF;

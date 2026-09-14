@@ -50,17 +50,17 @@ async function become(fragment) {
 }
 
 /** Arm a control, then confirm it. Mirrors what a presenter actually does. */
-async function clickThrough(name) {
-  const button = page.getByRole('button', { name, exact: false }).first();
+async function clickThrough(name, within = page) {
+  const button = within.getByRole('button', { name, exact: false }).first();
   await button.click();
-  const confirm = page.getByRole('button', { name: `Confirm: ${name}`, exact: false }).first();
+  const confirm = within.getByRole('button', { name: `Confirm: ${name}`, exact: false }).first();
   if (await confirm.isVisible().catch(() => false)) await confirm.click();
   await page.waitForTimeout(900);
 }
 
-async function expectText(needle, where) {
-  const body = await page.locator('body').innerText();
-  if (!body.includes(needle)) throw new Error(`expected "${needle}" on ${where}`);
+async function expectText(needle, where, within = page.locator('body')) {
+  const text = await within.innerText();
+  if (!text.includes(needle)) throw new Error(`expected "${needle}" on ${where}`);
 }
 
 try {
@@ -253,14 +253,38 @@ try {
   // -------------------------------------------------------------- 6. settle
   await page.goto(`${BASE}/adata/settlement`, { waitUntil: 'domcontentloaded' });
   await expectText('Settlement', 'the settlement screen');
+  // PRD §8 screen 4: the funding asset is chosen before confirming, with the
+  // conversion and the source debit shown for it. ADATA pays face, so the
+  // 250,000 XUSD owed costs 327,500.0000 XSGD at 1.31. Several seeded payables
+  // are also due at T0 + 90, so every step here is scoped to the runbook's own.
+  const due = page.locator('section', { hasText: created }).first();
+  await due.getByRole('button', { name: 'XSGD', exact: true }).click();
+  await page.waitForTimeout(300);
+  await expectText('1 XUSD = 1.3100 XSGD', 'the settlement panel', due);
+  await expectText('327,500.0000 XSGD', 'the settlement panel', due);
   await shot('settlement');
-  await clickThrough('Fund settlement');
-  await say('ADATA funds settlement to the current holder');
+  await say('ADATA chooses XSGD and reads the conversion: 250,000 XUSD of face is 327,500.0000 XSGD at 1.31');
+
+  await clickThrough('Fund settlement', due);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  if ((await page.locator('body').innerText()).includes(created)) {
+    throw new Error(`${created} is still listed as due after settlement`);
+  }
+  await say('ADATA funds settlement in XSGD, and the payable leaves the due list');
+
+  await become('Rina Okafor');
+  await page.goto(`${BASE}/lender/portfolio`, { waitUntil: 'domcontentloaded' });
+  await expectText('6,770,000.00', "the lender's XUSD balance after settlement");
+  await expectText('250,000.00', `${created}'s portfolio row`, page.locator('tr', { hasText: created }).first());
+  await say('the lender holds 250,000 XUSD more, and the portfolio shows the position realised at face');
 
   await page.goto(`${BASE}/explorer`, { waitUntil: 'domcontentloaded' });
   await expectText('Balanced', 'the explorer');
+  const redemption = page.locator('tr', { hasText: '327,500.0000' }).first();
+  await expectText('redemption', 'the explorer row debiting 327,500.0000', redemption);
+  await expectText('XSGD', 'the explorer row debiting 327,500.0000', redemption);
   await shot('explorer');
-  await say('the books still reconcile to the journal after the full run');
+  await say('the explorer records the redemption funded in XSGD, and the books still reconcile');
 
   // --------------------------------------------------- 7. the other way in
   // PRD §8 screen 2 offers manual entry alongside the ERP import. Shown last

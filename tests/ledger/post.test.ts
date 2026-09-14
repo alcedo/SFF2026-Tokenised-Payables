@@ -187,7 +187,7 @@ describe('post returns a tagged result, never an exception', () => {
     const result = await post({
       key: 'c1000000-0000-0000-0000-000000000004',
       actorUserId: SUPPLIER_USER,
-      intent: { kind: 'settle_maturity', payableId: PAYABLE },
+      intent: { kind: 'settle_maturity', payableId: PAYABLE, fundingCode: 'XUSD' },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('key_reused');

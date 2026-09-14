@@ -14,9 +14,12 @@
 import { useMemo, useState } from 'react';
 
 import { ActionButton } from '@/components/ActionButton';
+import { AssetPicker } from '@/components/AssetPicker';
 import { Notice, Panel } from '@/components/primitives';
 import { buyNow, placeBid } from '@/app/actions';
-import { ASSETS, type Asset, formatUnits, type BaseUnits } from '@/core/money';
+import type { SerialBalances } from '@/db/read';
+import { convert, formatRate } from '@/core/fx';
+import { type Asset, formatUnits, type BaseUnits } from '@/core/money';
 import { formatPercent, priceFromPercent, quote } from '@/core/pricing';
 
 export function BidPanel({
@@ -38,12 +41,13 @@ export function BidPanel({
   daysRemaining: number;
   wallet: string;
   eligible: boolean;
-  balances: Record<string, string>;
+  balances: SerialBalances;
   xsgdPerXusdE6: string;
   isSeller: boolean;
 }) {
   const face = BigInt(listedFaceBase) as BaseUnits;
   const ask = BigInt(askBase) as BaseUnits;
+  const rate = BigInt(xsgdPerXusdE6);
   const askPercent = (Number(ask) / Number(face)) * 100;
 
   const [percent, setPercent] = useState(askPercent.toFixed(2));
@@ -59,13 +63,11 @@ export function BidPanel({
     const bps = Math.round(parsed * 100);
     const price = priceFromPercent(face, bps);
     const q = quote(face, price, daysRemaining);
-    const rate = BigInt(xsgdPerXusdE6);
-    const debit =
-      asset === 'XSGD' ? (BigInt(price) * rate + 500_000n) / 1_000_000n : (BigInt(price) as bigint);
-    return { price, q, debit };
-  }, [valid, parsed, face, daysRemaining, asset, xsgdPerXusdE6]);
+    const conversion = convert(price, asset, rate);
+    return { price, q, debit: conversion.sourceDebit, applied: conversion.rate };
+  }, [valid, parsed, face, daysRemaining, asset, rate]);
 
-  const available = BigInt(balances[asset] ?? '0');
+  const available = BigInt(balances[asset]);
   const short = priced !== null && available < priced.debit;
 
   // Buy-now is charged at the seller's published price, not at whatever is
@@ -73,15 +75,14 @@ export function BidPanel({
   const takeNow = useMemo(() => {
     if (buyNowBase === null) return null;
     const price = BigInt(buyNowBase) as BaseUnits;
-    const rate = BigInt(xsgdPerXusdE6);
-    const debit = asset === 'XSGD' ? (price * rate + 500_000n) / 1_000_000n : (price as bigint);
+    const debit = convert(price, asset, rate).sourceDebit;
     return {
       price,
       debit,
       short: available < debit,
       percent: (Number(price) / Number(face)) * 100,
     };
-  }, [buyNowBase, asset, xsgdPerXusdE6, available, face]);
+  }, [buyNowBase, asset, rate, available, face]);
 
   if (isSeller) {
     return (
@@ -117,27 +118,7 @@ export function BidPanel({
   return (
     <Panel title={buyNowBase ? 'Buy or bid' : 'Place a bid'}>
       <div className="space-y-3">
-        <label className="block">
-          <span className="mb-0.5 block text-[10.5px] tracking-wide text-ink-muted uppercase">
-            Funding asset
-          </span>
-          <div className="flex flex-wrap gap-1">
-            {ASSETS.map((a) => (
-              <button
-                key={a}
-                type="button"
-                onClick={() => setAsset(a)}
-                className={`rounded-[3px] border px-2 py-1 text-[12px] ${
-                  a === asset
-                    ? 'border-accent bg-accent-soft font-medium text-accent'
-                    : 'border-rule-strong bg-surface text-ink-muted hover:bg-surface-sunken'
-                }`}
-              >
-                {a}
-              </button>
-            ))}
-          </div>
-        </label>
+        <AssetPicker value={asset} onChange={setAsset} />
 
         {/*
           PRD §8 screen 11 pairs buy-now with bidding on one screen. It leads,
@@ -162,7 +143,7 @@ export function BidPanel({
             </p>
             <dl className="mb-2 space-y-1 border-t border-accent/20 pt-1.5">
               <Line label={`Debited from you (${asset})`}>
-                <strong>{formatUnits(takeNow.debit as BaseUnits, 4)}</strong> {asset}
+                <strong>{formatUnits(takeNow.debit, 4)}</strong> {asset}
               </Line>
               <Line label={`Your ${asset} balance`}>
                 <span className={takeNow.short ? 'text-critical' : ''}>
@@ -181,7 +162,7 @@ export function BidPanel({
                 confirm={
                   <>
                     Buys {formatUnits(face, 2)} XUSD of face for {formatUnits(takeNow.price, 2)}{' '}
-                    XUSD, debiting {formatUnits(takeNow.debit as BaseUnits, 4)} {asset}. This
+                    XUSD, debiting {formatUnits(takeNow.debit, 4)} {asset}. This
                     settles immediately; the seller does not need to accept.
                   </>
                 }
@@ -227,12 +208,10 @@ export function BidPanel({
             </Line>
             <div className="my-1 border-t border-rule" />
             <Line label="Conversion">
-              {asset === 'XSGD'
-                ? `1 XUSD = ${(Number(xsgdPerXusdE6) / 1_000_000).toFixed(4)} XSGD`
-                : '1:1 with XUSD'}
+              {priced.applied === null ? '1:1 with XUSD' : formatRate(priced.applied)}
             </Line>
             <Line label={`Debited from you (${asset})`}>
-              <strong>{formatUnits(priced.debit as BaseUnits, 4)}</strong> {asset}
+              <strong>{formatUnits(priced.debit, 4)}</strong> {asset}
             </Line>
             <Line label={`Your ${asset} balance`}>
               <span className={short ? 'text-critical' : ''}>

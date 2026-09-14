@@ -1,4 +1,4 @@
-import { ActionButton } from '@/components/ActionButton';
+import { FundingPanel } from './FundingPanel';
 import {
   Address,
   Amount,
@@ -8,17 +8,16 @@ import {
   Panel,
   StatusChip,
 } from '@/components/primitives';
-import { settleMaturity } from '@/app/actions';
-import { formatUnits } from '@/core/money';
-import { readBalances, readHolders, readPayables, readWorld } from '@/db/read';
+import { readBalances, readHolders, readPayables, readWorld, serializeBalances } from '@/db/read';
 
 /**
  * PRD §8 screen 4. Settlement.
  *
- * The screen exists to make one thing legible before ADATA commits: who is
- * owed, and how much each of them gets. A payable that was sold in slices has
- * several current holders, and §7 requires each to be credited in proportion to
- * the quantity they hold, against a single debit from ADATA.
+ * The screen exists to make two things legible before ADATA commits: who is
+ * owed, and how much each of them gets; and what leaves ADATA's wallet, in the
+ * asset it chooses to pay with. A payable that was sold in slices has several
+ * current holders, and §7 requires each to be credited in proportion to the
+ * quantity they hold, against a single debit from ADATA.
  */
 export default async function SettlementPage() {
   const world = await readWorld();
@@ -27,6 +26,7 @@ export default async function SettlementPage() {
   const due = payables.filter((p) => p.status === 'matured' || p.status === 'overdue');
   const anchorWallet = '0xada7a0000000000000000000000000000000c21d';
   const balances = await readBalances(anchorWallet);
+  const cashBalances = serializeBalances(balances);
 
   const withHolders = await Promise.all(
     due.map(async (p) => ({ payable: p, holders: await readHolders(p.id) })),
@@ -124,26 +124,13 @@ export default async function SettlementPage() {
                   <Field label="Status">
                     <DaysRemaining days={payable.daysRemaining} />
                   </Field>
-                  <Field label="Source debit">
-                    <Amount value={payable.outstandingBase} decimals={2} showAsset asset="XUSD" />
-                  </Field>
-
-                  <div className="pt-1">
-                    <ActionButton
-                      label="Fund settlement"
-                      confirm={
-                        <>
-                          Debits ADATA {formatUnits(payable.outstandingBase, 2)} XUSD and credits{' '}
-                          {holders.length === 1 ? 'the holder' : `all ${holders.length} holders`} in
-                          one operation. The payable is then settled and cannot move again.
-                        </>
-                      }
-                      disabled={balances.XUSD < payable.outstandingBase}
-                      disabledReason="ADATA does not hold enough XUSD. Use Simulate top-up."
-                      action={settleMaturity}
-                      args={[payable.id]}
-                    />
-                  </div>
+                  <FundingPanel
+                    payableId={payable.id}
+                    outstandingBase={payable.outstandingBase.toString()}
+                    holderCount={holders.length}
+                    balances={cashBalances}
+                    xsgdPerXusdE6={world.xsgdPerXusdE6.toString()}
+                  />
                 </div>
               </div>
             </Panel>
