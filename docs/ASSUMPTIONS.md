@@ -183,3 +183,35 @@ documents and that this marks the account verified on submit so the flow can be
 shown end to end. Only a supplier or a lender can be onboarded; the anchor and
 the platform are fixtures of this programme, and section 5 names exactly one of
 each.
+
+## What a programme limit is a limit on
+
+Section 8 screen 14 asks for "configurable programme limits" and section 5 gives
+the StraitsX admin the power to "set programme limits", but neither says what a
+limit caps or what happens when it is reached.
+
+**Built:** a cap on the anchor's **currently outstanding** face, not on
+cumulative issuance. An issuance that would take the anchor over it is refused
+at `ledger.post()`, and redemption returns face to the unissued account and
+frees the headroom again. Outstanding is the reading the certification screen
+already used when it showed "currently outstanding" and "headroom"; capping
+cumulative issuance instead would mean a programme that eventually stops
+working however promptly it pays.
+
+**Also enforced:** the issuer's certification status. A suspended or uncertified
+anchor cannot issue. Payables already issued are untouched and still settle at
+maturity, because suspending an issuer is a statement about new business, not a
+repudiation of existing obligations.
+
+**Lowering a limit below what is outstanding is allowed.** An issuer being wound
+down should stop issuing, not have its existing obligations invalidated. The
+screen warns before the change and shows the breach afterwards rather than
+hiding it; issuance stays blocked until the book falls back under the limit.
+
+**A cleared limit is null, not zero.** Null means uncapped; zero would mean no
+issuance at all. The screen says "none set, issuance uncapped" and shows no
+headroom figure rather than showing zero.
+
+**Why this was worth doing at all:** before this, the limit was stored,
+displayed, and enforced nowhere. A number on a screen that no code consults is
+worse than no number, because it invites a viewer to believe a control exists.

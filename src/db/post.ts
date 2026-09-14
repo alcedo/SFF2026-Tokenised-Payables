@@ -72,6 +72,13 @@ export type Intent =
     }
   | { kind: 'create_user'; entityId: string; userName: string; role: Role }
   | { kind: 'remove_user'; userId: string }
+  // PRD §5 and §8 screen 14. Both are enforced at issuance, not just shown.
+  | { kind: 'set_programme_limit'; entityId: string; limitBase: BaseUnits | null }
+  | {
+      kind: 'set_certification';
+      entityId: string;
+      status: 'uncertified' | 'certified' | 'suspended';
+    }
   | { kind: 'settle_maturity'; payableId: string }
   | { kind: 'advance_clock'; days: number }
   | { kind: 'submit'; payableId: string }
@@ -147,6 +154,8 @@ export type PostErrorCode =
   | 'role_mismatch'
   | 'last_user'
   | 'supplier_not_onboarded'
+  | 'issuer_not_certified'
+  | 'programme_limit_exceeded'
   | 'unknown';
 
 export interface PostError {
@@ -191,6 +200,8 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA29: 'role_mismatch',
   ADA30: 'last_user',
   ADA31: 'supplier_not_onboarded',
+  ADA32: 'issuer_not_certified',
+  ADA33: 'programme_limit_exceeded',
   ADA20: 'insufficient_funds',
   ADA21: 'insufficient_quantity',
   '23505': 'duplicate_listing',
@@ -304,5 +315,9 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
     'That is the only account for this organisation. Removing it would strand the wallet it holds, so add another account first.',
   supplier_not_onboarded:
     'That supplier has no account yet, so nobody could accept the payable. Onboard them first.',
+  issuer_not_certified:
+    'That issuer is not certified under this programme, so nothing can be issued against it.',
+  programme_limit_exceeded:
+    'This issuance would take the issuer over its programme limit. Raise the limit, or wait for an outstanding payable to settle.',
   unknown: 'That did not go through. Nothing was changed.',
 };

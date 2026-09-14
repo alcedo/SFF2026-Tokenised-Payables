@@ -45,6 +45,13 @@ Switch to **ADATA preparer**.
 4. Switch to **StraitsX admin**. Certify it and assign grade AA with a rationale.
 5. Issue. The full quantity mints to the supplier's wallet.
 
+**If the audience is a risk or compliance one, spend 30 seconds here.** Open
+**Issuer certification**, drop the programme limit to 1,000,000 and try to
+issue: it is refused, because the limit is checked where face enters the world
+rather than displayed on a dashboard. Raise it back to 25,000,000 and the same
+issuance goes through unchanged. Suspending the issuer blocks new issuance the
+same way and leaves everything already outstanding to settle normally.
+
 > "One invoice, one token ID. The whole face value lands with the supplier."
 
 ## 2. List (45 seconds)

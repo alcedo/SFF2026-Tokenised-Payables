@@ -440,6 +440,7 @@ CREATE TYPE ledger.entry_kind AS ENUM (
   'graded', 'listing_published', 'listing_cancelled', 'bid_placed',
   'bid_withdrawn', 'clock_advanced', 'world_reset', 'receipt_accepted',
   'entity_onboarded', 'user_created', 'user_removed',
+  'programme_limit_set', 'issuer_certification_changed',
   -- legged: chain-relevant actions
   'issuance', 'receipt_rejected', 'top_up', 'transfer', 'trade_settlement', 'redemption'
 );
@@ -869,6 +870,7 @@ BEGIN
   --   ADA26 duplicate_reference  ADA27 duplicate_entity
   --   ADA28 missing_name         ADA29 role_mismatch
   --   ADA30 last_user           ADA31 supplier_not_onboarded
+  --   ADA32 issuer_not_certified ADA33 programme_limit_exceeded
   -- ADA22 to ADA26 exist because PRD §8 screen 2's manual entry is the first
   -- form a person types into freely. Folding them into not_permitted would
   -- tell a preparer who mistyped an invoice number that they lack permission,

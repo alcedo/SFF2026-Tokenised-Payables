@@ -61,6 +61,7 @@ echo "── ledger ────────────────────
 RESET_ARG=reset sql_stage "seed matches PRD section 12" tests/ledger/seed.sql
 RESET_ARG=reset sql_stage "lifecycle: ERP invoice to issued token" tests/ledger/lifecycle.sql
 RESET_ARG=reset sql_stage "accounts: onboarding, personas, removal" tests/ledger/accounts.sql
+RESET_ARG=reset sql_stage "programme: limits and issuer certification" tests/ledger/programme.sql
 RESET_ARG=bare sql_stage "runbook: issue, list, bid, accept, advance, settle" tests/ledger/runbook.sql
 RESET_ARG=bare sql_stage "invariants: the things PRD 14 says must not happen" tests/ledger/invariants.sql
 stage "concurrency: two lenders race one listing" tests/ledger/concurrency.sh

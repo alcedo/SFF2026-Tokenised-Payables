@@ -312,6 +312,30 @@ export async function removeUser(userId: string, key?: string): Promise<ActionRe
 }
 
 /**
+ * PRD §5: the StraitsX admin's two levers over an issuer. Both bite at
+ * issuance, so changing one here changes what the programme can do next, not
+ * just what a screen reports.
+ */
+export async function setProgrammeLimit(
+  entityId: string,
+  limitBase: string | null,
+  key?: string,
+): Promise<ActionResult> {
+  return run(
+    { kind: 'set_programme_limit', entityId, limitBase: limitBase === null ? null : (BigInt(limitBase) as never) },
+    key,
+  );
+}
+
+export async function setCertification(
+  entityId: string,
+  status: string,
+  key?: string,
+): Promise<ActionResult> {
+  return run({ kind: 'set_certification', entityId, status: status as never }, key);
+}
+
+/**
  * A stable UUID derived from a string, for operations whose identity is their
  * target rather than a dialog the user opened.
  */

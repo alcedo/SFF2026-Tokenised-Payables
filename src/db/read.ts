@@ -97,7 +97,7 @@ export interface EntityRow {
   id: string;
   name: string;
   entityType: 'anchor' | 'supplier' | 'lender' | 'platform';
-  certification: 'uncertified' | 'pending' | 'certified' | 'suspended';
+  certification: 'uncertified' | 'certified' | 'suspended';
   wallet: string | null;
   userCount: number;
 }

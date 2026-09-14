@@ -252,6 +252,8 @@ DECLARE
   v_supplier_id uuid;
   v_invoice_ref text;
   v_entity      app.entity;
+  v_limit       bigint;
+  v_outstanding bigint;
   v_user        app.app_user;
   v_role        app.user_role;
   v_name        text;
@@ -287,6 +289,8 @@ BEGIN
     WHEN 'onboard_entity' THEN 'entity_onboarded'
     WHEN 'create_user'    THEN 'user_created'
     WHEN 'remove_user'    THEN 'user_removed'
+    WHEN 'set_programme_limit' THEN 'programme_limit_set'
+    WHEN 'set_certification'   THEN 'issuer_certification_changed'
     ELSE NULL END;
 
   IF v_entry_kind IS NULL THEN
@@ -319,6 +323,36 @@ BEGIN
     IF v_payable.lifecycle_status <> 'certified' THEN
       RAISE EXCEPTION 'payable % is % and must be certified before issuance',
         v_payable.ref, v_payable.lifecycle_status USING ERRCODE = 'ADA15';
+    END IF;
+
+    -- PRD §8 screen 14 and §5: StraitsX certifies the issuer and sets its
+    -- programme limit. Both are checked here, at the only point where face
+    -- enters the world, rather than on the screen that displays them. A limit
+    -- that nothing enforces is a number, not a limit.
+    --
+    -- Locked, because two issuances racing each other could otherwise both
+    -- read the same headroom and both fit inside it.
+    SELECT * INTO v_entity FROM app.entity WHERE id = v_payable.anchor_id FOR UPDATE;
+    IF v_entity.certification_status <> 'certified' THEN
+      RAISE EXCEPTION '% is % and cannot issue under this programme',
+        v_entity.name, v_entity.certification_status USING ERRCODE = 'ADA32';
+    END IF;
+
+    IF v_entity.programme_limit_base IS NOT NULL THEN
+      -- Outstanding, not cumulative: redemption returns face to the unissued
+      -- account and frees the headroom again, which is what the certification
+      -- screen already calls "currently outstanding" and "headroom".
+      SELECT COALESCE(SUM(sup.outstanding_base), 0)::bigint INTO v_outstanding
+        FROM app.payable p
+        JOIN ledger.v_payable_supply sup ON sup.payable_id = p.id
+       WHERE p.anchor_id = v_entity.id;
+      IF v_outstanding + v_payable.face_base > v_entity.programme_limit_base THEN
+        RAISE EXCEPTION
+          'issuing % would take % to % outstanding, over its % programme limit',
+          v_payable.ref, v_entity.name,
+          v_outstanding + v_payable.face_base, v_entity.programme_limit_base
+          USING ERRCODE = 'ADA33';
+      END IF;
     END IF;
 
     INSERT INTO ledger.asset (kind, payable_id, token_id)
@@ -826,6 +860,36 @@ BEGIN
       RAISE EXCEPTION 'the platform already has a StraitsX administrator'
         USING ERRCODE = 'ADA29';
     END;
+
+  ELSIF v_kind IN ('set_programme_limit', 'set_certification') THEN
+    -- PRD §5 gives the StraitsX admin exactly these two levers over an issuer.
+    -- Both go through the journal like every other act, so "who raised the
+    -- limit, and when" is answerable from the explorer rather than from
+    -- nobody's memory.
+    SELECT * INTO v_entity FROM app.entity WHERE id = (v_intent->>'entityId')::uuid FOR UPDATE;
+    IF v_entity.id IS NULL THEN
+      RAISE EXCEPTION 'no such organisation' USING ERRCODE = 'ADA24';
+    END IF;
+
+    IF v_kind = 'set_programme_limit' THEN
+      v_limit := (v_intent->>'limitBase')::bigint;   -- NULL clears the limit
+      IF v_limit IS NOT NULL AND v_limit < 0 THEN
+        RAISE EXCEPTION 'a programme limit cannot be negative' USING ERRCODE = 'ADA19';
+      END IF;
+      -- Lowering a limit below what is already outstanding is allowed: an
+      -- issuer being wound down should stop issuing, not have its existing
+      -- obligations invalidated. The screen shows the breach rather than
+      -- hiding it, and issuance is blocked until it unwinds.
+      UPDATE app.entity SET programme_limit_base = v_limit WHERE id = v_entity.id;
+    ELSE
+      IF (v_intent->>'status') NOT IN ('uncertified', 'certified', 'suspended') THEN
+        RAISE EXCEPTION 'unknown certification status %', v_intent->>'status'
+          USING ERRCODE = 'ADA19';
+      END IF;
+      UPDATE app.entity
+         SET certification_status = (v_intent->>'status')::app.certification_status
+       WHERE id = v_entity.id;
+    END IF;
 
   ELSIF v_kind = 'remove_user' THEN
     -- PRD §5: "The admin account can delete all other users from the platform."

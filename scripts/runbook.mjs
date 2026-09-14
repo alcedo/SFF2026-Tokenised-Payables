@@ -106,8 +106,35 @@ try {
   await clickThrough('Certify');
   await say('StraitsX certifies it under the programme');
 
+  // PRD §8 screen 14 asks for "configurable programme limits" and §5 lets the
+  // admin certify or suspend an issuer. Both bite here, at issuance, so the
+  // limit is demonstrated by refusing the very next act rather than by showing
+  // a number change. The admin persona is already acting, so it costs seconds.
+  await page.goto(`${BASE}/admin/certification`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('textbox', { name: 'Programme limit' }).fill('1000000');
+  await page.waitForTimeout(400);
+  await expectText('below the', 'the warning about lowering under outstanding face');
+  await shot('programme-limit');
+  await clickThrough('Set limit');
+  await say('StraitsX lowers ADATA\'s programme limit below what is outstanding');
+
   await page.goto(`${BASE}/adata/approvals`, { waitUntil: 'domcontentloaded' });
   await clickThrough('Issue to supplier');
+  await expectText('over its programme limit', 'the refused issuance');
+  await say('the next issuance is refused: the limit is enforced, not displayed');
+
+  await page.goto(`${BASE}/admin/certification`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('textbox', { name: 'Programme limit' }).fill('25000000');
+  await page.waitForTimeout(400);
+  await clickThrough('Set limit');
+  await say('raises it back to 25,000,000');
+
+  await page.goto(`${BASE}/adata/approvals`, { waitUntil: 'domcontentloaded' });
+  await clickThrough('Issue to supplier');
+  await page.goto(`${BASE}/adata/approvals`, { waitUntil: 'domcontentloaded' });
+  if ((await page.locator('body').innerText()).includes('Issue to supplier')) {
+    throw new Error('the payable is still awaiting issuance after the limit was raised');
+  }
   await say('issues the full face to the supplier wallet');
 
   // ----------------------------------------------------------------- 2. list
