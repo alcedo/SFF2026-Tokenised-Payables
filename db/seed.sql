@@ -16,7 +16,8 @@
 --
 -- Fictional throughout. ADATA is the intentional named-anchor exception.
 
-\set QUIET on
+-- No psql meta-commands anywhere in this file: the Reset world control
+-- executes it through the driver, where a backslash directive is a syntax error.
 SET client_min_messages TO warning;
 
 -- A thin wrapper so the seed reads as a sequence of business events rather than
@@ -299,4 +300,3 @@ BEGIN
 
   RAISE NOTICE 'seeded: world at %, books reconcile', v_date;
 END $$;
-\set QUIET off
