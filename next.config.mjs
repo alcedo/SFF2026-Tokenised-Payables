@@ -1,11 +1,10 @@
 /** @type {import('next').NextConfig} */
 export default {
   reactStrictMode: true,
-  // The reset control reloads the world by executing these files at runtime, so
-  // they have to reach the deployment. Without this they are left behind as
-  // "unused" and Reset world fails only in production, which is the worst place
-  // to find out.
+  // First-request bootstrap and Reset world execute these files at runtime, so
+  // they have to reach every serverless bundle. Any route can be the first
+  // request against a fresh database.
   outputFileTracingIncludes: {
-    '/reset': ['./db/*.sql'],
+    '/**': ['./db/*.sql'],
   },
 };
