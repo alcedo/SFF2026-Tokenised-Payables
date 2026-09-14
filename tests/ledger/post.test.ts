@@ -25,8 +25,19 @@ const LENDER_USER = '11111111-0000-0000-0000-000000000004';
 const FACE = 2_500_000_000n; // 250,000.0000 XUSD
 const PRICE = 2_446_250_000n; // 97.85% of face
 
+/**
+ * Its own database. vitest runs test files in parallel, so sharing one would
+ * make every run a race between two resets.
+ */
+const DB_NAME = 'adata_test_post';
+
 function run(cmd: string, args: string[]) {
-  return execFileSync(cmd, args, { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' });
+  return execFileSync(cmd, args, {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    stdio: 'pipe',
+    env: { ...process.env, DB_NAME },
+  });
 }
 
 beforeAll(() => {
