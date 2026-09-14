@@ -22,7 +22,7 @@
 --      transitions a *person* caused.
 -- ============================================================================
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- digest() for deterministic mock tx hashes
+CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- digest() for mock tx hashes, gen_random_bytes() for custodial wallets
 
 -- ----------------------------------------------------------------------------
 -- §0  Roles and schemas
