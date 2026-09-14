@@ -50,9 +50,14 @@ realistic however long the URL stays up.
 npm test                     # unit, schema, ledger, invariants, concurrency
 npm run verify:screens       # every screen, every persona, in a real browser
 npm run verify:runbook       # the whole runbook driven click by click
+node scripts/drive.mjs ...   # one screen or one path, step by step, with evidence
 ```
 
-The last two need the app running (`scripts/serve.sh`).
+The last three need the app running (`scripts/serve.sh`). `drive.mjs` is the
+reusable form of the runbook's clicking: `--as` a persona, `--go` a path,
+`--click` a button, `--expect` a text, `--shot` a screenshot. Its header lists
+every step, and `.claude/skills/verify-adata/features/` holds a recipe per
+feature written against it.
 
 ## Deploy to Vercel
 
