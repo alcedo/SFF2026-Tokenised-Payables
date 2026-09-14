@@ -8,7 +8,7 @@
 
 **Delivery:** Mock application now; testnet integration in a later phase
 
-**Status:** Working draft; demo defaults and outstanding decisions are recorded in §§15–16
+**Status:** Working draft; demo defaults and outstanding decisions are recorded in §15. Build assumptions are recorded in `docs/ASSUMPTIONS.md`.
 
 ---
 
@@ -32,7 +32,7 @@ Audiences can also try it out themselves.
 
 | Criterion | Acceptance condition |
 |---|---|
-| Complete story | A viewer can issue → list → bid → accept → advance time → settle within five minutes, following §19. |
+| Complete story | A viewer can issue → list → bid → accept → advance time → settle within five minutes. The presenter script is `docs/RUNBOOK.md`. |
 | Product credibility | All reachable screens work and contain realistic seeded data or useful guidance. No placeholder copy, dead controls, or unfinished routes. |
 | Clear credit narrative | Lender detail leads with ADATA as anchor obligor, its sample/demo credit grade, and the repayment obligation. Supplier information is secondary. |
 | Visible supplier benefit | The supplier dashboard shows sale proceeds, annualised financing cost, and the indicative 18% bank benchmark without opening another screen. |
@@ -223,7 +223,7 @@ Idempotency is required and important for all transaction, similar to how a bloc
 ### StraitsX admin
 
 14. **Issuer certification:** ADATA programme details, certification status, and configurable programme limits.
-15. **Grading:** assign AAA / AA / A with an sample rationale. Only certified, graded payables can be listed. An advance-rate/LTV mapping is pending definition (§16); do not present it as an external rating or guarantee.
+15. **Grading:** assign AAA / AA / A with an sample rationale. Only certified, graded payables can be listed. An advance-rate/LTV mapping is still pending definition and is not built; do not present a grade as an external rating or guarantee.
 16. **Programme oversight:** issued, financed, settled, and overdue totals, with access to event history and the sample recovery case.
 
 ### Common to all users
@@ -245,7 +245,7 @@ Use **bid-and-accept with optional buy-now**. A full order book, automatic aucti
 - On successful purchase, move only the listed quantity, expire competing bids, and show the seller's XUSD receipt, the buyer's new holding, and the seller's remaining quantity if any.
 - Secondary sales use the same rules.
 
-**Structure decision:** the draft demonstrates direct institutional purchase. The earlier source notes also describe lending through a pool with licensed intermediaries. Institutional gating does not settle that difference. Keep the direct-purchase flow as an explicit demo assumption until legal and commercial owners confirm the structure (§16).
+**Structure decision — settled.** Direct institutional purchase. A lender buys the payable and holds it; ADATA pays whoever holds it at maturity. The earlier source notes describing lending through a pool with licensed intermediaries are **not** being built, now or later.
 
 ## 10. Wallets, funding, and audit history
 

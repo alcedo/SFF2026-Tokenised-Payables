@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+
+/*
+ * PRD section 2: "Use the visual language of treasury and trade-finance
+ * portals: restrained colours, clear tables, compact layouts, and readable
+ * numbers."
+ *
+ * That rules out the defaults a demo usually reaches for. No gradients, no
+ * large radii, no saturated brand colour used as decoration. Colour carries
+ * meaning only: obligation status, grade, and the direction of a balance
+ * change. Everything else is ink on paper.
+ */
+@theme {
+  --color-ink: #0f172a;
+  --color-ink-muted: #64748b;
+  --color-ink-faint: #94a3b8;
+
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f8fafc;
+  --color-surface-raised: #f1f5f9;
+
+  --color-rule: #e2e8f0;
+  --color-rule-strong: #cbd5e1;
+
+  /* One accent, used for primary actions and active navigation only. */
+  --color-accent: #1b3a5c;
+  --color-accent-hover: #142d48;
+  --color-accent-soft: #eef2f7;
+
+  --color-positive: #15803d;
+  --color-positive-soft: #f0fdf4;
+  --color-caution: #b45309;
+  --color-caution-soft: #fffbeb;
+  --color-critical: #b91c1c;
+  --color-critical-soft: #fef2f2;
+
+  --radius-control: 3px;
+  --radius-panel: 4px;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /*
+   * Figures are read across columns and compared, so every numeral must occupy
+   * the same width. This is the "readable numbers" requirement made concrete.
+   */
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-surface-sunken);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Every figure in the product carries this. Tabular figures keep decimal points
+ * aligned down a column, which is what makes a table of payables scannable.
+ */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wallet addresses and mock transaction hashes. */
+.addr {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+  color: var(--color-ink-muted);
+}
+
+table.ledger {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+
+table.ledger thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface-raised);
+  color: var(--color-ink-muted);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--color-rule-strong);
+  white-space: nowrap;
+}
+
+table.ledger thead th.num {
+  text-align: right;
+}
+
+table.ledger tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-rule);
+  vertical-align: middle;
+}
+
+table.ledger tbody tr:last-child td {
+  border-bottom: none;
+}
+
+table.ledger tbody tr:hover {
+  background: var(--color-surface-sunken);
+}
+
+/* Focus stays visible for keyboard use at the booth. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
