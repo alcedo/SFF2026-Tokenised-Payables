@@ -91,6 +91,55 @@ export async function readPersonas(): Promise<Persona[]> {
   }));
 }
 
+// --- entities ---------------------------------------------------------------
+
+export interface EntityRow {
+  id: string;
+  name: string;
+  entityType: 'anchor' | 'supplier' | 'lender' | 'platform';
+  certification: 'uncertified' | 'pending' | 'certified' | 'suspended';
+  wallet: string | null;
+  userCount: number;
+}
+
+/**
+ * Counterparties on the platform. PRD §5 and §8 screens 2, 5 and 14.
+ *
+ * One function rather than one per screen, because "the suppliers", "the
+ * lenders" and "everyone" are the same question with a different argument, and
+ * three near-identical queries would be three places to fix a join.
+ */
+export async function readEntities(
+  type?: EntityRow['entityType'],
+): Promise<EntityRow[]> {
+  return (
+    await query<{
+      id: string;
+      name: string;
+      entity_type: EntityRow['entityType'];
+      certification_status: EntityRow['certification'];
+      wallet: string | null;
+      user_count: bigint;
+    }>(
+      `SELECT e.id, e.name, e.entity_type, e.certification_status,
+              (SELECT w.address FROM app.wallet w WHERE w.entity_id = e.id LIMIT 1) AS wallet,
+              (SELECT count(*) FROM app.app_user u
+                WHERE u.entity_id = e.id AND u.deactivated_at IS NULL)::bigint AS user_count
+         FROM app.entity e
+        WHERE ($1::text IS NULL OR e.entity_type::text = $1)
+        ORDER BY e.name`,
+      [type ?? null],
+    )
+  ).map((r) => ({
+    id: r.id,
+    name: r.name,
+    entityType: r.entity_type,
+    certification: r.certification_status,
+    wallet: r.wallet,
+    userCount: Number(r.user_count),
+  }));
+}
+
 // --- wallets ----------------------------------------------------------------
 
 export type Balances = Record<Asset, BaseUnits>;

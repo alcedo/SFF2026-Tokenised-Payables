@@ -278,6 +278,12 @@ CREATE TABLE app.payable (
     CHECK (lifecycle_status IN ('draft','pending_approval','approved','certified')
            OR issue_date IS NOT NULL)
 );
+-- INVARIANT: one supplier's invoice is financed once. Manual entry (PRD §8
+-- screen 2) lets a preparer type an invoice reference by hand, and financing
+-- the same invoice twice is the fraud this programme exists to prevent, so the
+-- database refuses it rather than a form remembering to check.
+CREATE UNIQUE INDEX payable_one_per_invoice
+  ON app.payable(original_supplier_id, invoice_ref);
 CREATE INDEX payable_by_series   ON app.payable(series_id) WHERE series_id IS NOT NULL;
 CREATE INDEX payable_by_maturity ON app.payable(maturity_date) WHERE lifecycle_status = 'issued';
 
@@ -852,6 +858,13 @@ BEGIN
   --   ADA11 listing_not_open     ADA12 past_maturity
   --   ADA13 stale_owner          ADA14 series_not_whole_lot
   --   ADA15 not_permitted        ADA16 already_settled
+  --   ADA22 duplicate_invoice    ADA23 invalid_terms
+  --   ADA24 unknown_supplier     ADA25 missing_invoice_ref
+  --   ADA26 duplicate_reference
+  -- ADA22 to ADA26 exist because PRD §8 screen 2's manual entry is the first
+  -- form a person types into freely. Folding them into not_permitted would
+  -- tell a preparer who mistyped an invoice number that they lack permission,
+  -- which is both wrong and unactionable.
   -- Insufficient funds and over-quantity transfers need no explicit check:
   -- the CHECK in §4 raises 23514 when the leg lands, which post.ts maps to
   -- insufficient_funds / insufficient_unlisted_quantity using the leg's asset

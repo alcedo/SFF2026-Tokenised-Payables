@@ -21,7 +21,7 @@ const EXECUTABLE = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium-1194/
 
 /** Persona name fragment -> the screens that persona can reach. */
 const TOURS = [
-  { persona: 'Wei-Ling Chen', label: 'adata-preparer', paths: ['/adata', '/adata/create', '/adata/approvals', '/adata/settlement', '/explorer'] },
+  { persona: 'Wei-Ling Chen', label: 'adata-preparer', paths: ['/adata', '/adata/create', '/adata/create?mode=manual', '/adata/approvals', '/adata/settlement', '/explorer'] },
   { persona: 'Hsu Po-Chun', label: 'adata-checker', paths: ['/adata/approvals'] },
   { persona: 'Tang Mei-Hua', label: 'supplier', paths: ['/supplier', '/supplier/offers', '/transfer'] },
   { persona: 'Rina Okafor', label: 'lender', paths: ['/lender', '/lender/portfolio', '/transfer', '/reset'] },

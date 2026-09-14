@@ -228,7 +228,38 @@ try {
   await shot('explorer');
   await say('the books still reconcile to the journal after the full run');
 
-  // ------------------------------------------------------- 7. reset guards
+  // --------------------------------------------------- 7. the other way in
+  // PRD §8 screen 2 offers manual entry alongside the ERP import. Shown last
+  // because the ERP picker is the headline path, and the draft it leaves
+  // behind is cleared by the reset immediately below.
+  await become('Wei-Ling Chen');
+  await page.goto(`${BASE}/adata/create?mode=manual`, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel('Invoice reference').fill('INV-TW-BYHAND-01');
+  await page.getByLabel('Invoice face').fill('412500');
+  await page.getByLabel('Payment terms').fill('45');
+  await page.waitForTimeout(400);
+  await expectText('412,500.0000 XUSD', 'the manual entry preview');
+  await shot('manual-entry');
+  await clickThrough('Create payable');
+  // Creation is an audit event, not a chain one, so §10 gives it no receipt.
+  await expectText('Done.', 'the manual creation result');
+  await say('creates a second payable by hand, for an invoice the ERP does not have');
+
+  await page.goto(`${BASE}/adata/approvals`, { waitUntil: 'domcontentloaded' });
+  await expectText('INV-TW-BYHAND-01', 'the approval queue');
+  await say('it lands in the same approval queue as an imported one');
+
+  // The same invoice cannot be financed twice, whichever way it was entered.
+  await page.goto(`${BASE}/adata/create?mode=manual`, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel('Invoice reference').fill('INV-TW-BYHAND-01');
+  await page.getByLabel('Invoice face').fill('412500');
+  await page.getByLabel('Payment terms').fill('45');
+  await page.waitForTimeout(400);
+  await clickThrough('Create payable');
+  await expectText('already been financed for this supplier', 'the duplicate refusal');
+  await say('entering the same invoice again is refused, not silently duplicated');
+
+  // ------------------------------------------------------- 8. reset guards
   // The demo runs on a public URL, so the one control that destroys everyone
   // else's session is checked here rather than trusted. Last, because a
   // successful reset is also how the world is handed to the next presenter.

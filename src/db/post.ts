@@ -22,7 +22,18 @@ import type { Asset, BaseUnits } from '@/core/money';
  * round-trip test in tests/ledger catches.
  */
 export type Intent =
+  // PRD §8 screen 2: "manual entry or Import from ERP". Two shapes, one kind,
+  // because the database treats them as one act producing one audit event.
   | { kind: 'create_payable'; erpInvoiceId: string; ref: string; payableId?: string }
+  | {
+      kind: 'create_payable';
+      ref: string;
+      supplierId: string;
+      invoiceRef: string;
+      faceBase: BaseUnits;
+      termsDays: number;
+      payableId?: string;
+    }
   | { kind: 'issue_payable'; payableId: string; toWallet: string; tokenId: number }
   | { kind: 'accept_receipt'; payableId: string }
   | { kind: 'reject_receipt'; payableId: string; holderWallet: string }
@@ -111,6 +122,14 @@ export type PostErrorCode =
   | 'key_reused'
   | 'contended'
   | 'invalid_amount'
+  // PRD §8 screen 2's manual entry is the first form a person types into
+  // freely, so its refusals get their own codes rather than being folded into
+  // not_permitted. See the registry in db/schema.sql.
+  | 'duplicate_invoice'
+  | 'invalid_terms'
+  | 'unknown_supplier'
+  | 'missing_invoice_ref'
+  | 'duplicate_reference'
   | 'unknown';
 
 export interface PostError {
@@ -145,6 +164,11 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA17: 'unknown',
   ADA18: 'unknown',
   ADA19: 'invalid_amount',
+  ADA22: 'duplicate_invoice',
+  ADA23: 'invalid_terms',
+  ADA24: 'unknown_supplier',
+  ADA25: 'missing_invoice_ref',
+  ADA26: 'duplicate_reference',
   ADA20: 'insufficient_funds',
   ADA21: 'insufficient_quantity',
   '23505': 'duplicate_listing',
@@ -245,5 +269,11 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
   key_reused: 'This confirmation was already used for a different action. Reopen the dialog and try again.',
   contended: 'Someone else is acting on this right now. Try again in a moment.',
   invalid_amount: 'Enter an amount greater than zero, in whole units of 0.0001.',
+  duplicate_invoice:
+    'That invoice has already been financed for this supplier. One invoice backs one payable.',
+  invalid_terms: 'Payment terms must be between 1 and 365 days.',
+  unknown_supplier: 'That supplier is not on the platform.',
+  missing_invoice_ref: 'Enter the invoice reference this payable is backed by.',
+  duplicate_reference: 'That payable reference is already in use. Reload and try again.',
   unknown: 'That did not go through. Nothing was changed.',
 };

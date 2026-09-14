@@ -16,10 +16,85 @@ DECLARE
   CHECKR uuid := '11111111-0000-0000-0000-000000000002';
   ADMIN uuid := '11111111-0000-0000-0000-000000000008';
   SUPP  text := '0x509911000000000000000000000000000000f88a';
+  SUPPLIER_ENTITY uuid := 'e0000000-0000-0000-0000-000000000c41';  -- Chien Yu Precision
   v_id   uuid;
   v_state text;
   v_grade text;
+  v_face bigint;
+  v_maturity date;
+  v_supplier uuid;
 BEGIN
+  ---------------------------------------------------------- manual entry --
+  -- PRD §8 screen 2 offers manual entry alongside the ERP import. It has to
+  -- produce the same kind of draft, and it has to refuse the four things a
+  -- typed form can get wrong that a picked ERP row cannot.
+  PERFORM ledger.post(jsonb_build_object(
+    'idempotencyKey','bbbb0000-0000-0000-0000-000000000001','actorUserId',PREP,
+    'intent', jsonb_build_object('kind','create_payable','ref','TP-2026-0198',
+      'supplierId', SUPPLIER_ENTITY, 'invoiceRef','INV-TW-HANDTYPED',
+      'faceBase', 1234500000, 'termsDays', 60)));
+  SELECT lifecycle_status, face_base, maturity_date, original_supplier_id
+    INTO v_state, v_face, v_maturity, v_supplier
+    FROM app.payable WHERE ref='TP-2026-0198';
+  IF v_state <> 'draft' THEN
+    RAISE EXCEPTION 'FAIL: manual entry created as %, expected draft', v_state;
+  END IF;
+  IF v_face <> 1234500000 THEN
+    RAISE EXCEPTION 'FAIL: face is %, expected the 1234500000 typed', v_face;
+  END IF;
+  IF v_maturity <> (SELECT t0 + offset_days + 60 FROM app.world) THEN
+    RAISE EXCEPTION 'FAIL: maturity is %, expected today plus the 60-day terms', v_maturity;
+  END IF;
+  IF v_supplier <> SUPPLIER_ENTITY THEN
+    RAISE EXCEPTION 'FAIL: manual entry named the wrong supplier';
+  END IF;
+  RAISE NOTICE 'PASS  a hand-typed invoice becomes a draft with derived maturity';
+
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','bbbb0000-0000-0000-0000-000000000002','actorUserId',PREP,
+      'intent', jsonb_build_object('kind','create_payable','ref','TP-2026-0197',
+        'supplierId', SUPPLIER_ENTITY, 'invoiceRef','INV-TW-HANDTYPED',
+        'faceBase', 5000000, 'termsDays', 30)));
+    RAISE EXCEPTION 'FAIL: the same invoice was financed twice';
+  EXCEPTION WHEN sqlstate 'ADA22' THEN
+    RAISE NOTICE 'PASS  one supplier invoice cannot be financed twice, under its own code';
+  END;
+
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','bbbb0000-0000-0000-0000-000000000003','actorUserId',PREP,
+      'intent', jsonb_build_object('kind','create_payable','ref','TP-2026-0196',
+        'supplierId', SUPPLIER_ENTITY, 'invoiceRef','INV-TW-ZERODAY',
+        'faceBase', 5000000, 'termsDays', 0)));
+    RAISE EXCEPTION 'FAIL: accepted terms that mature on the issue date';
+  EXCEPTION WHEN sqlstate 'ADA23' THEN
+    RAISE NOTICE 'PASS  zero-day terms are refused at creation, not at issuance';
+  END;
+
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','bbbb0000-0000-0000-0000-000000000004','actorUserId',PREP,
+      'intent', jsonb_build_object('kind','create_payable','ref','TP-2026-0195',
+        'supplierId', SUPPLIER_ENTITY, 'invoiceRef','   ',
+        'faceBase', 5000000, 'termsDays', 30)));
+    RAISE EXCEPTION 'FAIL: accepted a blank invoice reference';
+  EXCEPTION WHEN sqlstate 'ADA25' THEN
+    RAISE NOTICE 'PASS  a blank invoice reference is refused';
+  END;
+
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','bbbb0000-0000-0000-0000-000000000005','actorUserId',PREP,
+      'intent', jsonb_build_object('kind','create_payable','ref','TP-2026-0194',
+        'supplierId', (SELECT id FROM app.entity WHERE entity_type='lender' LIMIT 1),
+        'invoiceRef','INV-TW-WRONGPARTY', 'faceBase', 5000000, 'termsDays', 30)));
+    RAISE EXCEPTION 'FAIL: created a payable owed to a lender';
+  EXCEPTION WHEN sqlstate 'ADA24' THEN
+    RAISE NOTICE 'PASS  only a supplier can be the original supplier';
+  END;
+
+  ------------------------------------------------------------ ERP import --
   PERFORM ledger.post(jsonb_build_object(
     'idempotencyKey','aaaa0000-0000-0000-0000-000000000001','actorUserId',PREP,
     'intent', jsonb_build_object('kind','create_payable','ref','TP-2026-0199',

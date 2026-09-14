@@ -249,6 +249,8 @@ DECLARE
   v_series      app.series;
   v_leg         RECORD;
   v_erp         app.erp_invoice;
+  v_supplier_id uuid;
+  v_invoice_ref text;
 BEGIN
   IF v_key IS NULL THEN
     RAISE EXCEPTION 'every command needs an idempotencyKey' USING ERRCODE = 'ADA17';
@@ -668,30 +670,73 @@ BEGIN
     END IF;
 
   ELSIF v_kind = 'create_payable' THEN
-    -- Importing from the ERP mock rather than typing an invoice by hand is the
-    -- common path (PRD section 8 screen 2), so the invoice is consumed here and
-    -- the picker greys it out. Doing it inside post() means the creation is in
-    -- the audit trail like every other act, instead of being a silent insert.
-    SELECT * INTO v_erp FROM app.erp_invoice WHERE id = (v_intent->>'erpInvoiceId')::uuid FOR UPDATE;
-    IF v_erp.id IS NULL THEN
-      RAISE EXCEPTION 'no such ERP invoice' USING ERRCODE = 'ADA15';
-    END IF;
-    IF v_erp.consumed_by IS NOT NULL THEN
-      RAISE EXCEPTION 'invoice % has already been issued as a payable', v_erp.doc_no
-        USING ERRCODE = 'ADA15';
+    -- PRD section 8 screen 2 offers two ways in: import from the ERP mock, or
+    -- type the invoice by hand. Both land here, in one branch producing one
+    -- row and one audit event, because the difference is only where the four
+    -- facts come from. An ERP import additionally consumes the invoice so the
+    -- picker can grey it out; manual entry has nothing to consume.
+    IF v_intent ? 'erpInvoiceId' THEN
+      SELECT * INTO v_erp FROM app.erp_invoice WHERE id = (v_intent->>'erpInvoiceId')::uuid FOR UPDATE;
+      IF v_erp.id IS NULL THEN
+        RAISE EXCEPTION 'no such ERP invoice' USING ERRCODE = 'ADA15';
+      END IF;
+      IF v_erp.consumed_by IS NOT NULL THEN
+        RAISE EXCEPTION 'invoice % has already been issued as a payable', v_erp.doc_no
+          USING ERRCODE = 'ADA15';
+      END IF;
+      v_supplier_id := v_erp.supplier_id;
+      v_invoice_ref := v_erp.invoice_ref;
+      v_qty         := v_erp.amount_base;
+      v_days        := v_erp.terms_days;
+    ELSE
+      v_supplier_id := (v_intent->>'supplierId')::uuid;
+      v_invoice_ref := btrim(COALESCE(v_intent->>'invoiceRef', ''));
+      v_qty         := (v_intent->>'faceBase')::bigint;
+      v_days        := (v_intent->>'termsDays')::int;
+
+      PERFORM 1 FROM app.entity
+       WHERE id = v_supplier_id AND entity_type = 'supplier';
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'no such supplier' USING ERRCODE = 'ADA24';
+      END IF;
+      IF v_invoice_ref = '' THEN
+        RAISE EXCEPTION 'an invoice reference is required' USING ERRCODE = 'ADA25';
+      END IF;
+      IF v_qty IS NULL OR v_qty <= 0 THEN
+        RAISE EXCEPTION 'the face value must be greater than zero' USING ERRCODE = 'ADA19';
+      END IF;
+      -- The schema's maturity_after_issue check cannot help here: a draft has
+      -- no issue date yet, so a zero-day term would pass it and only fail much
+      -- later, at issuance, with a confusing message.
+      IF v_days IS NULL OR v_days < 1 OR v_days > 365 THEN
+        RAISE EXCEPTION 'payment terms must be between 1 and 365 days' USING ERRCODE = 'ADA23';
+      END IF;
     END IF;
 
-    INSERT INTO app.payable (id, ref, anchor_id, original_supplier_id, invoice_ref,
-                             face_base, maturity_date, lifecycle_status)
-    VALUES (COALESCE((v_intent->>'payableId')::uuid, gen_random_uuid()),
-            v_intent->>'ref',
-            (SELECT id FROM app.entity WHERE entity_type = 'anchor' ORDER BY name LIMIT 1),
-            v_erp.supplier_id, v_erp.invoice_ref, v_erp.amount_base,
-            (v_world.t0 + v_world.offset_days) + v_erp.terms_days,
-            'draft')
-    RETURNING * INTO v_payable;
+    BEGIN
+      INSERT INTO app.payable (id, ref, anchor_id, original_supplier_id, invoice_ref,
+                               face_base, maturity_date, lifecycle_status)
+      VALUES (COALESCE((v_intent->>'payableId')::uuid, gen_random_uuid()),
+              v_intent->>'ref',
+              (SELECT id FROM app.entity WHERE entity_type = 'anchor' ORDER BY name LIMIT 1),
+              v_supplier_id, v_invoice_ref, v_qty,
+              (v_world.t0 + v_world.offset_days) + v_days,
+              'draft')
+      RETURNING * INTO v_payable;
+    EXCEPTION WHEN unique_violation THEN
+      -- One index guards the reference, another guards the invoice. Saying
+      -- which one was hit is the difference between a preparer fixing a typo
+      -- and a preparer wondering what the system means.
+      IF SQLERRM LIKE '%payable_one_per_invoice%' THEN
+        RAISE EXCEPTION 'invoice % has already been financed for this supplier', v_invoice_ref
+          USING ERRCODE = 'ADA22';
+      END IF;
+      RAISE EXCEPTION 'reference % is already in use', v_intent->>'ref' USING ERRCODE = 'ADA26';
+    END;
 
-    UPDATE app.erp_invoice SET consumed_by = v_payable.id WHERE id = v_erp.id;
+    IF v_erp.id IS NOT NULL THEN
+      UPDATE app.erp_invoice SET consumed_by = v_payable.id WHERE id = v_erp.id;
+    END IF;
     UPDATE ledger.journal_entry SET payable_id = v_payable.id WHERE id = v_entry.id;
 
   ELSIF v_kind IN ('submit','approve','certify','grade') THEN

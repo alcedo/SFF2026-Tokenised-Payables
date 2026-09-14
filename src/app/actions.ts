@@ -111,6 +111,35 @@ export async function createPayableFromErp(
   return run({ kind: 'create_payable', erpInvoiceId, ref }, key);
 }
 
+/**
+ * PRD §8 screen 2's other path: an invoice typed by hand rather than imported.
+ *
+ * Takes strings because it is called from a form. Everything it can get wrong —
+ * a blank reference, a zero face, zero-day terms, an unknown supplier, an
+ * invoice already financed — is refused by `ledger.post()` with a message, not
+ * validated twice.
+ */
+export async function createPayableManually(
+  ref: string,
+  supplierId: string,
+  invoiceRef: string,
+  faceBase: string,
+  termsDays: string,
+  key?: string,
+): Promise<ActionResult> {
+  return run(
+    {
+      kind: 'create_payable',
+      ref,
+      supplierId,
+      invoiceRef,
+      faceBase: BigInt(faceBase) as never,
+      termsDays: Number(termsDays),
+    },
+    key,
+  );
+}
+
 export async function submitPayable(payableId: string, key?: string): Promise<ActionResult> {
   return run({ kind: 'submit', payableId }, key);
 }
