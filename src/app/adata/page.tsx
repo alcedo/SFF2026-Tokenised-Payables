@@ -9,9 +9,6 @@ import {
   Stat,
   StatusChip,
 } from '@/components/primitives';
-import { NextActionStrip } from '@/components/NextActionStrip';
-import { currentPersona } from '@/app/session';
-import { deriveNextAction } from '@/core/next-action';
 import { formatUnits } from '@/core/money';
 import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
 
@@ -25,24 +22,7 @@ import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
  */
 export default async function AdataDashboard() {
   const world = await readWorld();
-  const [persona, totals, payables] = await Promise.all([
-    currentPersona(),
-    readProgrammeTotals(world),
-    readPayables(world),
-  ]);
-  const next = deriveNextAction({
-    actor: { role: persona.role, name: persona.name, wallet: persona.wallet },
-    payables: payables.map((p) => ({
-      id: p.id,
-      ref: p.ref,
-      storedStatus: p.storedStatus,
-      status: p.status,
-      daysRemaining: p.daysRemaining,
-      grade: p.grade,
-    })),
-    holdings: [],
-    listings: [],
-  });
+  const [totals, payables] = await Promise.all([readProgrammeTotals(world), readPayables(world)]);
 
   const live = payables.filter(
     (p) => p.status === 'issued' || p.status === 'matured' || p.status === 'overdue',
@@ -58,8 +38,6 @@ export default async function AdataDashboard() {
           face value at maturity, to whoever holds it then.
         </p>
       </div>
-
-      <NextActionStrip action={next} />
 
       <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
         <Stat label="Outstanding" value={totals.issuedCount} hint="payables" />

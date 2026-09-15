@@ -110,7 +110,16 @@ describe('deriveNextAction', () => {
   it('asks a lender to review the first open lot', () => {
     const snapshot: NextActionSnapshot = {
       actor: actor('lender'),
-      payables: [],
+      payables: [
+        {
+          id: 'p-overdue',
+          ref: 'TP-2026-0119',
+          storedStatus: 'issued',
+          status: 'overdue',
+          daysRemaining: -45,
+          grade: 'A',
+        },
+      ],
       holdings: [],
       listings: [{ id: 'lot-1', targetRef: 'TP-2026-0143', sellerWallet: '0xseller', bidCount: 0 }],
     };

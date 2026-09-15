@@ -11,9 +11,6 @@ import {
   Stat,
 } from '@/components/primitives';
 import { MarketFilters } from './MarketFilters';
-import { NextActionStrip } from '@/components/NextActionStrip';
-import { currentPersona } from '@/app/session';
-import { deriveNextAction } from '@/core/next-action';
 import { formatUnits } from '@/core/money';
 import { applyFilter, isFiltered, parseFilter } from '@/core/market';
 import { readMarketplace, readWorld } from '@/db/read';
@@ -37,21 +34,10 @@ export default async function MarketplacePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [world, params, persona] = await Promise.all([readWorld(), searchParams, currentPersona()]);
+  const [world, params] = await Promise.all([readWorld(), searchParams]);
   const all = await readMarketplace(world);
   const filter = parseFilter(params);
   const listings = applyFilter(all, filter);
-  const next = deriveNextAction({
-    actor: { role: persona.role, name: persona.name, wallet: persona.wallet },
-    payables: [],
-    holdings: [],
-    listings: all.map((l) => ({
-      id: l.id,
-      targetRef: l.targetRef,
-      sellerWallet: l.sellerWallet,
-      bidCount: l.bidCount,
-    })),
-  });
 
   const totalFace = listings.reduce<bigint>((acc, l) => acc + l.listedFaceBase, 0n);
   const bestYield = listings.reduce((best, l) => Math.max(best, l.quote.lenderYieldPercent ?? 0), 0);
@@ -66,8 +52,6 @@ export default async function MarketplacePage({
           </p>
         </div>
       </div>
-
-      <NextActionStrip action={next} />
 
       <MarketFilters shown={listings.length} total={all.length} />
 

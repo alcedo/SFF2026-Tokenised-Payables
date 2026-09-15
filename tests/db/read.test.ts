@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
 import { closePool } from '@/db/client';
+import { loadNextAction } from '@/app/next-action-data';
 import {
   readBalances,
   readBids,
@@ -299,5 +300,41 @@ describe('a listing can be found from its target', () => {
     const tp141 = payables.find((p) => p.ref === 'TP-2026-0141')!;
     const listing = await readListingForTarget(tp141.id, world);
     expect(listing?.targetRef).toBe('TP-2026-0141');
+  });
+});
+
+describe('the next action for a seeded persona', () => {
+  it('sends the ADATA checker to fund the overdue payable', async () => {
+    const personas = await readPersonas();
+    const checker = personas.find((p) => p.name === 'Hsu Po-Chun');
+    expect(checker).toBeDefined();
+    expect(await loadNextAction(checker!, world)).toEqual({
+      kind: 'yours',
+      verb: 'Fund settlement of TP-2026-0119',
+      href: '/adata/settlement',
+      detail: 'Maturity does not pay anyone. Settlement is an explicit act.',
+    });
+  });
+
+  it('sends a lender to an open lot even when payables exist', async () => {
+    const personas = await readPersonas();
+    const lender = personas.find((p) => p.name === 'Rina Okafor');
+    expect(lender).toBeDefined();
+    const action = await loadNextAction(lender!, world);
+    expect(action.kind).toBe('yours');
+    if (action.kind !== 'yours') return;
+    expect(action.verb).toMatch(/^Review TP-/);
+    expect(action.href).toMatch(/^\/lender\//);
+  });
+
+  it('tells the admin the programme is current', async () => {
+    const personas = await readPersonas();
+    const admin = personas.find((p) => p.name === 'Nadia Rahman');
+    expect(admin).toBeDefined();
+    expect(await loadNextAction(admin!, world)).toEqual({
+      kind: 'clear',
+      heading: 'Programme is current.',
+      detail: 'Open Explorer to show the trail, or Accounts to add a user.',
+    });
   });
 });

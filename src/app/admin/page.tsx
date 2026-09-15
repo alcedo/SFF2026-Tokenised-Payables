@@ -8,9 +8,6 @@ import {
   Stat,
   StatusChip,
 } from '@/components/primitives';
-import { NextActionStrip } from '@/components/NextActionStrip';
-import { currentPersona } from '@/app/session';
-import { deriveNextAction } from '@/core/next-action';
 import { formatUnits } from '@/core/money';
 import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
 
@@ -28,24 +25,7 @@ import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
  */
 export default async function AdminPage() {
   const world = await readWorld();
-  const [persona, totals, payables] = await Promise.all([
-    currentPersona(),
-    readProgrammeTotals(world),
-    readPayables(world),
-  ]);
-  const next = deriveNextAction({
-    actor: { role: persona.role, name: persona.name, wallet: persona.wallet },
-    payables: payables.map((p) => ({
-      id: p.id,
-      ref: p.ref,
-      storedStatus: p.storedStatus,
-      status: p.status,
-      daysRemaining: p.daysRemaining,
-      grade: p.grade,
-    })),
-    holdings: [],
-    listings: [],
-  });
+  const [totals, payables] = await Promise.all([readProgrammeTotals(world), readPayables(world)]);
   const overdue = payables.filter((p) => p.status === 'overdue');
 
   return (
@@ -56,8 +36,6 @@ export default async function AdminPage() {
           StraitsX platform view of the ADATA tokenised payables programme.
         </p>
       </div>
-
-      <NextActionStrip action={next} />
 
       <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
         <Stat label="Issued" value={formatUnits(totals.issuedFaceBase, 2)} hint={`${totals.issuedCount} payables`} />

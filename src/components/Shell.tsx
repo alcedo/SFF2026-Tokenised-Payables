@@ -3,7 +3,9 @@ import Link from 'next/link';
 import { DemoControls } from './DemoControls';
 import { ExplorerHost } from './explorer/ExplorerHost';
 import { ExplorerOpenButton } from './explorer/ExplorerOpenButton';
+import { NextActionStrip } from './NextActionStrip';
 import { Address } from './primitives';
+import { loadNextAction } from '@/app/next-action-data';
 import { currentPersona, navFor } from '@/app/session';
 import { formatUnits } from '@/core/money';
 import { formatClock } from '@/core/clock';
@@ -11,11 +13,14 @@ import { readBalances, readPersonas, readWorld } from '@/db/read';
 
 /**
  * The frame every screen sits in: the demo-controls bar, the acting persona's
- * navigation, and their four wallet balances.
+ * navigation, their four wallet balances, and the next step that persona should
+ * take.
  *
- * Balances live in the header because PRD §10 wants them visible whenever a
- * payment is possible, and a lender deciding whether to bid should not have to
- * leave the marketplace to find out what they can afford.
+ * The next step is derived here, not on each home screen, so switching persona
+ * without changing route still shows that person's action. Balances live in the
+ * header because PRD §10 wants them visible whenever a payment is possible, and
+ * a lender deciding whether to bid should not have to leave the marketplace to
+ * find out what they can afford.
  */
 export async function Shell({ children }: { children: React.ReactNode }) {
   const [persona, personas, world] = await Promise.all([
@@ -23,7 +28,10 @@ export async function Shell({ children }: { children: React.ReactNode }) {
     readPersonas(),
     readWorld(),
   ]);
-  const balances = await readBalances(persona.wallet);
+  const [balances, next] = await Promise.all([
+    readBalances(persona.wallet),
+    loadNextAction(persona, world),
+  ]);
   const nav = navFor(persona);
 
   return (
@@ -91,7 +99,10 @@ export async function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto min-w-0 max-w-[1600px] p-3">{children}</main>
+      <main className="mx-auto min-w-0 max-w-[1600px] space-y-3 p-3">
+        <NextActionStrip action={next} />
+        {children}
+      </main>
       <ExplorerHost />
     </div>
   );
