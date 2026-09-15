@@ -10,9 +10,10 @@ two are compared after every single step.
 Nothing in `src/` or `db/` was changed. The suite is green: the model
 reproduces each behaviour below exactly, because the model's job is to predict
 what the system does, not what it ought to do. That is also why they would
-otherwise be invisible, so each is additionally recorded as an `it.fails(...)`
-case in `describe('behaviours the model reproduces but would not choose')`,
-stating what a caller would reasonably expect. The day one of them is fixed,
+otherwise be invisible, so each except the first is additionally recorded as an
+`it.fails(...)` case in
+`describe('behaviours the model reproduces but would not choose')`, stating what
+a caller would reasonably expect. The day one of them is fixed,
 that case starts passing and the suite reports it.
 
 Reproduce everything with:
@@ -72,7 +73,8 @@ name); legality is decided inside `run` so that illegal commands really do fire.
 Two commands in three aim at a subject that is ready for them and the third aims
 blind, because walking a six-deep lifecycle by drawing blind never gets past
 `approved`. The aim biases which sequences are generated, never which are judged
-legal, and the blind third is what produces 3,773 of the 6,121 refusals.
+legal, and it is largely the blind third that makes 3,773 of the 6,121
+commands refusals rather than acceptances.
 
 ---
 
@@ -353,6 +355,8 @@ missing.
 **File:** `db/schema.sql`, `maturity_after_issue`, against `db/post.sql`'s
 `issue_payable`.
 
+**Suite case:** `names maturity when a draft is issued after its own maturity date`.
+
 **Reproduction:** create a payable on 30-day terms, advance the clock 40 days,
 then take it through to `certified` and issue it:
 
@@ -432,7 +436,8 @@ able to update a payable without moving it, but the effect is that the approval
 queue can be told the same thing repeatedly and the journal records each telling
 as an event.
 
-**Self-transfers.** `fromWallet` equal to `toWallet` is accepted:
+**Self-transfers.** `fromWallet` equal to `toWallet` is accepted. Suite case:
+`does not stamp a confirmed transaction hash on a transfer that moved nothing`.
 
 ```ts
 await post(pool, { kind: 'transfer', payableId, fromWallet: w, toWallet: w, quantityBase: 5_000 });
