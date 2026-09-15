@@ -1095,6 +1095,13 @@ class PlaceBid extends Step {
     if (!this.bidder(real).institutional) {
       return refuse('ADA34', 'only institutional lender accounts can bid');
     }
+    // min_price_base is a floor, checked after the bidder's eligibility.
+    if (this.price < listing.minPrice) {
+      return refuse(
+        'ADA38',
+        `a bid must be at least ${listing.minPrice}, the minimum this listing asks`,
+      );
+    }
     return legal;
   }
 
@@ -1850,7 +1857,7 @@ describe('model-based coverage of the payable workflow', () => {
       '23502', '23505', '23514',
       'ADA01', 'ADA11', 'ADA12', 'ADA15', 'ADA16', 'ADA17', 'ADA19', 'ADA20',
       'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34', 'ADA35',
-      'ADA36', 'ADA37', 'accepted',
+      'ADA36', 'ADA37', 'ADA38', 'accepted',
     ]);
   });
 });
@@ -1992,20 +1999,6 @@ describe('behaviours the model reproduces but would not choose', () => {
       buyNowPriceBase: '200',
     });
     expect(result.ok ? '' : result.code ?? '').toMatch(/^ADA/);
-  });
-
-  it.fails('refuses a bid below the minimum price the seller published', async () => {
-    // PRD section 8 screen 7 has the seller "enter a minimum XUSD price". The
-    // column is stored and shown, and neither place_bid nor accept_bid reads it.
-    const result = await post(db.pool, {
-      kind: 'place_bid',
-      bidId: '00000000-0000-4000-f000-000000000004',
-      listingId: LISTING,
-      bidderWallet: lenderWallet,
-      priceBase: '1',
-      fundingCode: 'XUSD',
-    });
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
   });
 
   it.fails('does not stamp a confirmed transaction hash on a transfer that moved nothing', async () => {

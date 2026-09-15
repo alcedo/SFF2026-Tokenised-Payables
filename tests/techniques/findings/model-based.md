@@ -385,6 +385,11 @@ drafts sit in the approval queue.
 
 ## 9. `min_price_base` is stored, displayed and never enforced
 
+**FIXED.** `place_bid` refuses a bid below the floor with `ADA38`. See finding 5
+of `findings/decision-tables.md`. The model predicts it and the property hits it
+11 times over 6,228 generated commands. The entry below is the state before that
+change.
+
 **File:** `db/post.sql`, the `place_bid` and `accept_bid` branches.
 
 **Suite case:** `refuses a bid below the minimum price the seller published`.

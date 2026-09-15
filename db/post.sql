@@ -612,11 +612,24 @@ BEGIN
     IF NOT ledger.wallet_is_institutional(v_intent->>'bidderWallet') THEN
       RAISE EXCEPTION 'only institutional lender accounts can bid' USING ERRCODE = 'ADA34';
     END IF;
+    -- PRD §8 screen 7 has the seller "enter a minimum XUSD price", and
+    -- min_price_base is NOT NULL with a CHECK that it is positive, so it is a
+    -- floor rather than a hint. Checked here, where a bid enters, rather than
+    -- at acceptance: a bid is only ever created by this branch or by buy_now,
+    -- and buy_now prices from buy_now_price_base, which the schema already
+    -- constrains to be at least the minimum. An absent price is below any
+    -- floor, so the comparison is written to catch it rather than to return
+    -- NULL and fall through to the NOT NULL column.
+    v_price := (v_intent->>'priceBase')::bigint;
+    IF v_price IS NULL OR v_price < v_listing.min_price_base THEN
+      RAISE EXCEPTION 'a bid must be at least %, the minimum this listing asks',
+        v_listing.min_price_base USING ERRCODE = 'ADA38';
+    END IF;
     -- PRD §9: bids do not reserve funds. Nothing is locked and no leg is
     -- posted; the balance is rechecked when the seller accepts.
     INSERT INTO app.bid (id, listing_id, bidder_wallet, price_base, funding_code, status)
     VALUES (COALESCE((v_intent->>'bidId')::uuid, gen_random_uuid()), v_listing.id,
-            v_intent->>'bidderWallet', (v_intent->>'priceBase')::bigint,
+            v_intent->>'bidderWallet', v_price,
             (v_intent->>'fundingCode')::ledger.cash_code, 'placed')
     RETURNING * INTO v_bid;
 

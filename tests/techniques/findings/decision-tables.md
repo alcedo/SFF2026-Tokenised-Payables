@@ -11,14 +11,14 @@ own row counts, so a row silently disappearing fails the suite.
 | --- | --- | --- | ---: | ---: | ---: |
 | 1 | issuance against certification and programme limit | 4 | 48 | 24 | 24 |
 | 2 | maker-checker approval | 3 | 60 | 35 | 25 |
-| 3a | bid acceptance, early gates | 2 | 18 | 13 | 5 |
+| 3a | bid acceptance, early gates | 2 | 18 | 12 | 6 |
 | 3b | bid acceptance, conditions after the gates | 5 | 32 | 24 | 8 |
 | 4 | maturity settlement | 6 | 144 | 62 | 82 |
 | 5a | `create_user` role against organisation type | 2 | 20 | 20 | 0 |
 | 5b | `onboard_entity` role against organisation type | 2 | 20 | 20 | 0 |
 | 5c | `onboard_entity` name validation | 2 | 15 | 15 | 0 |
 | 6 | user removal | 3 | 12 | 5 | 7 |
-| | | | **369** | **218** | **151** |
+| | | | **369** | **217** | **152** |
 
 Nothing in `src/` or `db/` was changed. Every scenario ends by asserting
 `ledgerHealth(pool)` equals `HEALTHY`; the books balance through all of it.
@@ -248,6 +248,29 @@ is a gap, not a defect this fix introduces.
 ---
 
 ## 5. A bid below `listing.min_price_base` is accepted and settles
+
+**FIXED.** `place_bid` refuses a bid below the floor with `ADA38 a bid must be
+at least <min>, the minimum this listing asks`, checked after the bidder's
+eligibility. It is checked where a bid enters rather than at acceptance,
+because the only two ways a bid is created are `place_bid` and `buy_now`, and
+`buy_now` prices from `buy_now_price_base`, which the schema already holds at
+or above the minimum. A second check at acceptance would be the unreachable
+recheck finding 6 already faults.
+
+An absent `priceBase` is caught by the same guard. It used to be NULL all the
+way to a NOT NULL column.
+
+Table 3a's `bid_below_min_price` gate is now infeasible for both verbs, since no
+acceptance can ever see such a bid, and the floor has a boundary triple of its
+own at 899,999 / 900,000 / 900,001 plus the absent case.
+
+**The seed carried a bid below its own ask.** `db/seed.sql` priced the two
+competing bids on TP-2026-0142 at 98.40% and 98.10% of face against a 98.40%
+ask, describing them as "at a spread". The second was below the floor and the
+seed refused to load once the rule was real. The spread now sits at and above
+the ask, at 98.40% and 98.60%, which is where a competing bid belongs.
+
+The entry below is the state before that change.
 
 File: `db/post.sql` lines 581 to 665, `db/schema.sql` lines 369 to 391.
 

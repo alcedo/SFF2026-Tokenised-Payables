@@ -212,14 +212,24 @@ async function buildPayable(pool: Pool, spec: BuildSpec): Promise<BuiltPayable> 
 
   // The id is read back rather than supplied. Supplying one is refused by a
   // foreign key at the idempotency gate. The case below records that defect.
-  await must(pool, {
-    kind: 'create_payable',
-    ref,
-    supplierId: spec.supplierId,
-    invoiceRef: `INV-DT-${String(refSeq).padStart(5, '0')}`,
-    faceBase: spec.faceBase,
-    termsDays: spec.termsDays,
-  });
+  //
+  // Posted as the preparer by name. The harness default is the lowest-id live
+  // user, and the fixtures template onboards its counterparties with
+  // gen_random_uuid(), so whether that default is the preparer or a supplier
+  // depends on how the random ids happened to sort when the template was last
+  // built. A test that asserts who acted cannot rest on that.
+  await must(
+    pool,
+    {
+      kind: 'create_payable',
+      ref,
+      supplierId: spec.supplierId,
+      invoiceRef: `INV-DT-${String(refSeq).padStart(5, '0')}`,
+      faceBase: spec.faceBase,
+      termsDays: spec.termsDays,
+    },
+    byRole.adata_preparer,
+  );
   const id = await scalar<string>(
     pool,
     'SELECT id::text AS value FROM app.payable WHERE ref = $1',
@@ -917,7 +927,7 @@ const GATE_OUTCOME: Readonly<Record<Gate, Expected>> = {
   bid_withdrawn: BID_WITHDRAWN,
   bid_superseded: BID_SUPERSEDED,
   bid_missing: BID_MISSING_READS_AS_INELIGIBLE,
-  bid_below_min_price: TRADED,
+  bid_below_min_price: refused('ADA38', 'a bid must be at least {minPrice}, the minimum this listing asks', 'open'),
   none: TRADED,
 };
 
@@ -925,6 +935,8 @@ const BUY_NOW_MAKES_ITS_OWN_BID =
   'buy_now creates and accepts its own bid in one command, so no pre-existing bid status applies';
 const SUPERSEDED_NEEDS_A_CLOSED_LISTING =
   'a bid only becomes superseded when its listing is filled or cancelled in the same command, and the listing status is checked first';
+const BELOW_MIN_NEVER_REACHES_ACCEPTANCE =
+  'place_bid refuses a bid below min_price_base with ADA38, and buy_now prices from buy_now_price_base which the schema holds at or above the minimum, so no acceptance can ever see one';
 
 const GATE_TABLE: readonly GateRow[] = VERBS.flatMap((verb) =>
   GATES.map((gate): GateRow => {
@@ -939,7 +951,9 @@ const GATE_TABLE: readonly GateRow[] = VERBS.flatMap((verb) =>
         ? BUY_NOW_MAKES_ITS_OWN_BID
         : gate === 'bid_superseded'
           ? SUPERSEDED_NEEDS_A_CLOSED_LISTING
-          : undefined;
+          : gate === 'bid_below_min_price'
+            ? BELOW_MIN_NEVER_REACHES_ACCEPTANCE
+            : undefined;
     const expected =
       verb === 'accept_bid' && gate === 'no_buy_now_price' ? TRADED : GATE_OUTCOME[gate];
     return { conditions, verb, gate, expected, ...(infeasible ? { infeasible } : {}) };
@@ -1022,8 +1036,63 @@ describe('table 3: bid acceptance', () => {
     await db?.close();
   });
 
+  // The gate table can no longer reach a below-minimum bid, because place_bid
+  // refuses one. The floor gets its own boundary triple here instead.
+  it.each([
+    { label: 'one below the minimum', price: 899_999, refused: true },
+    { label: 'exactly the minimum', price: 900_000, refused: false },
+    { label: 'one above the minimum', price: 900_001, refused: false },
+  ])('takes a bid of $label', async ({ price, refused: isRefused }) => {
+    const lot = await listLot({
+      seller: world.suppliers[0].wallet,
+      termsDays: 90,
+      minPriceBase: 900_000,
+      buyNowPriceBase: null,
+    });
+    const result = await post(db.pool, {
+      kind: 'place_bid',
+      bidId: randomUUID(),
+      listingId: lot.listingId,
+      bidderWallet: world.lenders[0].wallet,
+      priceBase: price,
+      fundingCode: 'XUSD',
+    });
+    expect(result).toEqual(
+      isRefused
+        ? {
+            ok: false,
+            code: 'ADA38',
+            message: 'a bid must be at least 900000, the minimum this listing asks',
+          }
+        : expect.objectContaining({ ok: true }),
+    );
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
+  });
+
+  it('refuses a bid with no price at all, which is below any floor', async () => {
+    const lot = await listLot({
+      seller: world.suppliers[1].wallet,
+      termsDays: 90,
+      minPriceBase: 900_000,
+      buyNowPriceBase: null,
+    });
+    const result = await post(db.pool, {
+      kind: 'place_bid',
+      bidId: randomUUID(),
+      listingId: lot.listingId,
+      bidderWallet: world.lenders[0].wallet,
+      fundingCode: 'XUSD',
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: 'ADA38',
+      message: 'a bid must be at least 900000, the minimum this listing asks',
+    });
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
+  });
+
   it('declares every gate against both verbs', () => {
-    expect(shapeOf(GATE_TABLE)).toEqual({ rows: 18, feasible: 13, infeasible: 5 });
+    expect(shapeOf(GATE_TABLE)).toEqual({ rows: 18, feasible: 12, infeasible: 6 });
   });
 
   it('declares every combination of the four conditions after the gates', () => {
@@ -1191,7 +1260,7 @@ describe('table 3: bid acceptance', () => {
         return;
       }
 
-      const minPrice = row.gate === 'bid_below_min_price' ? 900_000 : PRICE;
+      const minPrice = PRICE;
       const lot = await listLot({
         seller,
         termsDays: 90,
@@ -1222,8 +1291,6 @@ describe('table 3: bid acceptance', () => {
         await must(db.pool, { kind: 'withdraw_bid', bidId });
       } else if (row.gate === 'bid_missing') {
         bidId = randomUUID();
-      } else if (row.gate === 'bid_below_min_price') {
-        await placeBid(1);
       } else if (row.verb === 'accept_bid') {
         await placeBid(minPrice);
       }
@@ -1239,14 +1306,6 @@ describe('table 3: bid acceptance', () => {
         resolve(row.expected, { ref: lot.ref }),
       );
 
-      if (row.gate === 'bid_below_min_price') {
-        const paid = await scalar<bigint>(db.pool,
-          `SELECT price_base AS value FROM app.bid WHERE id = $1`,
-          [bidId],
-        );
-        expect(paid).toBe(1n);
-        expect(await tokenBalance(db.pool, buyer, lot.payableId)).toBe(BigInt(FACE));
-      }
       expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
     });
   }
@@ -1991,67 +2050,20 @@ describe('a client-minted payable id', () => {
 });
 
 /**
- * The rules these tables prove absent, stated as the rules a reader expects.
+ * This file used to end with `describe('rules the write path does not
+ * enforce')`, four `it.fails` cases stating rules a reader expects and the
+ * write path did not keep. All four are now kept, so all four were deleted and
+ * the block with them.
  *
- * Everything above pins what the system does, and does it deliberately: a
- * decision table whose outcome is keyed on fewer conditions than it enumerates
- * is how this suite shows which conditions the write path ignores. The cost of
- * that choice is that the whole file stays green while a rule a reader expects
- * goes unenforced, so a reader running `npm test` sees nothing wrong.
+ * The convention still holds for the next one. A decision table whose outcome
+ * is keyed on fewer conditions than it enumerates is how this suite shows which
+ * conditions the write path ignores, and the cost is that the file stays green
+ * while the gap is open. An `it.fails` case beside the table is what makes the
+ * day it closes visible.
  *
- * These cases close that gap. Each asserts the rule a reader would expect to
- * hold, and each is marked `it.fails`, so the day one is enforced this file
- * turns red and someone has to come and delete the case on purpose. They are
- * the same findings as tests/techniques/findings/decision-tables.md, in a form
- * the test runner can report.
+ * One thing that convention does not survive: if the fix moves the refusal
+ * earlier, into the case's own setup, the case keeps reporting "expected fail"
+ * for a reason that is no longer the one it documents. Both min-price cases did
+ * exactly that, and were found by reading them rather than by the run. Read a
+ * surviving case before trusting it.
  */
-describe('rules the write path does not enforce', () => {
-  const FACE = 1_000_000;
-  let db: Database;
-  let world: World;
-
-  beforeAll(async () => {
-    db = await freshDatabase('decision_absent_rules', 'fixtures');
-    world = await loadWorld(db.pool);
-  });
-
-  afterAll(async () => {
-    await db?.close();
-  });
-
-  it.fails('refuses a bid below the minimum price the seller published', async () => {
-    const supplier = world.suppliers[0];
-    const lender = world.lenders[0];
-    const payable = await buildPayable(db.pool, {
-      supplierId: supplier.id,
-      faceBase: FACE,
-      termsDays: 90,
-      upTo: 'issued',
-      toWallet: supplier.wallet,
-    });
-    await must(db.pool, { kind: 'accept_receipt', payableId: payable.id });
-
-    const listingId = randomUUID();
-    const bidId = randomUUID();
-    await must(db.pool, {
-      kind: 'publish_listing',
-      listingId,
-      payableId: payable.id,
-      sellerWallet: supplier.wallet,
-      quantityBase: FACE,
-      minPriceBase: 900_000,
-    });
-    await must(db.pool, {
-      kind: 'place_bid',
-      bidId,
-      listingId,
-      bidderWallet: lender.wallet,
-      priceBase: 1,
-      fundingCode: 'XUSD',
-    });
-
-    const accepted = await post(db.pool, { kind: 'accept_bid', listingId, bidId });
-    expect(accepted).toMatchObject({ ok: false });
-  });
-
-});

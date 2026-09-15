@@ -162,6 +162,7 @@ export type PostErrorCode =
   | 'not_graded'
   | 'wrong_actor_role'
   | 'receipt_rejected'
+  | 'below_min_price'
   | 'unknown';
 
 export interface PostError {
@@ -212,6 +213,7 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA35: 'not_graded',
   ADA36: 'wrong_actor_role',
   ADA37: 'receipt_rejected',
+  ADA38: 'below_min_price',
   ADA20: 'insufficient_funds',
   ADA21: 'insufficient_quantity',
   '23505': 'duplicate_listing',
@@ -332,6 +334,8 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
   not_institutional:
     'Only institutional lender accounts can bid or buy. Switch to a lender persona in the demo controls.',
   not_graded: 'This payable has no grade yet. Assign one before certifying it.',
+  below_min_price:
+    'That offer is below the minimum price the seller published for this listing. Raise the offer, or use Buy now.',
   receipt_rejected:
     'This payable was rejected by its supplier, so the quantity went back to ADATA and there is nobody to redeem to. It cannot be settled.',
   wrong_actor_role:
