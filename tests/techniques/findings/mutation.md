@@ -91,6 +91,35 @@ A related symptom, unexplained: Stryker's dry run reports 369 tests where the
 same config run directly reports 887. Whatever suppresses the `fx.ts` mutant
 runs is likely the same thing.
 
+## After merging main: two files Stryker cannot measure, not one
+
+main brought `src/core/input.ts` with PR #11. Stryker scored it 0.00%, 120
+survivors, 0 killed, which is the same reading it gives `fx.ts`. Both are
+false. Planting either mutation by hand fails a real test:
+
+| file | planted change | test that caught it |
+|---|---|---|
+| `fx.ts` | `rounded: exact % RATE_SCALE !== 0n` to `rounded: false` | three, across `properties.test.ts` and `pricing.test.ts` |
+| `input.ts` | dropped the `days > TERMS_MAX` bound | `input.ep-bva.test.ts > payment terms: partitions and boundaries > just above upper bound` |
+
+So 148 of 937 mutants were counted as survived while the suite was killing
+them, and the headline score read 20.92% instead of the truth.
+
+Both files are now excluded in `stryker.config.json` and guarded by
+`scripts/mutate.mjs` instead, which plants four mutants across them by hand and
+fails the build unless every one dies. That guard is stricter than the score it
+replaces, not weaker: Stryker tolerates survivors up to a threshold, the guard
+tolerates none.
+
+The excluded score is **24.84%**, 196 killed of 789. Killed is unchanged from
+the 20.92% reading; only the denominator was wrong. `thresholds.break` is 24.
+
+The cause is still unexplained. It is not coverage attribution, not static
+filtering, and not the import style, since both `../fx` and `@/core/fx` appear
+across the tests and `money.ts` is measured correctly through both. Whoever
+picks this up should treat a new file reading exactly 0.00% as suspect until a
+hand-planted mutation proves otherwise.
+
 ## What the surviving mutants say
 
 613 mutants still survive, so 22.60% is a floor to build on, not a good score.

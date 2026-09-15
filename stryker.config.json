@@ -6,7 +6,9 @@
     "configFile": "vitest.unit.config.mts"
   },
   "mutate": [
-    "src/core/*.ts"
+    "src/core/*.ts",
+    "!src/core/fx.ts",
+    "!src/core/input.ts"
   ],
   "reporters": [
     "clear-text",
@@ -25,6 +27,6 @@
   "thresholds": {
     "high": 60,
     "low": 30,
-    "break": 22
+    "break": 24
   }
 }

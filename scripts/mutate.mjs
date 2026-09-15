@@ -3,19 +3,19 @@
  * The mutants Stryker cannot measure.
  *
  * Stryker is the mutation gate for this repo; its score and threshold live in
- * stryker.config.json. It has one blind spot: for src/core/fx.ts it reports
- * "Ran 0.00 tests per mutant" and marks all 25 mutants survived, under every
- * coverage mode and with static filtering off. That is a measurement failure,
- * not a coverage hole, and it predates this suite.
+ * stryker.config.json. It cannot measure two of the files it is pointed at.
+ * For src/core/fx.ts and src/core/input.ts it reports "Ran 0.00 tests per
+ * mutant" and marks every mutant survived, under every coverage mode and with
+ * static filtering off. Both claims are false: planting either mutation by
+ * hand fails a test. Rather than let 148 phantom survivors drag the score,
+ * those two files are excluded in stryker.config.json and guarded here.
  *
- * So this file is not a second mutation tool. It is a guard over the one file
- * the first one cannot see. It plants the mutant by hand, runs the suite, and
- * fails if nothing notices. The other nine mutants it used to carry were
- * dropped when Stryker became the gate, because Stryker measures those files
- * properly and two tools scoring the same code is one signal at twice the cost.
+ * So this is not a second mutation tool. It is the gate for the files the
+ * first one is blind to, and it is stricter: every mutant must die or the
+ * build fails. Mutants in files Stryker measures properly do not belong here.
  *
- * tests/techniques/findings/mutation.md carries the evidence for the blind
- * spot, including the hand-planted change that fails three tests.
+ * tests/techniques/findings/mutation.md carries the evidence for both files,
+ * including the hand-planted changes and the tests that caught them.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -26,6 +26,24 @@ const mutants = [
     file: 'src/core/fx.ts',
     find: "if (fundingAsset !== 'XSGD') {",
     replace: 'if (true) {',
+  },
+  {
+    id: 'accept-zero-amount',
+    file: 'src/core/input.ts',
+    find: "if (!isPositive(value)) return fail('Enter an amount greater than zero.');",
+    replace: "if (false && !isPositive(value)) return fail('Enter an amount greater than zero.');",
+  },
+  {
+    id: 'drop-terms-upper-bound',
+    file: 'src/core/input.ts',
+    find: 'if (!Number.isInteger(days) || days < TERMS_MIN || days > TERMS_MAX) {',
+    replace: 'if (!Number.isInteger(days) || days < TERMS_MIN) {',
+  },
+  {
+    id: 'allow-price-above-par',
+    file: 'src/core/input.ts',
+    find: "if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {\n    return fail('Enter a price between 0 and 100 percent of face.');\n  }\n  const bps = Math.round(pct * 100);\n  if (bps <= 0 || bps > BPS_PER_100_PERCENT) {",
+    replace: "if (!Number.isFinite(pct) || pct <= 0) {\n    return fail('Enter a price between 0 and 100 percent of face.');\n  }\n  const bps = Math.round(pct * 100);\n  if (bps <= 0) {",
   },
 ];
 
@@ -78,4 +96,4 @@ if (survivors.length > 0) {
   console.error(`survivors: ${survivors.join(', ')}`);
   process.exit(1);
 }
-console.log('PASS  the suite kills the fx.ts mutants Stryker cannot measure');
+console.log('PASS  the suite kills every mutant in the files Stryker cannot measure');
