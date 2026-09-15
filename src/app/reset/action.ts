@@ -40,7 +40,7 @@ export async function resetWorld(formData: FormData): Promise<void> {
     redirect('/reset?e=pin');
   }
 
-  await rebuild();
+  await rebuild('seed');
   revalidatePath('/', 'layout');
   redirect('/');
 }
