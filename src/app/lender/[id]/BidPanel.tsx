@@ -1,16 +1,5 @@
 'use client';
 
-/**
- * PRD §8 screen 11. Place bid / buy now.
- *
- * "Enter price as a percentage of the listed quantity's face and show the
- * equivalent XUSD amount. Select the funding asset before confirmation. Show
- * conversion, source debit, available balance, and XUSD seller credit."
- *
- * Every one of those appears before the button is armed, which is the point:
- * the lender should never have to confirm to find out what they are charged.
- */
-
 import { useMemo, useState } from 'react';
 
 import { ActionButton } from '@/components/ActionButton';
@@ -19,6 +8,7 @@ import { Notice, Panel } from '@/components/primitives';
 import { buyNow, placeBid } from '@/app/actions';
 import type { SerialBalances } from '@/db/read';
 import { convert, formatRate } from '@/core/fx';
+import { parsePricePercent } from '@/core/input';
 import { type Asset, formatUnits, type BaseUnits } from '@/core/money';
 import { formatPercent, priceFromPercent, quote } from '@/core/pricing';
 
@@ -53,25 +43,19 @@ export function BidPanel({
   const [percent, setPercent] = useState(askPercent.toFixed(2));
   const [asset, setAsset] = useState<Asset>('USDC');
 
-  const parsed = Number(percent);
-  const valid = Number.isFinite(parsed) && parsed > 0 && parsed <= 100;
-
   const priced = useMemo(() => {
-    if (!valid) return null;
-    // Percent entry converts to base units immediately; the base-unit value is
-    // what is stored and what the confirmation shows.
-    const bps = Math.round(parsed * 100);
-    const price = priceFromPercent(face, bps);
+    const parsedPercent = parsePricePercent(percent);
+    if (!parsedPercent.ok) return null;
+    const price = priceFromPercent(face, parsedPercent.value);
     const q = quote(face, price, daysRemaining);
     const conversion = convert(price, asset, rate);
     return { price, q, debit: conversion.sourceDebit, applied: conversion.rate };
-  }, [valid, parsed, face, daysRemaining, asset, rate]);
+  }, [percent, face, daysRemaining, asset, rate]);
+  const valid = priced !== null;
 
   const available = BigInt(balances[asset]);
   const short = priced !== null && available < priced.debit;
 
-  // Buy-now is charged at the seller's published price, not at whatever is
-  // typed in the bid box, so it needs its own debit and its own balance check.
   const takeNow = useMemo(() => {
     if (buyNowBase === null) return null;
     const price = BigInt(buyNowBase) as BaseUnits;
@@ -120,13 +104,6 @@ export function BidPanel({
       <div className="space-y-3">
         <AssetPicker value={asset} onChange={setAsset} />
 
-        {/*
-          PRD §8 screen 11 pairs buy-now with bidding on one screen. It leads,
-          because it is the faster path: a lender happy with the published price
-          should not have to read the bid mechanics to find out they can skip
-          them. The funding asset is shared with the bid form below, so choosing
-          one reprices both.
-        */}
         {takeNow ? (
           <div className="rounded-[4px] border border-accent/25 bg-accent-soft p-2.5">
             <div className="mb-1 flex items-baseline justify-between gap-3">
