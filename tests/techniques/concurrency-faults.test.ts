@@ -411,18 +411,41 @@ describe('lock order between settle_maturity and accept_bid', () => {
       expect(await parksBehind(s.pool, accepterPid, holderPid)).toBe(true);
 
       await holder!.query('ROLLBACK');
+
+      // Both sessions are queued on the payable row, and whichever wins it
+      // holds it until its own transaction ends. Awaiting the pair with both
+      // still open would hang rather than prove anything, because the loser
+      // cannot move until the winner lets go. So the winner is closed the
+      // moment it answers, and which of the two that is does not matter.
+      const close: Record<'settle' | 'accept', () => Promise<unknown>> = {
+        // The settlement is the one whose work the assertions below read back.
+        settle: () => settler!.query('COMMIT'),
+        accept: () => accepter!.query('ROLLBACK'),
+      };
+      const first = await Promise.race([
+        settling.then(() => 'settle' as const),
+        accepting.then(() => 'accept' as const),
+      ]);
+      await close[first]().catch(() => undefined);
       const [settled, accepted] = await Promise.all([settling, accepting]);
-      await settler!.query('COMMIT').catch(() => undefined);
-      await accepter!.query('ROLLBACK').catch(() => undefined);
+      await close[first === 'settle' ? 'accept' : 'settle']().catch(() => undefined);
 
       expect([settled, accepted].filter((r): r is PostErr => !r.ok).map((r) => r.code)).not.toContain(
         '40P01',
       );
-      // Either order gives the same answer. Maturity closes the market, so the
-      // acceptance meets a business refusal whichever of the two runs first.
+      // Either order refuses the acceptance, and which guard catches it is the
+      // one difference between them. Settling first cancels the listing, so
+      // the acceptance is turned away at the listing (ADA11); accepting first
+      // reaches a payable that is already past its date (ADA12). Both are
+      // business refusals with wording behind them, which is the point: the
+      // caller is told why, rather than handed a 40P01 with nothing to say.
       expect(settled.ok).toBe(true);
-      expect(refused(accepted).code).toBe('ADA12');
-      expect(refused(accepted).message).toBe('payable TP-ABBA-0001 has reached maturity');
+      expect(['ADA11', 'ADA12']).toContain(refused(accepted).code);
+      expect(refused(accepted).message).toBe(
+        refused(accepted).code === 'ADA11'
+          ? 'listing is cancelled'
+          : 'payable TP-ABBA-0001 has reached maturity',
+      );
     });
 
     const { rows } = await s.pool.query<{ lifecycle: string; listing: string; bid: string }>(

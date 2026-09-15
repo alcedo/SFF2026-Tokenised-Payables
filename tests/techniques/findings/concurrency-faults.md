@@ -99,8 +99,21 @@ order.** They closed the cycle by hand, giving each session the first lock of
 its own path, so they would deadlock whatever `ledger.post()` does and could
 never have shown the fix. The new test holds one row and asserts both commands
 queue on it, which is a claim about the product rather than about Postgres.
-Neither of the two possible orders changes the answer: maturity closes the
-market, so the acceptance meets `ADA12` whichever runs first.
+
+**The replacement hung on its first outing, and the hang was its own.** It waited
+on both commands together while both sessions were still open. Whichever of the
+two wins the payable row holds it until its transaction ends, so the loser could
+never answer and the test ran to its 30s timeout. The winner is now closed as
+soon as it answers, and the loser then gets its turn. Which one wins is not
+asserted, because either order is legal.
+
+Either order refuses the acceptance, but not with the same code, and the first
+version of the test was wrong about that too. Settling first cancels the
+listing, so the acceptance is turned away at the listing with `ADA11`, `listing
+is cancelled`. Accepting first reaches a payable already past its date, which is
+`ADA12`. Both are business refusals with wording behind them, which is the claim
+that matters: the caller is told why, rather than handed a `40P01` the UI has no
+sentence for.
 
 ---
 
