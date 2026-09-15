@@ -26,12 +26,12 @@
 -- fifty entries rather than a hundred and sixteen. tests/ledger/seed.sql holds
 -- the budget and fails if it creeps back up.
 --
--- Every organisation here has an account behind it. PRD §12 asks for entity
--- records covering "all remaining invoice originators", which in an earlier
--- build meant twelve supplier names nobody could sign in as. A supplier with no
+-- Every organisation here has an account behind it, which PRD §12 now requires.
+-- It once asked for entity records covering "all remaining invoice originators",
+-- which meant twelve supplier names nobody could sign in as. A supplier with no
 -- account can never accept delivery of what it is issued, so those rows were
--- names on a screen with no way to reach them. The series draws on the five
--- interactive suppliers instead; docs/ASSUMPTIONS.md records the deviation.
+-- names on a screen with no way to reach them. docs/ASSUMPTIONS.md records why
+-- the specification moved.
 --
 -- Fictional throughout. ADATA is the intentional named-anchor exception.
 
@@ -324,11 +324,11 @@ END $$;
 -- Small invoices with the same anchor, currency and maturity, bundled into one
 -- lot worth a bank's time. 180,000 XUSD, which is the face PRD §12 states.
 --
--- The PRD writes the lot as twelve suppliers' paper. This build uses five, one
--- invoice from each interactive supplier, so that the bundle is made of firms a
--- viewer can actually switch to and look at rather than of names with no
--- account behind them. What the lot is for is unchanged: several suppliers'
--- invoices, one maturity, one current holder, one price.
+-- Five members, one invoice from each interactive supplier, so the bundle is
+-- made of firms a viewer can switch to and look at rather than of names with no
+-- account behind them. PRD §12 was revised to this; docs/ASSUMPTIONS.md records
+-- why. What the lot is for is unchanged: several suppliers' invoices, one
+-- maturity, one current holder, one price.
 INSERT INTO app.series (id, ref, anchor_id, maturity_date, grade, grade_rationale)
 VALUES ('5e000000-0000-0000-0000-000000000430', 'SERIES-2026-Q4-30D',
         'e0000000-0000-0000-0000-00000000ada7', pg_temp.t0() + 30, 'A',

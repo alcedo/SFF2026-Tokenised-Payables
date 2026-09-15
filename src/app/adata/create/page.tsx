@@ -44,7 +44,7 @@ export default async function CreatePayablePage({
 
   // Both references continue the series already on the books, and both read the
   // whole payable table rather than the marketplace projection, which hides the
-  // series lot's twelve refs.
+  // series lot's member refs.
   const payableRef = nextPayableRef(references.payableRefs);
   const suggestedInvoiceRef = suggestInvoiceRef(references.invoiceRefs);
 

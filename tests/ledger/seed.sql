@@ -86,10 +86,10 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS  TP-2026-0119 is % days past due and unpaid', -v_n;
 
-  -- PRD §12 writes the lot as "12 fictional suppliers; one current holder".
-  -- This build carries five, one from each interactive supplier, so that no
-  -- organisation exists without an account behind it. docs/ASSUMPTIONS.md
-  -- records why. The face and the single-holder rule are unchanged, which is
+  -- PRD §12: "5 fictional suppliers; one current holder". One invoice from each
+  -- interactive supplier, so no organisation exists without an account behind
+  -- it. The section was revised from twelve to five and docs/ASSUMPTIONS.md
+  -- records why; the face and the single-holder rule never changed, which is
   -- what the lot is for.
   SELECT count(*) INTO v_n FROM app.payable p
     JOIN app.series s ON s.id = p.series_id WHERE s.ref = 'SERIES-2026-Q4-30D';

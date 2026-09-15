@@ -755,7 +755,7 @@ export interface ErpInvoice {
  * Every reference already in use, for the create screen's two suggestions.
  *
  * Deliberately not `readPayables()`. That is the priced marketplace projection
- * and it hides series members behind `series_id IS NULL`, so the twelve
+ * and it hides series members behind `series_id IS NULL`, so the
  * `TP-2026-05xx` refs in the seeded lot are invisible to it. A generator that
  * claims to continue the series has to see the whole table. An unconsumed ERP
  * row counts too: its invoice reference exists the moment someone imports it.

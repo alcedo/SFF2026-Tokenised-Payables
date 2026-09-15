@@ -159,9 +159,9 @@ fresh world.
 
 ## Suppliers on the ERP register versus suppliers on the platform
 
-Not every supplier ADATA buys from has an account. The seed has twelve tier-2
-suppliers who originated the invoices in the series lot, sold their whole
-position, and have no live account — which is a real state, not a broken one.
+Not every supplier ADATA buys from need have an account, and the ERP register is
+a company's own book rather than a list of platform members. Nothing in the
+schema requires the two to line up.
 
 **Built:** manual entry only offers suppliers with a live account, and
 `ledger.post()` refuses a payable raised against one without. A payable issues
@@ -331,30 +331,35 @@ member of the sequence, so it does not count toward the maximum.
 
 ## How many suppliers the series lot draws on
 
-Section 12 writes the bundled lot as "SERIES-2026-Q4-30D | 12 fictional
-suppliers; one current holder", and asks separately to "include fictional
+Section 12 originally wrote the bundled lot as "SERIES-2026-Q4-30D | 12 fictional
+suppliers; one current holder", and asked separately to "include fictional
 supplier entity records and wallets for all remaining invoice originators".
-Taken literally that means twelve supplier organisations that exist only as a
+Taken literally that meant twelve supplier organisations that existed only as a
 name and a wallet, with nobody able to sign in as any of them.
 
-That state is reachable and the product handles it, but as seed data it is a
+That state is reachable and the product handles it, but as seed data it was a
 liability. A supplier with no account can never accept delivery of what it is
-issued, so those twelve appear in counts, in the explorer and on the programme
-oversight screen as organisations a viewer cannot switch to or act as. They also
-cost the demo twenty-four ledger entries, which is more than the entire rest of
-the live world.
+issued, so those twelve appeared in counts, in the explorer and on the programme
+oversight screen as organisations a viewer could not switch to or act as. They
+also cost the demo twenty-four ledger entries, more than the entire rest of the
+live world.
 
 **Built:** the lot carries five members, one invoice from each of the five
 interactive suppliers, still 180,000 XUSD in total and still wholly held by one
-seller. Every organisation in the seeded world now has a live account behind it,
+seller. Every organisation in the seeded world has a live account behind it,
 which `tests/ledger/seed.sql` asserts. What the lot demonstrates is unchanged:
 several suppliers' invoices against one anchor, one maturity, one price, sold as
 a unit no single invoice would be worth.
 
+**The PRD was revised to match** rather than left contradicting the build, since
+a specification the code knowingly ignores stops being worth reading. Section 12
+now states five originators and requires every seeded organisation to have an
+account. This entry is the record of why it moved.
+
 **If wrong:** the member count is one loop bound and one array in `db/seed.sql`,
 with the expected counts named in `tests/ledger/seed.sql` and
 `tests/db/read.test.ts`. Restoring twelve originators means restoring twelve
-account-less entity rows with it.
+account-less entity rows with it, and reverting the section 12 revision note.
 
 ## How much history the seed writes
 
