@@ -49,6 +49,12 @@
   --layout-phone-max: 767px;
   --layout-tablet-min: 768px;
   --layout-desktop-min: 1024px;
+
+  /*
+   * Lives here, not on .chrome-tools, because the top-up panel below reads it
+   * too and is a sibling of .chrome-tools rather than a descendant.
+   */
+  --chrome-tools-control-h: 34px;
 }
 
 html {
@@ -138,10 +144,100 @@ main .grid > * {
   max-width: 100%;
 }
 
-.chrome-tools,
 .chrome-primary,
 .chrome-primary > * {
   min-width: 0;
+}
+
+.chrome-tools {
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.375;
+}
+
+.chrome-tools-btn,
+.chrome-tools select {
+  min-height: var(--chrome-tools-control-h);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font: inherit;
+}
+
+.chrome-tools-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.chrome-tools select {
+  padding: 0 8px;
+}
+
+.chrome-tools-btn:hover {
+  background: var(--color-surface-sunken);
+}
+
+.chrome-tools-btn:disabled {
+  opacity: 0.5;
+}
+
+.chrome-tools-btn.is-caution {
+  border-color: color-mix(in srgb, var(--color-caution) 30%, transparent);
+  background: var(--color-caution-soft);
+  color: var(--color-caution);
+}
+
+.chrome-tools-btn.is-caution:hover {
+  background: color-mix(in srgb, var(--color-caution) 10%, transparent);
+}
+
+.chrome-tools-btn.is-critical {
+  border-color: color-mix(in srgb, var(--color-critical) 30%, transparent);
+  background: var(--color-critical-soft);
+  color: var(--color-critical);
+}
+
+.chrome-tools-btn.is-critical:hover {
+  background: color-mix(in srgb, var(--color-critical) 10%, transparent);
+}
+
+/* A sibling of .chrome-tools, not a descendant, so it needs its own scale. */
+.chrome-topup {
+  font-size: 16px;
+  line-height: 1.375;
+}
+
+.chrome-topup select,
+.chrome-topup input {
+  min-height: var(--chrome-tools-control-h);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  padding: 0 8px;
+  font: inherit;
+}
+
+.chrome-topup-submit {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--chrome-tools-control-h);
+  border-radius: var(--radius-control);
+  padding: 0 14px;
+  background: var(--color-accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+}
+
+.chrome-topup-submit:hover {
+  background: var(--color-accent-hover);
+}
+
+.chrome-topup-submit:disabled {
+  opacity: 0.5;
 }
 
 .control-fit {

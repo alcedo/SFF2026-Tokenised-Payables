@@ -50,16 +50,16 @@ export function DemoControls({
 
   return (
     <div className="border-b border-rule-strong bg-surface-raised">
-      <div className="chrome-tools mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-3 py-1.5">
-        <span className="text-[10px] font-semibold tracking-[0.08em] text-ink-muted uppercase">
+      <div className="chrome-tools mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
+        <span className="font-semibold tracking-[0.04em] text-ink-muted uppercase">
           Demo controls
         </span>
 
         <label className="control-fit flex items-center gap-1.5">
-          <span className="shrink-0 text-[11px] text-ink-muted">Acting as</span>
+          <span className="shrink-0 text-ink-muted">Acting as</span>
           <select
             aria-label="Switch persona"
-            className="control-fit rounded-[3px] border border-rule-strong bg-surface px-1.5 py-1 text-[12px]"
+            className="control-fit"
             value={current.userId}
             disabled={pending}
             onChange={(e) => {
@@ -77,19 +77,17 @@ export function DemoControls({
           </select>
         </label>
 
-        <span className="h-4 w-px bg-rule-strong" />
-
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="num text-[12px] font-medium" title="The demo clock">
+          <span className="num font-medium" title="The demo clock">
             {worldDate}
           </span>
-          <span className="text-[11px] text-ink-faint">
+          <span className="text-ink-faint">
             {offsetDays === 0 ? 'T0' : `T0 + ${offsetDays}d`}
           </span>
           <button
             type="button"
             disabled={pending}
-            className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-0.5 text-[11px] hover:bg-surface-sunken disabled:opacity-50"
+            className="chrome-tools-btn"
             onClick={() => act(() => advanceClock(1))}
           >
             +1d
@@ -97,7 +95,7 @@ export function DemoControls({
           <button
             type="button"
             disabled={pending}
-            className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-0.5 text-[11px] hover:bg-surface-sunken disabled:opacity-50"
+            className="chrome-tools-btn"
             onClick={() => act(() => advanceClock(30))}
           >
             +30d
@@ -105,49 +103,40 @@ export function DemoControls({
           <button
             type="button"
             disabled={pending}
-            className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-0.5 text-[11px] hover:bg-surface-sunken disabled:opacity-50"
+            className="chrome-tools-btn"
             onClick={() => act(() => jumpToNextMaturity())}
           >
             Next maturity
           </button>
         </div>
 
-        <span className="h-4 w-px bg-rule-strong" />
-
-        <button
-          type="button"
-          disabled={pending}
-          className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-0.5 text-[11px] hover:bg-surface-sunken disabled:opacity-50"
-          onClick={() => setTopUpOpen((v) => !v)}
-        >
-          Simulate top-up
-        </button>
-
-        <a
-          href="/onboarding"
-          className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-0.5 text-[11px] hover:bg-surface-sunken"
-        >
-          New account
-        </a>
-
-        <a
-          href="/overdue"
-          className="rounded-[3px] border border-caution/30 bg-caution-soft px-1.5 py-0.5 text-[11px] text-caution hover:bg-caution/10"
-        >
-          Trigger overdue
-        </a>
-
-        {current.role === 'straitsx_admin' ? (
-          <a
-            href="/reset"
-            className="rounded-[3px] border border-critical/30 bg-critical-soft px-1.5 py-0.5 text-[11px] text-critical hover:bg-critical/10"
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            disabled={pending}
+            className="chrome-tools-btn"
+            onClick={() => setTopUpOpen((v) => !v)}
           >
-            Reset world
-          </a>
-        ) : null}
+            Simulate top-up
+          </button>
 
-        {pending ? <span className="text-[11px] text-ink-faint">working…</span> : null}
-        {note ? <span className="text-[11px] text-ink-muted">{note}</span> : null}
+          <a href="/onboarding" className="chrome-tools-btn">
+            New account
+          </a>
+
+          <a href="/overdue" className="chrome-tools-btn is-caution">
+            Trigger overdue
+          </a>
+
+          {current.role === 'straitsx_admin' ? (
+            <a href="/reset" className="chrome-tools-btn is-critical">
+              Reset world
+            </a>
+          ) : null}
+        </div>
+
+        {pending ? <span className="text-ink-faint">working…</span> : null}
+        {note ? <span className="text-ink-muted">{note}</span> : null}
       </div>
 
       {topUpOpen ? (
@@ -181,14 +170,10 @@ function TopUpPanel({
 
   return (
     <div className="border-t border-rule bg-surface">
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-end gap-3 px-3 py-2">
+      <div className="chrome-topup mx-auto flex max-w-[1600px] flex-wrap items-end gap-3 px-3 py-2">
         <label className="flex flex-col gap-0.5">
-          <span className="text-[10.5px] tracking-wide text-ink-muted uppercase">Wallet</span>
-          <select
-            className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-1 text-[12px]"
-            value={wallet}
-            onChange={(e) => setWallet(e.target.value)}
-          >
+          <span className="tracking-wide text-ink-muted uppercase">Wallet</span>
+          <select value={wallet} onChange={(e) => setWallet(e.target.value)}>
             {personas.map((p) => (
               <option key={p.userId} value={p.wallet}>
                 {p.entityName}
@@ -197,12 +182,8 @@ function TopUpPanel({
           </select>
         </label>
         <label className="flex flex-col gap-0.5">
-          <span className="text-[10.5px] tracking-wide text-ink-muted uppercase">Asset</span>
-          <select
-            className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-1 text-[12px]"
-            value={asset}
-            onChange={(e) => setAsset(e.target.value)}
-          >
+          <span className="tracking-wide text-ink-muted uppercase">Asset</span>
+          <select value={asset} onChange={(e) => setAsset(e.target.value)}>
             {ASSETS.map((a) => (
               <option key={a} value={a}>
                 {a}
@@ -211,9 +192,9 @@ function TopUpPanel({
           </select>
         </label>
         <label className="flex flex-col gap-0.5">
-          <span className="text-[10.5px] tracking-wide text-ink-muted uppercase">Amount</span>
+          <span className="tracking-wide text-ink-muted uppercase">Amount</span>
           <input
-            className="num w-40 rounded-[3px] border border-rule-strong bg-surface px-1.5 py-1 text-[12px]"
+            className="num w-40"
             value={amount}
             inputMode="decimal"
             onChange={(e) => setAmount(e.target.value)}
@@ -222,7 +203,7 @@ function TopUpPanel({
         <button
           type="button"
           disabled={pending}
-          className="rounded-[3px] bg-accent px-2.5 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+          className="chrome-topup-submit"
           onClick={() =>
             startTransition(async () => {
               const parsed = parseAmount(amount);
@@ -237,7 +218,7 @@ function TopUpPanel({
         >
           Add balance
         </button>
-        <p className="text-[11px] text-ink-faint">
+        <p className="text-ink-faint">
           Demo-only. Adds a simulated balance and records a mock transaction receipt.
         </p>
       </div>
