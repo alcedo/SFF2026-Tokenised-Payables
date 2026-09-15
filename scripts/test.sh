@@ -38,9 +38,8 @@ sql_stage() {
 }
 
 echo "── unit ─────────────────────────────────────────────"
-stage "pricing, lifecycle, clock, fields (vitest)" npx vitest run
+stage "core, fields, db, and the technique suites (vitest)" npx vitest run
 stage "typecheck" npx tsc --noEmit
-stage "mutation: core parsers and formulas" node scripts/mutate.mjs
 
 echo "── schema ───────────────────────────────────────────"
 scripts/db.sh reset >/dev/null 2>&1
@@ -69,6 +68,16 @@ RESET_ARG=bare sql_stage "state machines: listing, bid, certification" tests/led
 stage "concurrency: two lenders race one listing" tests/ledger/concurrency.sh
 stage "concurrency: two transfers of the same holding" tests/ledger/concurrency-transfer.sh
 stage "fault injection: rollback, kill, replay" tests/ledger/fault.sh
+
+# Mutation testing scores how much of the suite above can actually fail for a
+# defect. The threshold in stryker.config.json is what makes it a gate rather
+# than a number in a report, so it runs here by default. SKIP_MUTATION=1 for a
+# quick loop; CI should not set it.
+if [ "${SKIP_MUTATION:-}" != "1" ]; then
+	echo "── mutation ─────────────────────────────────────────"
+	stage "mutation score over src/core, against the threshold" npx stryker run
+	stage "the fx.ts mutants Stryker cannot measure" node scripts/mutate.mjs
+fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then

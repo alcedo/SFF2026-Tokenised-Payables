@@ -1,32 +1,26 @@
 #!/usr/bin/env node
+/**
+ * The mutants Stryker cannot measure.
+ *
+ * Stryker is the mutation gate for this repo; its score and threshold live in
+ * stryker.config.json. It cannot measure two of the files it is pointed at.
+ * For src/core/fx.ts and src/core/input.ts it reports "Ran 0.00 tests per
+ * mutant" and marks every mutant survived, under every coverage mode and with
+ * static filtering off. Both claims are false: planting either mutation by
+ * hand fails a test. Rather than let 148 phantom survivors drag the score,
+ * those two files are excluded in stryker.config.json and guarded here.
+ *
+ * So this is not a second mutation tool. It is the gate for the files the
+ * first one is blind to, and it is stricter: every mutant must die or the
+ * build fails. Mutants in files Stryker measures properly do not belong here.
+ *
+ * tests/techniques/findings/mutation.md carries the evidence for both files,
+ * including the hand-planted changes and the tests that caught them.
+ */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const mutants = [
-  {
-    id: 'accept-amount-between-base-units',
-    file: 'src/core/money.ts',
-    find: 'if (/[^0]/.test(excess)) {',
-    replace: 'if (false && /[^0]/.test(excess)) {',
-  },
-  {
-    id: 'skip-pro-rata-residue',
-    file: 'src/core/money.ts',
-    find: 'if (residue <= 0n) break;\n    floors[index] += 1n;',
-    replace: 'if (residue <= 0n) break;\n    /* floors[index] += 1n; */',
-  },
-  {
-    id: 'truncate-instead-of-round',
-    file: 'src/core/money.ts',
-    find: 'const quotient = (absProduct * 2n + absDenominator) / (absDenominator * 2n);',
-    replace: 'const quotient = absProduct / absDenominator;',
-  },
-  {
-    id: 'annualise-after-maturity',
-    file: 'src/core/pricing.ts',
-    find: "const annualise = maturity === 'live';",
-    replace: 'const annualise = true;',
-  },
   {
     id: 'xsgd-funds-one-to-one',
     file: 'src/core/fx.ts',
@@ -34,22 +28,10 @@ const mutants = [
     replace: 'if (true) {',
   },
   {
-    id: 'mature-only-after-due-date',
-    file: 'src/core/lifecycle.ts',
-    find: 'return daysRemaining <= 0 ? \'matured\' : \'issued\';',
-    replace: "return daysRemaining < 0 ? 'matured' : 'issued';",
-  },
-  {
-    id: 'skip-actor-check',
-    file: 'src/core/lifecycle.ts',
-    find: 'if (transition.actors.length > 0 && !transition.actors.includes(actor)) {',
-    replace: 'if (false && transition.actors.length > 0 && !transition.actors.includes(actor)) {',
-  },
-  {
     id: 'accept-zero-amount',
     file: 'src/core/input.ts',
-    find: 'if (!isPositive(value)) return fail(\'Enter an amount greater than zero.\');',
-    replace: 'if (false && !isPositive(value)) return fail(\'Enter an amount greater than zero.\');',
+    find: "if (!isPositive(value)) return fail('Enter an amount greater than zero.');",
+    replace: "if (false && !isPositive(value)) return fail('Enter an amount greater than zero.');",
   },
   {
     id: 'drop-terms-upper-bound',
@@ -114,4 +96,4 @@ if (survivors.length > 0) {
   console.error(`survivors: ${survivors.join(', ')}`);
   process.exit(1);
 }
-console.log('PASS  every mutant was killed');
+console.log('PASS  the suite kills every mutant in the files Stryker cannot measure');
