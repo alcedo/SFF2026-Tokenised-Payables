@@ -17,6 +17,8 @@
     "verify:fields": "node scripts/fields.mjs",
     "verify:fresh": "scripts/fresh.sh",
     "verify:runbook": "node scripts/runbook.mjs",
+    "verify:pathways": "node scripts/pathways.mjs",
+    "verify:controls": "node scripts/controls.mjs",
     "test:techniques": "vitest run tests/techniques tests/support",
     "test:mutation": "stryker run",
     "test:mutation:fx": "node scripts/mutate.mjs"

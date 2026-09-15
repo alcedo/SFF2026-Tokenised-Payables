@@ -56,11 +56,20 @@ the URL stays up.
 npm test                     # unit, schema, ledger, fixtures, invariants, concurrency
 npm run verify:screens       # every screen, every persona, in a real browser
 npm run verify:runbook       # the whole runbook driven click by click
+npm run verify:pathways      # every branch off issuance, each in its own world
+npm run verify:controls      # what each screen offers each persona, as a list
 npm run verify:demo          # the register, the suggested reference, the queue handover
 npm run verify:fresh         # the same, against a database that has never been seeded
 ```
 
-The middle three need the app running (`scripts/serve.sh`). `scripts/fresh.sh`
+`verify:runbook` walks one line through the app and `verify:pathways` walks the
+tree: accept and decline, cancel, list whole and in part, bid, buy now,
+transfer, settle in two assets, overdue, and the refusals each of those should
+meet. It rebuilds the world per pathway through the app's own reset, and reports
+a branch the ledger allows but no screen reaches as `UNREACHABLE` rather than as
+a pass. `verify:controls` is the map it was written from.
+
+The middle five need the app running (`scripts/serve.sh`). `scripts/fresh.sh`
 builds its own database and serves it on :3101. A new deployment boots from
 `db/fixtures.sql` rather than `db/seed.sql`, so that is the world an audience
 meets first, and this is the only driver that reaches it the way a new
