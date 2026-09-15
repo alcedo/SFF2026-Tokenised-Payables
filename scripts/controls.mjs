@@ -51,6 +51,10 @@ async function become(fragment) {
 /**
  * The chrome strip repeats on every screen, so its controls are collected once
  * and subtracted from each page. What is left is what that screen actually adds.
+ *
+ * The strip is printed once, on its own, because subtracting it silently is how
+ * you conclude a control has no caller when it is sitting on every page. "Add
+ * balance", the only way to reach `top_up`, lives there.
  */
 async function controlsOn(path) {
   await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' });
@@ -76,6 +80,8 @@ for (const persona of ONE ? [ONE] : PERSONAS) {
 
   const chrome = await controlsOn('/');
   const isChrome = new Set(chrome.buttons);
+  console.log(`\n  [every screen, the demo controls strip]`);
+  console.log(`      btn: ${[...new Set(chrome.buttons)].join(' | ') || '(none)'}`);
 
   for (const route of ROUTES) {
     const { buttons, textboxes, radios, links } = await controlsOn(route);

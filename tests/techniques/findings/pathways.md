@@ -43,10 +43,10 @@ Two of the passes are refusals that pass by omission: `cancel-after-accept` and
 `settle-early` have no control at all, which is the refusal working. See
 findings 3 and 4.
 
-The books are re-proved after every pathway, with the same four-part query
-`tests/support/database.ts` runs. That check is not decorative: adding one base
-unit to a single wallet balance by hand makes it report
-`projection_mismatches=2, unconserved_assets=2`.
+The books are re-proved after every pathway, refused and failed ones included,
+with the same four-part query `tests/support/database.ts` runs. That check is
+not decorative: adding one base unit to a single wallet balance by hand makes it
+report `projection_mismatches=2, unconserved_assets=2`.
 
 Three intents gained real-browser coverage for the first time: `reject_receipt`,
 `cancel_payable` and `cancel_listing` each had a wired control that no script
@@ -57,8 +57,13 @@ had ever clicked. `transfer` gained it too.
 `grade-by-supplier`, the one FAIL.
 
 Acting as Tang Mei-Hua, a supplier at Chien Yu Precision, on a payable owed to
-Chien Yu Precision: open `/admin/grading`, click "Assign grade". It is accepted.
-The ledger's own journal records who did it.
+Chien Yu Precision: go to `/admin/grading` and click "Assign grade". It is
+accepted. The ledger's own journal records who did it.
+
+The supplier is not offered that screen. `navFor` (`src/app/session.ts:66`)
+gives them no grading link, so reaching it means typing the URL. That lowers how
+likely this is to happen by accident and changes nothing about the control: the
+server renders the form for them and the ledger accepts the write.
 
 ```
  kind   |    actor     |   role   |     acting_for
@@ -117,8 +122,12 @@ persona can post.
 control for it. `src/app/actions.ts` has no server action, and `BidPanel.tsx`
 imports only `buyNow` and `placeBid`.
 
-So a lender can place a bid and has no way to take it back. The bid stays live
-against their balance until the seller accepts it or supersedes it.
+So a lender can place a bid and has no way to take it back. It stays on the
+seller's offers screen until they accept it or another bid supersedes it.
+
+Nothing is locked by this. `db/post.sql:669` is explicit that bids reserve no
+funds and post no leg, and the balance is rechecked when the seller accepts. The
+gap is that a lender cannot retract an offer, not that money is tied up.
 
 ## 3. An accepted payable cannot be cancelled, and that is correct
 
@@ -180,10 +189,15 @@ reset` fixes it; the hazard is that nothing says so.
 
 ## What the suite does not cover
 
-- `top_up` and `reset_world` have no UI path at all. `top_up` has an exported
-  server action with no caller; `reset_world` is dead relative to the shipped
-  app, which rebuilds the schema directly rather than posting the intent.
-  Neither is a branch off issuance, so neither has a pathway here.
+- `top_up` is reachable, from "Simulate top-up" then "Add balance" in the demo
+  controls strip (`src/components/DemoControls.tsx:233`). No pathway here drives
+  it because funding a wallet is not a branch off issuance. An earlier draft of
+  this file called it uncallable, which was wrong: `scripts/controls.mjs`
+  subtracts the strip from every screen to show what each one adds, and a
+  control that lives only in the strip therefore appeared nowhere. The script
+  now prints the strip once on its own.
+- `reset_world` is dead relative to the shipped app, which rebuilds the schema
+  directly rather than posting the intent.
 - `create_user` and `set_certification` have controls this suite only partly
   drives. `set_certification` is exercised by `issue-suspended-issuer`;
   `create_user` is account administration, not an issuance branch.

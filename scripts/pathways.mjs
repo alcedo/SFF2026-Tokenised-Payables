@@ -2,7 +2,7 @@
  * Drive every pathway that leaves issuance, through the real UI.
  *
  *   scripts/serve.sh && node scripts/pathways.mjs
- *   node scripts/pathways.mjs --only accept-settle
+ *   node scripts/pathways.mjs --only bid-accept
  *   node scripts/pathways.mjs --shots
  *
  * scripts/runbook.mjs walks one long line through the app: issue, list, bid,
@@ -427,7 +427,6 @@ async function run() {
     try {
       await resetWorld();
       await pathway.drive(ctx);
-      await books();
     } catch (error) {
       if (error instanceof Unreachable && pathway.expects === 'blocked') {
         // The pathway asks whether the system refuses something. A control that
@@ -439,6 +438,17 @@ async function run() {
         detail = error.message.split('\n')[0].slice(0, 150);
         await shot(`${pathway.id}-${verdict}`);
       }
+    }
+
+    // Outside the catch, so a refused pathway and a failed one are held to the
+    // books too. Inside it, the four pathways that end by throwing were the
+    // four never checked, which is the wrong way round: a refusal that
+    // half-posted is exactly the case worth catching.
+    try {
+      await books();
+    } catch (error) {
+      verdict = 'FAIL';
+      detail = `${detail ? `${detail}; ` : ''}${error.message}`;
     }
     const secs = ((Date.now() - started) / 1000).toFixed(0);
     results.push({ id: pathway.id, describes: pathway.describes, verdict, detail, secs });
@@ -801,12 +811,22 @@ const PATHWAYS = [
       await go('/admin/certification', ADMIN);
       // By its own label, not by role: the persona switcher is a combobox too,
       // and it is on every screen, so the first one on the page is that.
+      // Plain errors, not `unreachable`. These are this pathway's setup, and a
+      // blocked pathway counts an Unreachable as the refusal it was looking for,
+      // so calling it here would pass the pathway without ever suspending
+      // anyone or attempting an issuance.
       const status = page.getByLabel('Certification status');
-      if ((await status.count()) === 0) unreachable('no certification status control on the admin screen');
+      expect((await status.count()) > 0, 'no certification status control, so suspension was never set up');
       await status.selectOption('suspended');
       await page.waitForTimeout(400);
-      if (!(await canClick('Change status'))) unreachable('no "Change status" control on the admin screen');
+      expect(await canClick('Change status'), 'no "Change status" control, so suspension was never applied');
       await clickThrough('Change status');
+      const [issuer] = await q(
+        `SELECT certification_status FROM app.entity WHERE certification_status IS NOT NULL
+          AND name LIKE 'ADATA%'`,
+      );
+      expect(issuer?.certification_status === 'suspended',
+        `setup failed: the issuer reads ${issuer?.certification_status}, not suspended`);
       try {
         await issue();
       } catch {
@@ -835,8 +855,25 @@ const PATHWAYS = [
       await go('/admin/grading', SUPPLIER);
       if (!(await canClick('Assign grade'))) return;
       await clickThrough('Assign grade');
-      const graded = await q(`SELECT ref, grade FROM app.payable WHERE grade IS NOT NULL`);
-      expect(graded.length === 0, `a supplier assigned grade ${graded[0]?.grade} to ${graded[0]?.ref}`);
+
+      // Who the ledger believes did it, not merely that a grade exists. Asserting
+      // the grade alone would read the same if the persona switch had silently
+      // failed and the admin graded it, which is the system working.
+      const graded = await q(
+        `SELECT p.ref, p.grade, u.name AS actor, u.role, e.name AS acting_for
+           FROM ledger.journal_entry j
+           JOIN app.app_user u ON u.id = j.actor_user_id
+           JOIN app.entity e   ON e.id = u.entity_id
+           JOIN app.payable p  ON p.grade IS NOT NULL
+          WHERE j.kind = 'graded' AND u.role <> 'straitsx_admin'`,
+      );
+      expect(
+        graded.length === 0,
+        graded.length
+          ? `${graded[0].role} ${graded[0].actor} of ${graded[0].acting_for} assigned grade `
+            + `${graded[0].grade} to ${graded[0].ref}`
+          : 'unreachable',
+      );
     },
   },
 ];
