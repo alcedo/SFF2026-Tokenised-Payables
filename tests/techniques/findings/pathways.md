@@ -190,7 +190,7 @@ reset` fixes it; the hazard is that nothing says so.
 ## What the suite does not cover
 
 - `top_up` is reachable, from "Simulate top-up" then "Add balance" in the demo
-  controls strip (`src/components/DemoControls.tsx:233`). No pathway here drives
+  controls strip (`src/components/DemoControls.tsx:219`). No pathway here drives
   it because funding a wallet is not a branch off issuance. An earlier draft of
   this file called it uncallable, which was wrong: `scripts/controls.mjs`
   subtracts the strip from every screen to show what each one adds, and a
