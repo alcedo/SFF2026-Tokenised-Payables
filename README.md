@@ -50,15 +50,6 @@ kept small enough not to bury them; `tests/ledger/seed.sql` holds the budget.
 T0 is the day the world was seeded, so the tenors stay realistic however long
 the URL stays up.
 
-## Known defects
-
-`npm test` is green and the system still has about twenty known defects, found
-by the suites in `tests/techniques/` and deliberately not fixed there. Most are
-pinned as passing assertions recording what the code does, so a clean run does
-not mean a correct system. The list, each with a reproduction, is in
-[`tests/techniques/findings/`](tests/techniques/findings/), and
-[`CLAUDE.md`](CLAUDE.md) summarises the ones most likely to bite.
-
 ## Verify it
 
 ```bash
