@@ -5,7 +5,7 @@ scored against `vitest.unit.config.mts`. Re-run with `npm run test:mutation`.
 
 ## The gate is red, and it was red before these fixes
 
-`npm test` fails at the mutation stage. Stryker scores 18.08% against a break
+`npm test` fails at the mutation stage. Stryker scores 18.29% against a break
 threshold of 24. The cause is not the defect fixes, and the arithmetic says so.
 
 `b1d9bad` and `46f36e0` added three modules to `src/core` while building the
@@ -27,11 +27,16 @@ Measured like for like, over the six files the last committed report covers:
 | | score |
 |---|---:|
 | `.audit/mutation/after-merge.json`, before these fixes | 24.84% |
-| `.audit/mutation/after-defect-fixes.json`, after them | **25.40%** |
+| `.audit/mutation/after-defect-fixes.json`, after them | 25.40% |
+| `.audit/mutation/after-cancellation.json`, with `cancelled` | **25.60%** |
 
 So the fixes raised the score on everything that was being measured, and the
 gate fails on three files none of them touched. Re-run it with
 `npx stryker run`; the raw report is committed beside the others.
+
+The seventh lifecycle state moved `lifecycle.ts` from 32.88% to 33.33%, so the
+new rows are covered about as well as the table they joined, and the overall
+number rose with them.
 
 Closing this needs unit tests for those three modules, which is a different
 piece of work from fixing the defects the suites found, and is left for whoever
