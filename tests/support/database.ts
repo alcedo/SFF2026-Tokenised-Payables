@@ -44,11 +44,22 @@ export const ADMIN_URL = urlFor('postgres');
 
 let counter = 0;
 
-/** A name unique across workers, since several vitest processes clone at once. */
+/**
+ * The prefix every database this run creates shares.
+ *
+ * Teardown deletes exactly this set and nothing else. The id is stamped into
+ * the environment by global-setup before any worker forks, so the workers that
+ * create the databases and the teardown that removes them agree on it. Two
+ * runs at once get two ids and cannot delete each other's databases.
+ */
+export function clonePrefix(): string {
+  return `adata_x_${process.env.ADATA_RUN_ID ?? process.pid}_`;
+}
+
 function uniqueName(suite: string): string {
-  const slug = suite.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 24);
+  const slug = suite.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 20);
   counter += 1;
-  return `adata_x_${slug}_${process.pid}_${counter}`;
+  return `${clonePrefix()}${slug}_${process.pid}_${counter}`;
 }
 
 async function withAdmin<T>(fn: (pool: Pool) => Promise<T>): Promise<T> {
