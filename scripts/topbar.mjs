@@ -53,13 +53,23 @@ function probe() {
     const style = getComputedStyle(el);
     const tag = el.tagName.toLowerCase();
     const isControl = tag === 'button' || tag === 'select' || tag === 'a' || tag === 'input';
-    if (!ownText(el) && !isControl) continue;
+
+    /*
+     * A text-less span that still paints is a rule, a dot or a divider. An
+     * earlier version of this check skipped those, and so passed a bar whose
+     * dividers had been orphaned onto their own wrapped lines. Anything that
+     * paints is a UI element and gets measured.
+     */
+    const isMark = !ownText(el) && !isControl && el.children.length === 0 && box.width < 4;
+    if (!ownText(el) && !isControl && !isMark) continue;
+
     rows.push({
       tag,
-      label: (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 34),
+      label: isMark ? '(divider)' : (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 34),
       fontPx: parseFloat(style.fontSize),
       heightPx: Math.round(box.height * 10) / 10,
       isControl,
+      isMark,
     });
   }
 
@@ -70,6 +80,30 @@ function probe() {
     docOverflowPx: Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
     rows,
   };
+}
+
+/** The same read, against the top-up panel the bar discloses. */
+function probePanel() {
+  const panel = document.querySelector('.chrome-topup');
+  if (!panel) return { rows: [] };
+  const ownText = (el) =>
+    [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim() !== '');
+  const rows = [];
+  for (const el of panel.querySelectorAll('*')) {
+    const box = el.getBoundingClientRect();
+    if (box.width === 0 && box.height === 0) continue;
+    const tag = el.tagName.toLowerCase();
+    const isControl = tag === 'button' || tag === 'select' || tag === 'input';
+    if (!ownText(el) && !isControl) continue;
+    rows.push({
+      tag,
+      label: (el.textContent ?? '').trim().slice(0, 34),
+      fontPx: parseFloat(getComputedStyle(el).fontSize),
+      heightPx: Math.round(box.height * 10) / 10,
+      isControl,
+    });
+  }
+  return { rows };
 }
 
 const browser = await chromium.launch({ executablePath: EXECUTABLE, args: ['--no-sandbox'] });
@@ -93,9 +127,9 @@ for (const viewport of VIEWPORTS) {
   console.log(`\n=== ${viewport.name} (${viewport.width}px) ===`);
   console.log(`bar height ${result.barHeightPx}px | bar font ${result.barFontPx}px | doc overflow ${result.docOverflowPx}px`);
 
-  const sizes = new Set(result.rows.map((r) => r.fontPx));
+  const sizes = new Set(result.rows.filter((r) => !r.isMark).map((r) => r.fontPx));
   for (const row of result.rows) {
-    const bad = row.fontPx !== FONT_PX;
+    const bad = !row.isMark && row.fontPx !== FONT_PX;
     const short = row.isControl && row.heightPx < MIN_CONTROL_PX;
     const mark = bad || short ? 'FAIL' : 'ok  ';
     console.log(
@@ -113,6 +147,28 @@ for (const viewport of VIEWPORTS) {
   if (SHOTS) {
     await page.locator('.chrome-tools').screenshot({ path: `${OUT}/${viewport.name}.png` });
   }
+
+  /*
+   * The top-up panel is a sibling of the bar rather than a descendant, so the
+   * bar's own rules never reach it. It opens directly beneath the bar, so a
+   * panel left at the old size reads as broken hanging off a 16px bar.
+   */
+  await page.getByRole('button', { name: 'Simulate top-up' }).click();
+  await page.waitForSelector('.chrome-topup');
+  const panel = await page.evaluate(probePanel);
+  for (const row of panel.rows) {
+    const bad = row.fontPx !== FONT_PX;
+    const short = row.isControl && row.heightPx < MIN_CONTROL_PX;
+    console.log(
+      `  ${bad || short ? 'FAIL' : 'ok  '} panel ${row.tag.padEnd(6)} ${String(row.fontPx).padStart(5)}px  h=${String(row.heightPx).padStart(5)}px  ${row.label}`,
+    );
+    if (bad || short) failures++;
+  }
+
+  if (SHOTS) {
+    await page.locator('.chrome-topup').screenshot({ path: `${OUT}/${viewport.name}-topup.png` });
+  }
+
   await context.close();
 }
 
