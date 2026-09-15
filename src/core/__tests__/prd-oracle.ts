@@ -12,14 +12,9 @@ export const PRD_EDGES: readonly PrdEdge[] = [
   { event: 'submit', from: 'draft', to: 'pending_approval', actors: ['adata_preparer'] },
   { event: 'approve', from: 'pending_approval', to: 'approved', actors: ['adata_checker'] },
   { event: 'certify', from: 'approved', to: 'certified', actors: ['straitsx_admin'] },
-  {
-    event: 'issue',
-    from: 'certified',
-    to: 'issued',
-    actors: ['adata_preparer', 'adata_checker', 'straitsx_admin'],
-  },
+  { event: 'issue', from: 'certified', to: 'issued', actors: ['straitsx_admin'] },
   { event: 'mature', from: 'issued', to: 'matured', actors: [] },
-  { event: 'settle', from: 'matured', to: 'settled', actors: ['adata_preparer', 'adata_checker'] },
+  { event: 'settle', from: 'matured', to: 'settled', actors: ['adata_preparer'] },
   { event: 'mark_overdue', from: 'matured', to: 'overdue', actors: [] },
 ];
 

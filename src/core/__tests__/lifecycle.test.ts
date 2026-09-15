@@ -21,7 +21,7 @@ describe('PRD section 7 obligation lifecycle', () => {
       { event: 'submit', actor: 'adata_preparer', to: 'pending_approval' },
       { event: 'approve', actor: 'adata_checker', to: 'approved' },
       { event: 'certify', actor: 'straitsx_admin', to: 'certified' },
-      { event: 'issue', actor: 'adata_preparer', to: 'issued' },
+      { event: 'issue', actor: 'straitsx_admin', to: 'issued' },
     ] as const;
 
     for (const step of path) {
@@ -34,7 +34,7 @@ describe('PRD section 7 obligation lifecycle', () => {
     const matured = attempt(status, 'mature', 'adata_preparer');
     expect(matured).toMatchObject({ ok: true, to: 'matured' });
 
-    expect(attempt('matured', 'settle', 'adata_checker')).toMatchObject({ ok: true, to: 'settled' });
+    expect(attempt('matured', 'settle', 'adata_preparer')).toMatchObject({ ok: true, to: 'settled' });
   });
 
   it('branches matured to overdue', () => {
@@ -63,17 +63,17 @@ describe('maker-checker is enforced by role', () => {
 
 describe('out-of-order transitions are refused with a usable reason', () => {
   it('will not issue a payable that was never certified', () => {
-    const result = attempt('approved', 'issue', 'adata_preparer');
+    const result = attempt('approved', 'issue', 'straitsx_admin');
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.reason).toMatch(/must be certified/);
   });
 
   it('will not settle a payable that has not matured', () => {
-    expect(attempt('issued', 'settle', 'adata_checker')).toMatchObject({ ok: false });
+    expect(attempt('issued', 'settle', 'adata_preparer')).toMatchObject({ ok: false });
   });
 
   it('will not settle twice', () => {
-    expect(attempt('settled', 'settle', 'adata_checker')).toMatchObject({ ok: false });
+    expect(attempt('settled', 'settle', 'adata_preparer')).toMatchObject({ ok: false });
   });
 
   it('will not re-approve an approved payable', () => {
@@ -159,7 +159,7 @@ describe('who the queue is waiting on', () => {
     expect(pendingStep('certified')).toEqual({
       event: 'issue',
       to: 'issued',
-      actors: ['adata_preparer', 'adata_checker', 'straitsx_admin'],
+      actors: ['straitsx_admin'],
       action: 'issue it to the supplier',
     });
   });
@@ -168,7 +168,7 @@ describe('who the queue is waiting on', () => {
     expect(pendingStep('matured')).toEqual({
       event: 'settle',
       to: 'settled',
-      actors: ['adata_preparer', 'adata_checker'],
+      actors: ['adata_preparer'],
       action: 'settle it to the holders',
     });
   });

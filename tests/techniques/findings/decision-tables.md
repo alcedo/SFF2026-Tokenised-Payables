@@ -10,7 +10,7 @@ own row counts, so a row silently disappearing fails the suite.
 | Table | Rule | Conditions | Rows | Feasible | Infeasible |
 | --- | --- | --- | ---: | ---: | ---: |
 | 1 | issuance against certification and programme limit | 4 | 48 | 24 | 24 |
-| 2 | maker-checker approval | 3 | 60 | 55 | 5 |
+| 2 | maker-checker approval | 3 | 60 | 35 | 25 |
 | 3a | bid acceptance, early gates | 2 | 18 | 13 | 5 |
 | 3b | bid acceptance, conditions after the gates | 5 | 32 | 24 | 8 |
 | 4 | maturity settlement | 6 | 144 | 60 | 84 |
@@ -18,7 +18,7 @@ own row counts, so a row silently disappearing fails the suite.
 | 5b | `onboard_entity` role against organisation type | 2 | 20 | 20 | 0 |
 | 5c | `onboard_entity` name validation | 2 | 15 | 15 | 0 |
 | 6 | user removal | 3 | 12 | 5 | 7 |
-| | | | **369** | **236** | **133** |
+| | | | **369** | **216** | **153** |
 
 Nothing in `src/` or `db/` was changed. Every scenario ends by asserting
 `ledgerHealth(pool)` equals `HEALTHY`; the books balance through all of it.
@@ -26,6 +26,11 @@ Nothing in `src/` or `db/` was changed. Every scenario ends by asserting
 ---
 
 ## 1. Maker-checker is enforced nowhere on the write path
+
+**FIXED.** `ledger.post()` now reads `app.lifecycle_edge.actor_role` through
+`app.assert_edge_actor` and refuses any other actor with `ADA36`. The write-up
+below is the state before that change; what replaced it is at the end of this
+entry.
 
 **Severity: the compliance rule the brief names is absent from the product.**
 
@@ -41,8 +46,9 @@ five edges (`pending_approval -> approved` is `adata_checker`). Nothing reads
 it. The suite proves this from the database itself rather than by inspection:
 `pg_get_functiondef(app.enforce_lifecycle_edge)` selects only `from_state` and
 `to_state`, and `pg_get_functiondef(ledger.post)` contains neither the string
-`actor_role` nor the string `lifecycle_edge`. See the case
-`carries an actor_role on every lifecycle edge that the write path never reads`.
+`actor_role` nor the string `lifecycle_edge`. The case that proved it is now
+`carries an actor_role on every lifecycle edge, which ledger.post reads through
+app.assert_edge_actor`, and it asserts the reader rather than its absence.
 
 `src/core/lifecycle.ts::attempt()` implements the role half in TypeScript. Its
 only callers are `src/app/adata/approvals/page.tsx`, which uses it to decide
@@ -58,8 +64,8 @@ submitter, is implemented nowhere. `attempt()` takes a role and never sees a
 user; its own doc comment says the identity check is "an identity check the
 caller performs", and no caller performs it.
 
-**Reproduction** (`accepts an approval from the supplier who submitted, which
-core/lifecycle refuses`): create a payable, post `submit` as the `supplier`
+**Reproduction** (now `refuses a supplier at submit and at approve, as
+core/lifecycle does`): create a payable, post `submit` as the `supplier`
 user, then post `approve` as the same `supplier` user.
 
 **Expected**: refusal. The PRD maker-checker rule requires an `adata_checker`,
@@ -72,12 +78,63 @@ submitted.
 'supplier')` returns `{ ok: false, reason: 'supplier may not approve a payable' }`,
 so the two layers disagree and the database is the one that decides.
 
-The 60-row table makes the scope of this exact. Its outcome lookup,
-`APPROVE_OUTCOME`, is keyed on the lifecycle state alone. Role and submitter
-identity are enumerated across all 60 rows and appear in no key, because they
-change nothing. All five roles and both identity settings produce the same
+The 60-row table made the scope of this exact. Its outcome lookup,
+`APPROVE_OUTCOME`, was keyed on the lifecycle state alone. Role and submitter
+identity were enumerated across all 60 rows and appeared in no key, because they
+changed nothing. All five roles and both identity settings produced the same
 result for a given state: `ADA01 illegal lifecycle transition <from> -> approved`
 off a bad edge, acceptance on a good one.
+
+### What replaced it
+
+`app.assert_edge_actor(payable, to_state, actor)` in `db/post.sql` looks up
+`app.lifecycle_edge.actor_role` for the edge the command would take, reads the
+actor's role, and refuses a mismatch with
+
+```
+ADA36 payable <ref> moves from <from> to <to> on the <required>, not the <actual>
+```
+
+It is called from all three places that move `lifecycle_status`: the
+`submit`/`approve`/`certify` branch, `issue_payable`, and `settle_maturity`. So
+the column is read on all five edges rather than on the one the brief named.
+Where the pair is not an edge at all, including a same-state write, it returns
+early and leaves the refusal to `app.enforce_lifecycle_edge`, which still
+answers `ADA01`.
+
+**The identity half needs no rule of its own.** `app.app_user.role` is written
+once at INSERT and no command updates it, and `submit` and `approve` name
+different roles, so the submitter of a payable can never be its approver. A
+guard for it could not fire. Writing one would have added the kind of
+unreachable branch findings 6 and 8 of this file already fault.
+
+**`src/core/lifecycle.ts` disagreed and now does not.** Its `TRANSITIONS.issue`
+allowed `adata_preparer`, `adata_checker` and `straitsx_admin`, and
+`TRANSITIONS.settle` allowed two roles, against one in the edge table. Those
+lists gate buttons, so the approvals screen would have drawn a control the
+database then refused. Both are narrowed to the edge table, and
+`tests/techniques/state-transitions.test.ts` now reads `app.lifecycle_edge` out
+of the database and asserts the two agree, so the next edit cannot drift them
+apart quietly.
+
+**`src/app/adata/settlement/FundingPanel.tsx` had no role gate at all**, only a
+funds check, so every persona could click Fund settlement. It now consults
+`attempt()` the way the approvals screen does.
+`src/core/next-action.ts::sourceSettlementDue` was a third copy, offering the
+step to the checker as well, and now reads `pendingStep('matured').actors`.
+
+**What the rule does not close.** `app.assert_edge_actor` returns early when the
+pair is not an edge, and `approved -> approved` is not one, so finding 2 below
+still stands and now has a sharper form: a wrong-role actor's `approve` on an
+already-approved payable is accepted and writes an `approved` journal entry
+under that actor. The audit trail can still show a supplier approving. Table 2
+pins it as `approved | acting as supplier | a different user -> accepted`.
+
+Table 2's shape moved with the rule. Its outcome is now keyed on lifecycle and,
+at `pending_approval` only, on role, which mirrors the write path reading the
+role only where an edge row exists. Twenty rows became infeasible: `submit` is
+refused to every role but `adata_preparer` and a role never changes, so no other
+role is ever a payable's submitter.
 
 ---
 

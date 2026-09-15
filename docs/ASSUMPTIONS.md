@@ -293,6 +293,36 @@ serverless instances can cold-start on the same empty database.
 `db/fixtures.sql`, and the counts they have to satisfy are named in
 `tests/ledger/fixtures.sql`.
 
+## Which role may drive each lifecycle edge
+
+Section 7 names an actor for one edge of five. "The ADATA checker approves the
+preparer's submission" is explicit, and section 3 question 6 adds that the
+checker is separate. For the other four it describes the event without saying
+whose hands are on it: "StraitsX assigns a grade and certifies eligibility",
+"mock mint assigns the full quantity to the supplier wallet", "ADATA funds the
+full outstanding face". Maker-checker is named as a phase 1 exit criterion, so
+the rule has to be enforced somewhere, against a role table the PRD only half
+supplies.
+
+**Built:** `app.lifecycle_edge.actor_role` carries a role on all five edges and
+`ledger.post()` reads it, refusing any other actor with `ADA36`. Submission and
+redemption belong to the ADATA preparer, approval to the ADATA checker, and
+grading, certification and issuance to StraitsX, which matches section 7's one
+explicit edge and follows the obligor-versus-programme split the rest of the
+document draws. The identity half of maker-checker needs no separate rule: a
+user holds exactly one `app.user_role`, set at creation and changed by no
+command, and submission and approval name different roles, so the submitter of
+a payable can never be its approver.
+
+`src/core/lifecycle.ts` holds the same five rows, because the screens disable
+buttons before a person clicks them, and a test in
+`tests/techniques/state-transitions.test.ts` reads `app.lifecycle_edge` out of
+the database and asserts the two agree. A rule written twice drifts, and the
+version that drew a button the database then refused is the one this replaced.
+
+**If wrong:** the rows in `db/schema.sql` §5, `app.assert_edge_actor` in
+`db/post.sql`, and `TRANSITIONS` in `src/core/lifecycle.ts`.
+
 ## Naming who the approval queue is waiting on
 
 Section 8 screen 3 asks for "preparer submission and separate checker approval,

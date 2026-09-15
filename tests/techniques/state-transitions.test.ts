@@ -24,6 +24,7 @@ import {
   type Database,
   type PostResult,
 } from '../support/database';
+import { TRANSITIONS, type LifecycleEvent } from '@/core/lifecycle';
 
 type ObligationState =
   | 'draft'
@@ -76,6 +77,7 @@ function outcome(result: PostResult): string {
 interface World {
   pool: Pool;
   preparer: string;
+  checker: string;
   admin: string;
   supplier: string;
   supplierId: string;
@@ -105,6 +107,7 @@ async function openWorld(pool: Pool): Promise<World> {
   return {
     pool,
     preparer: byRole.adata_preparer!,
+    checker: byRole.adata_checker!,
     admin: byRole.straitsx_admin!,
     supplier: byRole.supplier!,
     supplierId: suppliers[0]!.entity_id,
@@ -147,6 +150,10 @@ async function createDraft(world: World, ref: string, termsDays: number): Promis
  * is both the honest way to reach a starting state and a second exercise of
  * every command in the chain. `settled` stops at `issued`, since settlement
  * needs the world clock past maturity and that is a decision for the caller.
+ *
+ * Each edge posts as the role app.lifecycle_edge names for it, or ledger.post
+ * refuses it with ADA36. grade is not a lifecycle edge, so it carries no role
+ * of its own; it is posted alongside certify as the straitsx_admin.
  */
 async function park(
   world: World,
@@ -159,6 +166,12 @@ async function park(
   for (let step = 1; step <= stop; step += 1) {
     tokenSeq += 1;
     const state = LIFECYCLE_ORDER[step];
+    const actor =
+      state === 'pending_approval'
+        ? world.preparer
+        : state === 'approved'
+          ? world.checker
+          : world.admin;
     const intents: Record<string, unknown>[] =
       state === 'pending_approval'
         ? [{ kind: 'submit', payableId }]
@@ -178,7 +191,7 @@ async function park(
                 },
               ];
     for (const intent of intents) {
-      const done = await post(world.pool, intent, { actorUserId: world.admin });
+      const done = await post(world.pool, intent, { actorUserId: actor });
       if (!done.ok) {
         throw new Error(`could not park ${ref} at ${state}: ${done.code} ${done.message}`);
       }
@@ -355,6 +368,27 @@ describe('machine 1: the obligation lifecycle', () => {
     await db?.close();
   });
 
+  // ledger.post() refuses an edge driven by the wrong role with ADA36, reading
+  // app.lifecycle_edge. src/core/lifecycle.ts decides whether to draw the
+  // button. Two statements of one rule drift silently, and a wider list in
+  // TypeScript renders a control the database then refuses, so tie them here.
+  it('agrees with src/core/lifecycle about who may drive each edge', () => {
+    const EVENT_OF: Record<string, LifecycleEvent> = {
+      'draft->pending_approval': 'submit',
+      'pending_approval->approved': 'approve',
+      'approved->certified': 'certify',
+      'certified->issued': 'issue',
+      'issued->settled': 'settle',
+    };
+    expect(
+      edges.map((e) => `${e.from}->${e.to}: ${e.role}`).sort(),
+    ).toEqual(
+      edges
+        .map((e) => `${e.from}->${e.to}: ${TRANSITIONS[EVENT_OF[`${e.from}->${e.to}`]!].actors.join(',')}`)
+        .sort(),
+    );
+  });
+
   it('stores exactly six obligation states and exactly five legal edges', async () => {
     expect(await enumLabels(db.pool, 'app.obligation_state')).toEqual([
       'draft',
@@ -439,6 +473,10 @@ describe('machine 1: the obligation lifecycle', () => {
   it('covers the full state by command matrix and records which guard wins', async () => {
     const observed: Record<string, string> = {};
     const expected: Record<string, string> = {};
+    // Every command below posts as world.admin (straitsx_admin), so a cell
+    // whose edge names a different role now names its own ADA36 refusal
+    // instead of landing.
+    const roleFor = new Map(edges.map((edge) => [`${edge.from}->${edge.to}`, edge.role]));
 
     for (const from of LIFECYCLE_ORDER) {
       for (const command of COMMANDS) {
@@ -472,6 +510,9 @@ describe('machine 1: the obligation lifecycle', () => {
             `ADA15: payable ${ref} is ${from} and must be certified before issuance -> ${from}`;
         } else if (command === 'settle_maturity' && from === 'settled') {
           expected[key] = `ADA16: payable ${ref} is already settled -> settled`;
+        } else if (edgeKeys.has(`${from}->${to}`) && roleFor.get(`${from}->${to}`) !== 'straitsx_admin') {
+          expected[key] =
+            `ADA36: payable ${ref} moves from ${from} to ${to} on the ${roleFor.get(`${from}->${to}`)}, not the straitsx_admin -> ${from}`;
         } else if (from === to || edgeKeys.has(`${from}->${to}`)) {
           expected[key] = `accepted -> ${to}`;
         } else {
@@ -552,46 +593,82 @@ describe('machine 1: the obligation lifecycle', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('accepts every legal edge from an actor holding the wrong role', async () => {
-    // lifecycle_edge.actor_role names a role per edge and the trigger reads
-    // only (from_state, to_state), so the column constrains nothing. Driving
-    // the whole chain as a supplier is the cheapest proof of that.
-    const payableId = await park(world, 'ROLE-wrong', 'draft', SHORT_TERM);
-    // grade is not a lifecycle edge, so it is setup here rather than a step.
-    expect(
-      await post(
-        db.pool,
-        { kind: 'grade', payableId, grade: 'A' },
-        { actorUserId: world.supplier },
-      ),
-    ).toMatchObject({ ok: true });
-    const walk = [
-      { kind: 'submit', payableId },
-      { kind: 'approve', payableId },
-      { kind: 'certify', payableId },
-      { kind: 'issue_payable', payableId, toWallet: world.supplierWallet, tokenId: 654_321 },
-      { kind: 'settle_maturity', payableId, fundingCode: 'XUSD' },
+  it('names the ADA36 refusal for every legal edge driven by the wrong role', async () => {
+    // lifecycle_edge.actor_role names a role per edge and ledger.post() now
+    // reads it, refusing the wrong actor with ADA36 before the edge fires. A
+    // supplier holds none of the five required roles, so driving each edge as
+    // a supplier is still the cheapest proof, only now the proof is a named
+    // refusal instead of a walk that lands anyway.
+    const edgeCases: {
+      from: ObligationState;
+      to: ObligationState;
+      role: string;
+      intent: (payableId: string) => Record<string, unknown>;
+    }[] = [
+      {
+        from: 'draft',
+        to: 'pending_approval',
+        role: 'adata_preparer',
+        intent: (payableId) => ({ kind: 'submit', payableId }),
+      },
+      {
+        from: 'pending_approval',
+        to: 'approved',
+        role: 'adata_checker',
+        intent: (payableId) => ({ kind: 'approve', payableId }),
+      },
+      {
+        from: 'approved',
+        to: 'certified',
+        role: 'straitsx_admin',
+        intent: (payableId) => ({ kind: 'certify', payableId }),
+      },
+      {
+        from: 'certified',
+        to: 'issued',
+        role: 'straitsx_admin',
+        intent: (payableId) => {
+          tokenSeq += 1;
+          return {
+            kind: 'issue_payable',
+            payableId,
+            toWallet: world.supplierWallet,
+            tokenId: 800_000 + tokenSeq,
+          };
+        },
+      },
+      {
+        from: 'issued',
+        to: 'settled',
+        role: 'adata_preparer',
+        intent: (payableId) => ({ kind: 'settle_maturity', payableId, fundingCode: 'XUSD' }),
+      },
     ];
-    const landed: string[] = [];
-    for (const intent of walk) {
-      if (intent.kind === 'settle_maturity') {
-        const advanced = await post(
-          db.pool,
-          { kind: 'advance_clock', days: SHORT_TERM },
-          { actorUserId: world.admin },
-        );
-        expect(advanced).toMatchObject({ ok: true });
+
+    for (const edgeCase of edgeCases) {
+      const ref = `ROLE-wrong-${edgeCase.from}`;
+      const payableId = await park(world, ref, edgeCase.from, SHORT_TERM);
+      if (edgeCase.from === 'approved') {
+        // grade is not a lifecycle edge, so it is setup here rather than a
+        // step; park() stops at approved ungraded and certify needs a grade.
+        expect(
+          await post(db.pool, { kind: 'grade', payableId, grade: 'A' }, { actorUserId: world.admin }),
+        ).toMatchObject({ ok: true });
       }
-      const result = await post(db.pool, intent, { actorUserId: world.supplier });
-      landed.push(`${outcome(result)} -> ${await lifecycleOf(db.pool, payableId)}`);
+      if (edgeCase.to === 'settled') {
+        expect(
+          await post(db.pool, { kind: 'advance_clock', days: SHORT_TERM }, { actorUserId: world.admin }),
+        ).toMatchObject({ ok: true });
+      }
+
+      const result = await post(db.pool, edgeCase.intent(payableId), { actorUserId: world.supplier });
+      expect(result).toEqual({
+        ok: false,
+        code: 'ADA36',
+        message: `payable ${ref} moves from ${edgeCase.from} to ${edgeCase.to} on the ${edgeCase.role}, not the supplier`,
+      });
+      expect(await lifecycleOf(db.pool, payableId)).toBe(edgeCase.from);
     }
-    expect(landed).toEqual([
-      'accepted -> pending_approval',
-      'accepted -> approved',
-      'accepted -> certified',
-      'accepted -> issued',
-      'accepted -> settled',
-    ]);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 });

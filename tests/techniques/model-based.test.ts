@@ -26,8 +26,10 @@ import {
   freshDatabase,
   ledgerHealth,
   post,
+  actors,
   HEALTHY,
   type Database,
+  type Role,
 } from '../support/database';
 
 // --- the world the model knows about ---------------------------------------
@@ -69,6 +71,7 @@ interface Real {
   readonly suppliers: readonly { id: string; name: string }[];
   readonly edges: ReadonlySet<string>;
   readonly programmeLimit: bigint;
+  readonly actorsByRole: Readonly<Record<Role, string>>;
 }
 
 interface MPayable {
@@ -247,6 +250,44 @@ function unreachablePairs(): string[] {
   return out;
 }
 
+// --- maker-checker roles -----------------------------------------------------
+
+/**
+ * The role app.lifecycle_edge names for each of the five edges, read here as a
+ * fixed table rather than from the database, because the whole point of this
+ * suite is a second implementation that predicts the first rather than a copy
+ * of it.
+ */
+const EDGE_ROLE: Record<
+  'submit' | 'approve' | 'certify' | 'issue_payable' | 'settle_maturity',
+  Role
+> = {
+  submit: 'adata_preparer',
+  approve: 'adata_checker',
+  certify: 'straitsx_admin',
+  issue_payable: 'straitsx_admin',
+  settle_maturity: 'adata_preparer',
+};
+
+const ROLE_ORDER: readonly Role[] = [
+  'adata_preparer', 'adata_checker', 'straitsx_admin', 'supplier', 'lender',
+];
+
+/** Some role other than the one named, chosen the same way every time. */
+function wrongRoleFor(required: Role): Role {
+  return ROLE_ORDER.find((role) => role !== required)!;
+}
+
+/**
+ * The actor a hand-written setup sequence needs for one intent, so that a
+ * fixture built out of raw `post()` calls still walks the lifecycle rather
+ * than tripping ADA36 on its own scaffolding.
+ */
+function correctActor(real: Real, kind: string): string | undefined {
+  const role = (EDGE_ROLE as Partial<Record<string, Role>>)[kind];
+  return role ? real.actorsByRole[role] : undefined;
+}
+
 // --- commands ---------------------------------------------------------------
 
 abstract class Step implements fc.AsyncCommand<Model, Real> {
@@ -267,11 +308,18 @@ abstract class Step implements fc.AsyncCommand<Model, Real> {
   /** Applied to the model only when the ledger accepted the command. */
   protected abstract apply(model: Model, real: Real): Promise<void> | void;
 
+  /** Who posts this command. Only the five role-gated edges override this. */
+  protected actorFor(_model: Model, _real: Real): string | undefined {
+    return undefined;
+  }
+
   async run(model: Model, real: Real): Promise<void> {
     const verdict = this.predict(model, real);
     note(this.kind, this.subject(model), verdict);
 
-    const result = await post(real.db.pool, this.intent(model, real));
+    const result = await post(real.db.pool, this.intent(model, real), {
+      actorUserId: this.actorFor(model, real),
+    });
     const seen = result.ok
       ? { accepted: true, code: null as string | null }
       : { accepted: false, code: result.code ?? null };
@@ -535,12 +583,18 @@ class Advance extends Step {
     private readonly target: LifecycleState,
     private readonly index: number,
     private readonly guided: boolean,
+    private readonly rightRole: boolean,
   ) {
     super();
   }
 
   check(model: Readonly<Model>): boolean {
     return model.payables.size > 0;
+  }
+
+  private role(): Role {
+    const required = EDGE_ROLE[this.kind];
+    return this.rightRole ? required : wrongRoleFor(required);
   }
 
   protected subject(model: Model): string {
@@ -561,7 +615,20 @@ class Advance extends Step {
     if (!real.edges.has(`${p.status}->${this.target}`)) {
       return refuse('ADA01', `illegal lifecycle transition ${p.status} -> ${this.target}`);
     }
+    // Only reached once the edge is confirmed real, which is exactly when
+    // app.assert_edge_actor finds a row and can have anything to check.
+    const required = EDGE_ROLE[this.kind];
+    if (this.role() !== required) {
+      return refuse(
+        'ADA36',
+        `payable ${p.ref} moves from ${p.status} to ${this.target} on the ${required}, not the ${this.role()}`,
+      );
+    }
     return legal;
+  }
+
+  protected actorFor(_model: Model, real: Real): string {
+    return real.actorsByRole[this.role()];
   }
 
   protected intent(model: Model): Record<string, unknown> {
@@ -573,7 +640,7 @@ class Advance extends Step {
   }
 
   toString(): string {
-    return `${this.kind}(payable=${this.guided ? 'ready' : ''}${this.index})`;
+    return `${this.kind}(payable=${this.guided ? 'ready' : ''}${this.index}, actor=${this.rightRole ? 'right' : 'wrong'})`;
   }
 }
 
@@ -629,6 +696,7 @@ class Issue extends Step {
     private readonly index: number,
     private readonly walletIndex: number,
     private readonly guided: boolean,
+    private readonly rightRole: boolean,
   ) {
     super();
   }
@@ -641,6 +709,10 @@ class Issue extends Step {
     return nth([...real.wallets], this.walletIndex);
   }
 
+  private role(): Role {
+    return this.rightRole ? EDGE_ROLE.issue_payable : wrongRoleFor(EDGE_ROLE.issue_payable);
+  }
+
   protected subject(model: Model): string {
     return stateOfPayable(model, this.kind, this.index, this.guided);
   }
@@ -649,6 +721,14 @@ class Issue extends Step {
     const p = aimed(model, this.kind, this.index, this.guided)[1];
     if (p.status !== 'certified') {
       return refuse('ADA15', `payable ${p.ref} is ${p.status} and must be certified before issuance`);
+    }
+    // Reached only once the payable is certified, which is the only from_state
+    // this intent's edge names, so app.assert_edge_actor always finds a row here.
+    if (this.role() !== EDGE_ROLE.issue_payable) {
+      return refuse(
+        'ADA36',
+        `payable ${p.ref} moves from certified to issued on the ${EDGE_ROLE.issue_payable}, not the ${this.role()}`,
+      );
     }
     // app.payable's maturity_after_issue CHECK, reached whenever the clock has
     // already passed the date the draft was written against.
@@ -663,6 +743,10 @@ class Issue extends Step {
       return refuse('ADA33', 'over its');
     }
     return legal;
+  }
+
+  protected actorFor(_model: Model, real: Real): string {
+    return real.actorsByRole[this.role()];
   }
 
   protected intent(model: Model, real: Real): Record<string, unknown> {
@@ -683,7 +767,7 @@ class Issue extends Step {
   }
 
   toString(): string {
-    return `issue_payable(payable=${this.guided ? 'ready' : ''}${this.index}, to=${this.walletIndex})`;
+    return `issue_payable(payable=${this.guided ? 'ready' : ''}${this.index}, to=${this.walletIndex}, actor=${this.rightRole ? 'right' : 'wrong'})`;
   }
 }
 
@@ -1353,6 +1437,7 @@ class SettleMaturity extends Step {
     private readonly index: number,
     private readonly funded: boolean,
     private readonly guided: boolean,
+    private readonly rightRole: boolean,
   ) {
     super();
   }
@@ -1363,6 +1448,10 @@ class SettleMaturity extends Step {
 
   private subjectOf(model: Model): [string, MPayable] {
     return aimed(model, this.kind, this.index, this.guided);
+  }
+
+  private role(): Role {
+    return this.rightRole ? EDGE_ROLE.settle_maturity : wrongRoleFor(EDGE_ROLE.settle_maturity);
   }
 
   protected subject(model: Model): string {
@@ -1378,9 +1467,17 @@ class SettleMaturity extends Step {
     if (model.day < p.maturity) return refuse('ADA12', `payable ${p.ref} has not matured`);
     // The redemption legs are built before the lifecycle write, but the write
     // happens before any leg is posted, so an unissued payable is stopped by
-    // the lifecycle trigger rather than by a missing token.
+    // the lifecycle trigger rather than by a missing token. app.assert_edge_actor
+    // is called before that write too, but only an already-issued payable names
+    // a row for it to find, so the role check only ever applies here.
     if (p.status !== 'issued') {
       return refuse('ADA01', `illegal lifecycle transition ${p.status} -> settled`);
+    }
+    if (this.role() !== EDGE_ROLE.settle_maturity) {
+      return refuse(
+        'ADA36',
+        `payable ${p.ref} moves from issued to settled on the ${EDGE_ROLE.settle_maturity}, not the ${this.role()}`,
+      );
     }
     let total = 0n;
     for (const wallet of real.wallets) total += position(model, wallet.address, id);
@@ -1393,6 +1490,10 @@ class SettleMaturity extends Step {
       );
     }
     return legal;
+  }
+
+  protected actorFor(_model: Model, real: Real): string {
+    return real.actorsByRole[this.role()];
   }
 
   protected intent(model: Model): Record<string, unknown> {
@@ -1427,7 +1528,7 @@ class SettleMaturity extends Step {
   }
 
   toString(): string {
-    return `settle_maturity(payable=${this.guided ? 'ready' : ''}${this.index}, funded=${this.funded})`;
+    return `settle_maturity(payable=${this.guided ? 'ready' : ''}${this.index}, funded=${this.funded}, actor=${this.rightRole ? 'right' : 'wrong'})`;
   }
 }
 
@@ -1477,6 +1578,11 @@ async function bootReal(db: Database): Promise<Real> {
   }));
   const anchorAddress = wallets.rows.find((r) => r.entity_type === 'anchor')!.address;
   const anchor = list.find((w) => w.address === anchorAddress)!;
+  const byRole = await actors(db.pool);
+  const roles: Role[] = ['adata_preparer', 'adata_checker', 'straitsx_admin', 'supplier', 'lender'];
+  for (const role of roles) {
+    if (!byRole[role]) throw new Error(`no live app_user with role ${role}; fixtures should always seed one`);
+  }
   return {
     db,
     wallets: list,
@@ -1484,6 +1590,7 @@ async function bootReal(db: Database): Promise<Real> {
     suppliers: suppliers.rows,
     edges: new Set(edges.rows.map((r) => `${r.from_state}->${r.to_state}`)),
     programmeLimit: anchorRow.rows[0]!.programme_limit_base,
+    actorsByRole: byRole as Record<Role, string>,
   };
 }
 
@@ -1575,9 +1682,12 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     .map((p) => new CreatePayable(p.supplier, p.face, p.terms, p.flaw));
 
   const aim = fc.record({ i: payableIndex, g: mostly });
-  const submit = aim.map((c) => new Advance('submit', 'pending_approval', c.i, c.g));
-  const approve = aim.map((c) => new Advance('approve', 'approved', c.i, c.g));
-  const certify = aim.map((c) => new Advance('certify', 'certified', c.i, c.g));
+  // Wrong-role commands are the only route to ADA36, so a third of these post
+  // as a role other than the one their edge names.
+  const aimWithRole = fc.record({ i: payableIndex, g: mostly, r: mostly });
+  const submit = aimWithRole.map((c) => new Advance('submit', 'pending_approval', c.i, c.g, c.r));
+  const approve = aimWithRole.map((c) => new Advance('approve', 'approved', c.i, c.g, c.r));
+  const certify = aimWithRole.map((c) => new Advance('certify', 'certified', c.i, c.g, c.r));
   const grade = fc
     .record({
       i: payableIndex,
@@ -1586,8 +1696,8 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     })
     .map((c) => new Grade(c.i, c.letter, c.g));
   const issue = fc
-    .record({ i: payableIndex, w: walletIndex, g: mostly })
-    .map((c) => new Issue(c.i, c.w, c.g));
+    .record({ i: payableIndex, w: walletIndex, g: mostly, r: mostly })
+    .map((c) => new Issue(c.i, c.w, c.g, c.r));
   const acceptReceipt = aim.map((c) => new Receipt('accept_receipt', c.i, c.g));
   const rejectReceipt = aim.map((c) => new Receipt('reject_receipt', c.i, c.g));
   const topUp = fc
@@ -1634,8 +1744,8 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     )
     .map((d) => new AdvanceClock(d));
   const settle = fc
-    .record({ i: payableIndex, funded: mostly, g: mostly })
-    .map((c) => new SettleMaturity(c.i, c.funded, c.g));
+    .record({ i: payableIndex, funded: mostly, g: mostly, r: mostly })
+    .map((c) => new SettleMaturity(c.i, c.funded, c.g, c.r));
 
   // Repetition is the weighting: fc.commands draws uniformly from this list, so
   // the commands that move a payable along appear more than once. Without that
@@ -1731,7 +1841,7 @@ describe('model-based coverage of the payable workflow', () => {
       '23502', '23505', '23514',
       'ADA01', 'ADA11', 'ADA12', 'ADA15', 'ADA16', 'ADA17', 'ADA19', 'ADA20',
       'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34', 'ADA35',
-      'accepted',
+      'ADA36', 'accepted',
     ]);
   });
 });
@@ -1800,7 +1910,10 @@ describe('behaviours the model reproduces but would not choose', () => {
         buyNowPriceBase: '200',
       },
     ]) {
-      expect(await post(db.pool, intent), `setup: ${intent.kind}`).toMatchObject({ ok: true });
+      expect(
+        await post(db.pool, intent, { actorUserId: correctActor(real, intent.kind) }),
+        `setup: ${intent.kind}`,
+      ).toMatchObject({ ok: true });
     }
   }, 60_000);
 
@@ -1930,14 +2043,17 @@ describe('behaviours the model reproduces but would not choose', () => {
         { kind: 'certify', payableId },
         { kind: 'advance_clock', days: 30 },
       ]) {
-        expect(await post(own.pool, intent), `setup: ${intent.kind}`).toMatchObject({ ok: true });
+        expect(
+          await post(own.pool, intent, { actorUserId: correctActor(real, intent.kind) }),
+          `setup: ${intent.kind}`,
+        ).toMatchObject({ ok: true });
       }
       const result = await post(own.pool, {
         kind: 'issue_payable',
         payableId,
         toWallet: wallet,
         tokenId: 11,
-      });
+      }, { actorUserId: correctActor(real, 'issue_payable') });
       expect(result).toMatchObject({ ok: false, code: 'ADA12' });
     } finally {
       await own.close();

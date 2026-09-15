@@ -98,7 +98,7 @@ export const TRANSITIONS: Readonly<Record<LifecycleEvent, Transition>> = {
   issue: {
     from: 'certified',
     to: 'issued',
-    actors: ['adata_preparer', 'adata_checker', 'straitsx_admin'],
+    actors: ['straitsx_admin'],
     label: 'Issued to supplier wallet',
     action: 'issue it to the supplier',
   },
@@ -112,7 +112,7 @@ export const TRANSITIONS: Readonly<Record<LifecycleEvent, Transition>> = {
   settle: {
     from: 'matured',
     to: 'settled',
-    actors: ['adata_preparer', 'adata_checker'],
+    actors: ['adata_preparer'],
     label: 'Settled to holders',
     action: 'settle it to the holders',
   },

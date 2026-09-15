@@ -109,7 +109,11 @@ export function sourceLifecycleYours(snapshot: NextActionSnapshot): NextAction |
 }
 
 export function sourceSettlementDue(snapshot: NextActionSnapshot): NextAction | null {
-  if (snapshot.actor.role !== 'adata_preparer' && snapshot.actor.role !== 'adata_checker') return null;
+  // app.lifecycle_edge names one role for issued -> settled, and pendingStep
+  // carries it, so this reads the same table the settlement button is disabled
+  // by rather than repeating the pair.
+  const settle = pendingStep('matured');
+  if (!settle || !settle.actors.includes(snapshot.actor.role)) return null;
   const due = snapshot.payables.filter((p) => p.status === 'matured' || p.status === 'overdue');
   if (due.length === 0) return null;
   const verb = due.length === 1 ? `Fund settlement of ${due[0]!.ref}` : `Fund settlement of ${due.length} payables`;

@@ -7,7 +7,8 @@ guards inside `ledger.post()`.
 
 292 cases. 283 pass. 9 run under `it.fails` because the system does not do what
 its own guard says it does; those are EB-01, EB-02, EB-03, EB-06, EB-07, EB-08
-and EB-09 below. Nothing in `src/` or `db/` was changed.
+and EB-09 below. Nothing in `src/` or `db/` was changed to write this suite. See
+`tests/techniques/README.md` on what a **FIXED** entry means.
 
 Three further findings (EB-04, EB-05, EB-10) are pinned by ordinary passing
 cases rather than by `it.fails`, because the observed behaviour is arguable

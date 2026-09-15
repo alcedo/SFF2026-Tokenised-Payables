@@ -4,9 +4,10 @@ Property-based and metamorphic testing over `src/core/`. Every counterexample
 below was shrunk by fast-check from a run of 500 generated values at seed
 `20260915`, so each one reproduces exactly by running the suite.
 
-Nothing in `src/` or `db/` was changed. The three defects are recorded as
-`it.fails(...)` cases in the suite, which therefore runs green while still
-carrying the evidence.
+Nothing in `src/` or `db/` was changed to write this suite. See
+`tests/techniques/README.md` on what a **FIXED** entry means. The three defects
+are recorded as `it.fails(...)` cases in the suite, which therefore runs green
+while still carrying the evidence.
 
 Reproduce all three with:
 

@@ -279,6 +279,51 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
 $$;
 
 -- ----------------------------------------------------------------------------
+-- Maker-checker
+-- ----------------------------------------------------------------------------
+-- PRD §7: "the ADATA checker approves the preparer's submission", §11:
+-- "approval events preserve the separate preparer and checker identities", and
+-- the phase 1 exit criterion, "an invoice can be created, independently
+-- approved, certified and issued".
+--
+-- app.lifecycle_edge.actor_role already names the role for each of the five
+-- edges and is NOT NULL on all of them. This is its only reader, so the column
+-- is a rule rather than documentation, and a sixth edge inherits enforcement
+-- from the row rather than from a sixth branch here.
+CREATE OR REPLACE FUNCTION app.assert_edge_actor(
+  p_payable app.payable,
+  p_to      app.obligation_state,
+  p_actor   uuid
+) RETURNS void LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  v_needs app.user_role;
+  v_has   app.user_role;
+BEGIN
+  SELECT actor_role INTO v_needs FROM app.lifecycle_edge
+   WHERE from_state = p_payable.lifecycle_status AND to_state = p_to;
+
+  -- No row means this is not an edge: either a same-state write, which moves
+  -- nobody and so has nobody to check, or an illegal transition, which
+  -- app.enforce_lifecycle_edge refuses with ADA01 a few lines later. Deciding
+  -- that here too would answer "wrong role" for a transition that is not
+  -- available to any role.
+  IF v_needs IS NULL THEN RETURN; END IF;
+
+  SELECT role INTO v_has FROM app.app_user
+   WHERE id = p_actor AND deactivated_at IS NULL;
+  IF v_has IS DISTINCT FROM v_needs THEN
+    RAISE EXCEPTION 'payable % moves from % to % on the %, not the %',
+      p_payable.ref, p_payable.lifecycle_status, p_to, v_needs,
+      COALESCE(v_has::text, 'unknown user') USING ERRCODE = 'ADA36';
+  END IF;
+
+  -- The identity half of maker-checker needs no separate check. A user holds
+  -- exactly one app.user_role, set at INSERT and changed by no command, and the
+  -- two edges name different roles, so the submitter of a payable can never be
+  -- its approver. A guard for it here could not fire.
+END $$;
+
+-- ----------------------------------------------------------------------------
 -- ledger.post
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ledger.post(p_command jsonb) RETURNS jsonb
@@ -388,6 +433,7 @@ BEGIN
       RAISE EXCEPTION 'payable % is % and must be certified before issuance',
         v_payable.ref, v_payable.lifecycle_status USING ERRCODE = 'ADA15';
     END IF;
+    PERFORM app.assert_edge_actor(v_payable, 'issued', v_actor);
 
     -- PRD §8 screen 14 and §5: StraitsX certifies the issuer and sets its
     -- programme limit. Both are checked here, at the only point where face
@@ -680,6 +726,7 @@ BEGIN
     IF (v_world.t0 + v_world.offset_days) < v_payable.maturity_date THEN
       RAISE EXCEPTION 'payable % has not matured', v_payable.ref USING ERRCODE = 'ADA12';
     END IF;
+    PERFORM app.assert_edge_actor(v_payable, 'settled', v_actor);
     v_asset := ledger.payable_asset(v_payable.id);
     v_cash  := ledger.cash_asset('XUSD');
     -- The anchor obligor funds redemption from its own wallet.
@@ -982,6 +1029,12 @@ BEGIN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
     IF v_kind = 'certify' AND v_payable.grade IS NULL THEN
       RAISE EXCEPTION 'payable % has no grade yet', v_payable.ref USING ERRCODE = 'ADA35';
+    END IF;
+    IF v_kind <> 'grade' THEN
+      PERFORM app.assert_edge_actor(v_payable, CASE v_kind
+        WHEN 'submit'  THEN 'pending_approval'::app.obligation_state
+        WHEN 'approve' THEN 'approved'::app.obligation_state
+        WHEN 'certify' THEN 'certified'::app.obligation_state END, v_actor);
     END IF;
     UPDATE app.payable
        SET lifecycle_status = CASE v_kind

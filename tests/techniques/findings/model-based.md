@@ -7,8 +7,9 @@ fast-check generates command sequences without regard for legality, the same
 sequence runs against the model and against a fresh Postgres database, and the
 two are compared after every single step.
 
-Nothing in `src/` or `db/` was changed. The suite is green: the model
-reproduces each behaviour below exactly, because the model's job is to predict
+Nothing in `src/` or `db/` was changed to write this suite. See
+`tests/techniques/README.md` on what a **FIXED** entry means. The suite is
+green: the model reproduces each behaviour below exactly, because the model's job is to predict
 what the system does, not what it ought to do. That is also why they would
 otherwise be invisible, so each except the first is additionally recorded as an
 `it.fails(...)` case in

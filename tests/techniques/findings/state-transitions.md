@@ -177,6 +177,11 @@ design, that is wrong.
 
 ## 5. `app.lifecycle_edge.actor_role` is a dead column
 
+**FIXED.** `app.assert_edge_actor` in `db/post.sql` reads the column on all five
+edges and refuses any other actor with `ADA36`. See finding 1 of
+`findings/decision-tables.md` for what replaced it. The entry below is the state
+before that change.
+
 File: `db/schema.sql:320-334` defines the column and populates it with a role
 per edge. `app.enforce_lifecycle_edge()` at `db/schema.sql:335-344` selects on
 `(from_state, to_state)` only.
@@ -185,11 +190,11 @@ Reproduction: `machine 1 > accepts every legal edge from an actor holding the
 wrong role` drives the whole chain, `submit` through `settle_maturity`, as a
 supplier user. All five edges are accepted.
 
-`tests/support/CONTRACT.md` already states that role and identity rules are not
-enforced in the database, so this is consistent with the design rather than a
-regression. It is recorded because the column reads as a rule: a contributor
-adding a sixth edge will fill in an `actor_role` believing it constrains
-something.
+`tests/support/CONTRACT.md` stated that role and identity rules were not
+enforced in the database, so this was consistent with the design rather than a
+regression. It was recorded because the column read as a rule: a contributor
+adding a sixth edge would fill in an `actor_role` believing it constrained
+something. It now does, and a sixth edge inherits enforcement from its row.
 
 ## 6. `set_certification` has no ordering at all
 

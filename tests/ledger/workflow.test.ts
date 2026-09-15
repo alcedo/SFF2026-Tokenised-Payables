@@ -9,6 +9,7 @@ const DB_NAME = 'adata_test_workflow';
 
 const PREP = '11111111-0000-0000-0000-000000000001';
 const CHECKR = '11111111-0000-0000-0000-000000000002';
+const ADMIN = '11111111-0000-0000-0000-000000000008';
 const SUPP_USER = '11111111-0000-0000-0000-000000000003';
 const BANK_USER = '11111111-0000-0000-0000-000000000004';
 const SUPP = '0x509911000000000000000000000000000000f88a';
@@ -68,20 +69,8 @@ describe('issue → list → bid → accept as one walk', () => {
       gradeRationale: 'Workflow coverage grade. Sample value.',
     });
 
-    await query(
-      `INSERT INTO app.entity (id, name, entity_type, certification_status)
-       VALUES ('e0000000-0000-0000-0000-0000000000aa', 'StraitsX', 'platform', 'certified')
-       ON CONFLICT (id) DO NOTHING`,
-    );
-    await query(
-      `INSERT INTO app.app_user (id, entity_id, name, role, mock_kyc_verified, institutional_eligible)
-       VALUES ('11111111-0000-0000-0000-000000000008', 'e0000000-0000-0000-0000-0000000000aa',
-               'Admin', 'straitsx_admin', true, false)
-       ON CONFLICT (id) DO NOTHING`,
-    );
-    const ADMIN = '11111111-0000-0000-0000-000000000008';
     await mustPost(ADMIN, { kind: 'certify', payableId });
-    await mustPost(PREP, {
+    await mustPost(ADMIN, {
       kind: 'issue_payable',
       payableId,
       toWallet: SUPP,

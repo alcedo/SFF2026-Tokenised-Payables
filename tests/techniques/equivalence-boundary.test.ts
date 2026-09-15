@@ -24,6 +24,7 @@ import {
   freshDatabase,
   post,
   anyActor,
+  actors,
   ledgerHealth,
   HEALTHY,
   type Database,
@@ -2545,8 +2546,13 @@ describe('layer 2: field validation at the ledger.post() boundary', () => {
   beforeAll(async () => {
     db = await freshDatabase('equivalence_boundary', 'fixtures');
 
-    const must = async (intent: Record<string, unknown>) => {
-      const result = await post(db.pool, intent);
+    // Each lifecycle edge is driven by the role app.lifecycle_edge names for
+    // it, not by whichever user post() would pick by default, so setup needs
+    // one real actor per role rather than the harness default throughout.
+    const roleActors = await actors(db.pool);
+
+    const must = async (intent: Record<string, unknown>, actorUserId?: string) => {
+      const result = await post(db.pool, intent, actorUserId ? { actorUserId } : {});
       if (!result.ok) {
         throw new Error(`suite setup refused ${String(intent.kind)}: ${result.code} ${result.message}`);
       }
@@ -2579,12 +2585,15 @@ describe('layer 2: field validation at the ledger.post() boundary', () => {
       const id = (
         await db.pool.query<{ id: string }>('SELECT id::text FROM app.payable WHERE ref = $1', [ref])
       ).rows[0]!.id;
-      await must({ kind: 'submit', payableId: id });
-      await must({ kind: 'approve', payableId: id });
+      await must({ kind: 'submit', payableId: id }, roleActors.adata_preparer);
+      await must({ kind: 'approve', payableId: id }, roleActors.adata_checker);
       await must({ kind: 'grade', payableId: id, grade: 'AA', gradeRationale: 'suite setup' });
-      await must({ kind: 'certify', payableId: id });
+      await must({ kind: 'certify', payableId: id }, roleActors.straitsx_admin);
       tokenId += 1;
-      await must({ kind: 'issue_payable', payableId: id, toWallet: supplierWallet, tokenId });
+      await must(
+        { kind: 'issue_payable', payableId: id, toWallet: supplierWallet, tokenId },
+        roleActors.straitsx_admin,
+      );
       await must({ kind: 'accept_receipt', payableId: id, holderWallet: supplierWallet });
       return id;
     };

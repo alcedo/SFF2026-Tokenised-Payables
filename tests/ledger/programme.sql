@@ -44,7 +44,7 @@ BEGIN
                                  'status','suspended')));
   BEGIN
     PERFORM ledger.post(jsonb_build_object(
-      'idempotencyKey','dddd0000-0000-0000-0000-000000000002','actorUserId',PREP,
+      'idempotencyKey','dddd0000-0000-0000-0000-000000000002','actorUserId',ADMIN,
       'intent', jsonb_build_object('kind','issue_payable','payableId',v_p,
                                    'toWallet',v_supp,'tokenId',8001)));
     RAISE EXCEPTION 'FAIL: a suspended issuer issued a payable';
@@ -75,7 +75,7 @@ BEGIN
                                  'limitBase', v_out + FACE - 1)));
   BEGIN
     PERFORM ledger.post(jsonb_build_object(
-      'idempotencyKey','dddd0000-0000-0000-0000-000000000005','actorUserId',PREP,
+      'idempotencyKey','dddd0000-0000-0000-0000-000000000005','actorUserId',ADMIN,
       'intent', jsonb_build_object('kind','issue_payable','payableId',v_p,
                                    'toWallet',v_supp,'tokenId',8001)));
     RAISE EXCEPTION 'FAIL: issued one base unit over the programme limit';
@@ -91,7 +91,7 @@ BEGIN
     'intent', jsonb_build_object('kind','set_programme_limit','entityId',v_anchor,
                                  'limitBase', v_out + FACE)));
   PERFORM ledger.post(jsonb_build_object(
-    'idempotencyKey','dddd0000-0000-0000-0000-000000000007','actorUserId',PREP,
+    'idempotencyKey','dddd0000-0000-0000-0000-000000000007','actorUserId',ADMIN,
     'intent', jsonb_build_object('kind','issue_payable','payableId',v_p,
                                  'toWallet',v_supp,'tokenId',8001)));
   PERFORM 1 FROM app.payable WHERE id = v_p AND lifecycle_status = 'issued';
@@ -121,7 +121,7 @@ BEGIN
 
   BEGIN
     PERFORM ledger.post(jsonb_build_object(
-      'idempotencyKey','dddd0000-0000-0000-0000-000000000008','actorUserId',PREP,
+      'idempotencyKey','dddd0000-0000-0000-0000-000000000008','actorUserId',ADMIN,
       'intent', jsonb_build_object('kind','issue_payable','payableId',v_p,
                                    'toWallet',v_supp,'tokenId',8002)));
     RAISE EXCEPTION 'FAIL: issued with the programme limit already full';
@@ -143,7 +143,7 @@ BEGIN
   UPDATE app.payable SET maturity_date = (SELECT t0 + offset_days + 90 FROM app.world)
    WHERE id = v_p;
   PERFORM ledger.post(jsonb_build_object(
-    'idempotencyKey','dddd0000-0000-0000-0000-00000000000b','actorUserId',PREP,
+    'idempotencyKey','dddd0000-0000-0000-0000-00000000000b','actorUserId',ADMIN,
     'intent', jsonb_build_object('kind','issue_payable','payableId',v_p,
                                  'toWallet',v_supp,'tokenId',8002)));
   PERFORM 1 FROM app.payable WHERE id = v_p AND lifecycle_status = 'issued';

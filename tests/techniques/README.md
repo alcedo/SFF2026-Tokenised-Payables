@@ -13,9 +13,15 @@ Seven testing techniques over the tokenised payables demo. Run them with
 | `concurrency-faults.test.ts` | concurrency and fault injection |
 | mutation, via `stryker.config.json` | mutation testing, which scores the rest |
 
-Nothing under `src/` or `db/` was changed to make any of this pass.
-`git diff <base>..HEAD -- src/ db/` is empty by design, and that is the point:
-these suites report on the system, they do not adjust it.
+Nothing under `src/` or `db/` was changed **to write** any of this. The suites
+were built to report on the system, not to adjust it, and every finding under
+`findings/` was recorded against the system exactly as it stood.
+
+That is the state they were handed over in, not a standing rule. Fixing a defect
+these suites found is expected to change `src/` or `db/`, and to turn the
+matching `it.fails` case red. A finding that has been fixed is marked **FIXED**
+in its `findings/` entry with what replaced it, rather than deleted, because the
+reproduction is what makes the fix checkable.
 
 ## Read this before you read a green run
 

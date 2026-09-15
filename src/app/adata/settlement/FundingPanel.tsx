@@ -17,16 +17,19 @@ import { AssetPicker } from '@/components/AssetPicker';
 import { Amount, Field, Notice } from '@/components/primitives';
 import { settleMaturity } from '@/app/actions';
 import { convert, formatRate } from '@/core/fx';
+import { attempt, type Role } from '@/core/lifecycle';
 import { type Asset, type BaseUnits, formatUnits } from '@/core/money';
 import type { SerialBalances } from '@/db/read';
 
 export function FundingPanel({
+  actorRole,
   payableId,
   outstandingBase,
   holderCount,
   balances,
   xsgdPerXusdE6,
 }: {
+  actorRole: Role;
   payableId: string;
   outstandingBase: string;
   holderCount: number;
@@ -41,6 +44,7 @@ export function FundingPanel({
   const available = BigInt(balances[asset]) as BaseUnits;
   const short = available < debit;
   const holders = holderCount === 1 ? 'the holder' : `all ${holderCount} holders`;
+  const permitted = attempt('matured', 'settle', actorRole);
 
   return (
     <>
@@ -75,8 +79,12 @@ export function FundingPanel({
               and cannot move again.
             </>
           }
-          disabled={short}
-          disabledReason={`ADATA does not hold enough ${asset}. Use Simulate top-up.`}
+          disabled={short || !permitted.ok}
+          disabledReason={
+            permitted.ok
+              ? `ADATA does not hold enough ${asset}. Use Simulate top-up.`
+              : permitted.reason
+          }
           action={settleMaturity}
           args={[payableId, asset]}
         />
