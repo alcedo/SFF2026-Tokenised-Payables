@@ -161,6 +161,7 @@ export type PostErrorCode =
   | 'not_institutional'
   | 'not_graded'
   | 'wrong_actor_role'
+  | 'receipt_rejected'
   | 'unknown';
 
 export interface PostError {
@@ -210,6 +211,7 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA34: 'not_institutional',
   ADA35: 'not_graded',
   ADA36: 'wrong_actor_role',
+  ADA37: 'receipt_rejected',
   ADA20: 'insufficient_funds',
   ADA21: 'insufficient_quantity',
   '23505': 'duplicate_listing',
@@ -330,6 +332,8 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
   not_institutional:
     'Only institutional lender accounts can bid or buy. Switch to a lender persona in the demo controls.',
   not_graded: 'This payable has no grade yet. Assign one before certifying it.',
+  receipt_rejected:
+    'This payable was rejected by its supplier, so the quantity went back to ADATA and there is nobody to redeem to. It cannot be settled.',
   wrong_actor_role:
     'That persona cannot take this step. Each lifecycle step belongs to one role: the preparer submits and redeems, a separate checker approves, and StraitsX certifies and issues.',
   unknown: 'That did not go through. Nothing was changed.',

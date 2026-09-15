@@ -727,6 +727,19 @@ BEGIN
       RAISE EXCEPTION 'payable % has not matured', v_payable.ref USING ERRCODE = 'ADA12';
     END IF;
     PERFORM app.assert_edge_actor(v_payable, 'settled', v_actor);
+
+    -- PRD §7: maturity settlement credits each current holder for the quantity
+    -- they hold. A rejected delivery sent the whole quantity back to the
+    -- anchor's own wallet, so the holder loop would credit the anchor its own
+    -- face and ledger.payer_legs would debit the same amount. The legs net to
+    -- zero per account and asset, the books stay balanced, and the obligation
+    -- is retired having paid nobody. Refusing keeps the payable where a person
+    -- can still see it.
+    IF v_payable.receipt_status = 'rejected' THEN
+      RAISE EXCEPTION 'payable % was rejected by its supplier and has nobody to redeem to',
+        v_payable.ref USING ERRCODE = 'ADA37';
+    END IF;
+
     v_asset := ledger.payable_asset(v_payable.id);
     v_cash  := ledger.cash_asset('XUSD');
     -- The anchor obligor funds redemption from its own wallet.

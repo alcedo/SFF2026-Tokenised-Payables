@@ -872,7 +872,7 @@ BEGIN
   --   ADA30 last_user           ADA31 supplier_not_onboarded
   --   ADA32 issuer_not_certified ADA33 programme_limit_exceeded
   --   ADA34 not_institutional    ADA35 not_graded
-  --   ADA36 wrong_actor_role
+  --   ADA36 wrong_actor_role     ADA37 receipt_rejected
   -- ADA22 to ADA26 exist because PRD §8 screen 2's manual entry is the first
   -- form a person types into freely. Folding them into not_permitted would
   -- tell a preparer who mistyped an invoice number that they lack permission,

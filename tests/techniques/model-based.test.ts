@@ -1479,6 +1479,15 @@ class SettleMaturity extends Step {
         `payable ${p.ref} moves from issued to settled on the ${EDGE_ROLE.settle_maturity}, not the ${this.role()}`,
       );
     }
+    // Rejection returned the whole quantity to the anchor, so there is no
+    // holder left to credit. Checked after the role and before the anchor's
+    // wallet and funds.
+    if (p.receipt === 'rejected') {
+      return refuse(
+        'ADA37',
+        `payable ${p.ref} was rejected by its supplier and has nobody to redeem to`,
+      );
+    }
     let total = 0n;
     for (const wallet of real.wallets) total += position(model, wallet.address, id);
     const anchorDelta = position(model, real.anchor.address, id) - total;
@@ -1841,7 +1850,7 @@ describe('model-based coverage of the payable workflow', () => {
       '23502', '23505', '23514',
       'ADA01', 'ADA11', 'ADA12', 'ADA15', 'ADA16', 'ADA17', 'ADA19', 'ADA20',
       'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34', 'ADA35',
-      'ADA36', 'accepted',
+      'ADA36', 'ADA37', 'accepted',
     ]);
   });
 });

@@ -13,12 +13,12 @@ own row counts, so a row silently disappearing fails the suite.
 | 2 | maker-checker approval | 3 | 60 | 35 | 25 |
 | 3a | bid acceptance, early gates | 2 | 18 | 13 | 5 |
 | 3b | bid acceptance, conditions after the gates | 5 | 32 | 24 | 8 |
-| 4 | maturity settlement | 6 | 144 | 60 | 84 |
+| 4 | maturity settlement | 6 | 144 | 62 | 82 |
 | 5a | `create_user` role against organisation type | 2 | 20 | 20 | 0 |
 | 5b | `onboard_entity` role against organisation type | 2 | 20 | 20 | 0 |
 | 5c | `onboard_entity` name validation | 2 | 15 | 15 | 0 |
 | 6 | user removal | 3 | 12 | 5 | 7 |
-| | | | **369** | **216** | **153** |
+| | | | **369** | **218** | **151** |
 
 Nothing in `src/` or `db/` was changed. Every scenario ends by asserting
 `ledgerHealth(pool)` equals `HEALTHY`; the books balance through all of it.
@@ -194,6 +194,14 @@ The same hazard exists for `seriesId`, which the gate also writes through.
 
 ## 4. Settlement never reads `receipt_status`, and a rejected payable redeems for free
 
+**FIXED.** `settle_maturity` now refuses a payable whose receipt was rejected,
+with `ADA37 payable <ref> was rejected by its supplier and has nobody to redeem
+to`. The guard sits after the role check and before the anchor-wallet and funds
+checks. Table 4's outcome is now keyed on all six conditions, and
+`receipt_status` earns its place in that key.
+
+The entry below is the state before that change.
+
 File: `db/post.sql` lines 667 to 738.
 
 Table 4 enumerates six conditions across 144 rows. Its outcome lookup,
@@ -223,9 +231,19 @@ anchor's XUSD balance is **identical** before and after, asserted literally in
 the test. The obligation is retired, the token is burned back to
 `system_unissued`, and no money moved.
 
-This is also why the table marks `receipt rejected` with `anchor funds
+This was also why the table marked `receipt rejected` with `anchor funds
 insufficient` infeasible across 12 rows: with the anchor paying itself, the
-shortfall branch can never fire however poor the anchor is.
+shortfall branch could never fire however poor the anchor was.
+
+That infeasibility is gone, because `ADA37` now answers those rows before the
+funds check is reached. A different one replaced it: a rejected payable can no
+longer reach `settled`, so every `already settled | receipt rejected` row is
+infeasible. Table 4 moves from 60 feasible and 84 infeasible to 62 and 82.
+
+The refusal leaves the payable at `issued` with its receipt `rejected`, which is
+a combination no constraint forbids and which a person can still see. Writing
+off a rejected delivery is a different act and there is no command for it. That
+is a gap, not a defect this fix introduces.
 
 ---
 

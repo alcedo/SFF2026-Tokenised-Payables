@@ -1356,38 +1356,50 @@ const ANCHOR_SHORT = refused(
   'wallet {anchorWallet} is short {shortfall} of the funding asset',
   'issued',
 );
+const RECEIPT_REJECTED = refused(
+  'ADA37',
+  'payable {ref} was rejected by its supplier and has nobody to redeem to',
+  'issued',
+);
 const SETTLED = accepted('settled');
 
-function settlementKey(c: SettlementConditions): string {
+function settlementKey(c: SettlementConditions, receipt: Receipt): string {
   return [
     c.fundingCode ? 'funding' : 'no-funding',
     c.alreadySettled ? 'settled' : 'issued',
     c.clock,
     c.anchorWallet ? 'wallet' : 'no-wallet',
     c.anchorFunds ? 'funded' : 'short',
+    `receipt ${receipt}`,
   ].join('/');
 }
 
 /**
- * Keyed on five conditions. `receipt_status` is the sixth condition the rows
- * enumerate and it is deliberately absent from this key, because settlement
- * never reads it: a rejected receipt settles exactly like an accepted one.
+ * Keyed on all six conditions. `receipt_status` earns its place in the key
+ * because settlement reads it: a rejected receipt returned the whole quantity
+ * to the anchor, so there is no holder left to credit and the command is
+ * refused. `pending` and `accepted` still settle identically, which is why the
+ * key distinguishes rejected from the other two rather than all three.
  */
 const SETTLEMENT_OUTCOME: Readonly<Record<string, Expected>> = Object.fromEntries(
   [true, false].flatMap((fundingCode) =>
     [true, false].flatMap((alreadySettled) =>
       (['before', 'on', 'after'] as const).flatMap((clock) =>
         [true, false].flatMap((anchorWallet) =>
-          [true, false].map((anchorFunds): [string, Expected] => {
-            const c = { fundingCode, alreadySettled, clock, anchorWallet, anchorFunds };
-            const stay = alreadySettled ? 'settled' : 'issued';
-            if (!fundingCode) return [settlementKey(c), NEEDS_FUNDING_CODE(stay)];
-            if (alreadySettled) return [settlementKey(c), ALREADY_SETTLED];
-            if (clock === 'before') return [settlementKey(c), NOT_MATURED];
-            if (!anchorWallet) return [settlementKey(c), ANCHOR_HAS_NO_WALLET];
-            if (!anchorFunds) return [settlementKey(c), ANCHOR_SHORT];
-            return [settlementKey(c), SETTLED];
-          }),
+          [true, false].flatMap((anchorFunds) =>
+            (['pending', 'accepted', 'rejected'] as const).map((receipt): [string, Expected] => {
+              const c = { fundingCode, alreadySettled, clock, anchorWallet, anchorFunds };
+              const key = settlementKey(c, receipt);
+              const stay = alreadySettled ? 'settled' : 'issued';
+              if (!fundingCode) return [key, NEEDS_FUNDING_CODE(stay)];
+              if (alreadySettled) return [key, ALREADY_SETTLED];
+              if (clock === 'before') return [key, NOT_MATURED];
+              if (receipt === 'rejected') return [key, RECEIPT_REJECTED];
+              if (!anchorWallet) return [key, ANCHOR_HAS_NO_WALLET];
+              if (!anchorFunds) return [key, ANCHOR_SHORT];
+              return [key, SETTLED];
+            }),
+          ),
         ),
       ),
     ),
@@ -1398,8 +1410,8 @@ const SETTLED_IMPLIES_MATURED =
   'settlement is refused before maturity and the clock never rewinds, so a settled payable is never ahead of its maturity date';
 const NO_WALLET_NO_BALANCE =
   'an anchor with no wallet holds no balance, so its funds can never be sufficient';
-const REJECTED_PAYS_ITSELF =
-  'a rejected receipt returns the whole quantity to the anchor, so its redemption credit and debit net to zero and no shortfall is possible';
+const REJECTED_NEVER_SETTLES =
+  'settlement is refused ADA37 once the receipt is rejected, so a rejected payable never reaches settled';
 const SETTLING_PROVED_THE_FUNDS =
   'reaching settled required the anchor to fund the redemption, and no command in this table moves funds back out of its wallet';
 
@@ -1410,7 +1422,7 @@ function settlementInfeasibility(
   if (c.alreadySettled && c.clock === 'before') return SETTLED_IMPLIES_MATURED;
   if (!c.anchorWallet && c.anchorFunds) return NO_WALLET_NO_BALANCE;
   if (c.alreadySettled && !c.anchorFunds) return SETTLING_PROVED_THE_FUNDS;
-  if (receipt === 'rejected' && !c.anchorFunds && c.anchorWallet) return REJECTED_PAYS_ITSELF;
+  if (c.alreadySettled && receipt === 'rejected') return REJECTED_NEVER_SETTLES;
   return undefined;
 }
 
@@ -1423,10 +1435,10 @@ const SETTLEMENT_TABLE: readonly SettlementRow[] = [true, false].flatMap((fundin
             const c = { fundingCode, alreadySettled, clock, anchorWallet, anchorFunds };
             const infeasible = settlementInfeasibility(c, receipt);
             return {
-              conditions: `${settlementKey(c)}/receipt ${receipt}`,
+              conditions: settlementKey(c, receipt),
               ...c,
               receipt,
-              expected: SETTLEMENT_OUTCOME[settlementKey(c)],
+              expected: SETTLEMENT_OUTCOME[settlementKey(c, receipt)],
               ...(infeasible ? { infeasible } : {}),
             };
           }),
@@ -1469,7 +1481,7 @@ describe('table 4: maturity settlement', () => {
   });
 
   it('declares every combination of its six conditions', () => {
-    expect(shapeOf(SETTLEMENT_TABLE)).toEqual({ rows: 144, feasible: 60, infeasible: 84 });
+    expect(shapeOf(SETTLEMENT_TABLE)).toEqual({ rows: 144, feasible: 62, infeasible: 82 });
   });
 
   for (const row of SETTLEMENT_TABLE) {
@@ -1540,7 +1552,7 @@ describe('table 4: maturity settlement', () => {
     });
   }
 
-  it('settles a payable whose supplier rejected the receipt', async () => {
+  it('refuses to settle a payable whose supplier rejected the receipt', async () => {
     const supplier = world.suppliers[1];
     const payable = await buildPayable(db.pool, {
       supplierId: supplier.id,
@@ -1563,13 +1575,20 @@ describe('table 4: maturity settlement', () => {
       { actorUserId: world.users.adata_preparer },
     );
 
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      code: 'ADA37',
+      message: `payable ${payable.ref} was rejected by its supplier and has nobody to redeem to`,
+    });
+    // The obligation stays where a person can see it. Settling it moved no
+    // money either, because rejection had already returned the quantity to the
+    // anchor, so the credit and the debit were the same wallet.
     expect(
       await scalar<string>(db.pool,
         'SELECT (lifecycle_status::text || $2 || receipt_status::text) AS value FROM app.payable WHERE id = $1',
         [payable.id, '/'],
       ),
-    ).toBe('settled/rejected');
+    ).toBe('issued/rejected');
     expect(await xusdBalance(db.pool, world.anchor.wallet)).toBe(anchorBefore);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
@@ -2035,28 +2054,4 @@ describe('rules the write path does not enforce', () => {
     expect(accepted).toMatchObject({ ok: false });
   });
 
-  it.fails('refuses to settle a payable whose supplier rejected the receipt', async () => {
-    const supplier = world.suppliers[0];
-    const payable = await buildPayable(db.pool, {
-      supplierId: supplier.id,
-      faceBase: FACE,
-      termsDays: 30,
-      upTo: 'issued',
-      toWallet: supplier.wallet,
-    });
-    await must(db.pool, {
-      kind: 'reject_receipt',
-      payableId: payable.id,
-      holderWallet: supplier.wallet,
-    });
-    await must(db.pool, { kind: 'advance_clock', days: 30 });
-
-    const settled = await post(
-      db.pool,
-      { kind: 'settle_maturity', payableId: payable.id, fundingCode: 'XUSD' },
-      { actorUserId: world.users.adata_preparer },
-    );
-    expect(settled).toMatchObject({ ok: false });
-    expect(await lifecycleOf(db.pool, payable.id)).toBe('issued');
-  });
 });
