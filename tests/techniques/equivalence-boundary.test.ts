@@ -2108,11 +2108,10 @@ const DB_CASES: readonly DbCase[] = [
   },
   {
     field: 'top_up.amountBase',
-    partition: 'absent, which the positive guard should still refuse, EB-06',
+    partition: 'absent, which the positive guard refuses along with zero and below',
     input: 'field omitted',
     intent: (w) => ({ kind: 'top_up', wallet: w.anchorWallet, cashCode: 'USDC' }),
     expected: refused('ADA19', 'a top-up must be positive'),
-    defect: 'EB-06',
   },
   {
     field: 'top_up.cashCode',
@@ -2129,6 +2128,19 @@ const DB_CASES: readonly DbCase[] = [
     expected: refused('22P02', 'invalid input value for enum ledger.cash_code: "EURC"'),
   },
 
+  {
+    field: 'transfer.toWallet',
+    partition: 'the wallet it came from, which moves nothing',
+    input: 'fromWallet',
+    intent: (w) => ({
+      kind: 'transfer',
+      payableId: w.transferPayableId,
+      fromWallet: w.supplierWallet,
+      toWallet: w.supplierWallet,
+      quantityBase: 1,
+    }),
+    expected: refused('ADA39', 'a transfer needs a different wallet to go to'),
+  },
   {
     field: 'transfer.quantityBase',
     partition: 'below the positive floor',

@@ -229,6 +229,14 @@ guarded functions.
 
 ## EB-06 `top_up` with `amountBase` absent is accepted and writes a legless entry
 
+**FIXED.** The guard is `IF v_qty IS NULL OR v_qty <= 0`, so an absent amount is
+refused with the `ADA19` the field already had. A deferred invariant in
+`db/schema.sql` §4b backs it up: an entry carrying a chain receipt and no legs
+raises `ADA39` at COMMIT, so a sixth receipted command cannot reintroduce the
+shape quietly.
+
+The entry below is the state before that change.
+
 **File:** `db/post.sql`, the `top_up` branch and `ledger.post_legs`
 
 **Reproduction**
@@ -271,9 +279,11 @@ HAVING SUM(amount) <> 0;
 `SUM(amount)` is NULL, `NULL <> 0` is NULL, and the row is not inserted. The
 entry commits with no legs at all.
 
-**Why it matters.** The books stay balanced, so the oracle does not catch it:
-the suite asserts `ledgerHealth` after this case and it is `HEALTHY`. An entry
-with no legs trivially balances. What is wrong is the audit trail and the
+**Why it matters.** The books stay balanced, so the oracle did not catch it:
+the suite asserts `ledgerHealth` after this case and it was `HEALTHY`. An entry
+with no legs trivially balances, conserves every asset, and disturbs no escrow,
+which is why none of the three existing deferred invariants could see it and why
+closing it needed a fourth. What is wrong is the audit trail and the
 receipt. The journal is the system's record of what happened, and it now
 contains a confirmed top-up with a transaction hash and a block number that
 moved no money. The same NULL path exists for `transfer.quantityBase`, but there

@@ -483,7 +483,11 @@ BEGIN
   ELSIF v_kind = 'top_up' THEN
     v_cash := ledger.cash_asset((v_intent->>'cashCode')::ledger.cash_code);
     v_qty  := (v_intent->>'amountBase')::bigint;
-    IF v_qty <= 0 THEN
+    -- An absent amountBase casts to NULL, and NULL <= 0 is NULL, which IF does
+    -- not take. The legs were then built with a NULL amount and post_legs
+    -- filtered them out on HAVING SUM(amount) <> 0, so the entry committed with
+    -- no legs and a confirmed receipt over it.
+    IF v_qty IS NULL OR v_qty <= 0 THEN
       RAISE EXCEPTION 'a top-up must be positive' USING ERRCODE = 'ADA19';
     END IF;
     v_legs := ARRAY[
@@ -495,8 +499,16 @@ BEGIN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
     v_asset := ledger.payable_asset(v_payable.id);
     v_qty   := (v_intent->>'quantityBase')::bigint;
-    IF v_qty <= 0 THEN
+    IF v_qty IS NULL OR v_qty <= 0 THEN
       RAISE EXCEPTION 'a transfer must be positive' USING ERRCODE = 'ADA19';
+    END IF;
+    -- post_legs sums legs per account and asset, so a transfer to the wallet it
+    -- came from nets to zero and inserts nothing. The entry is still stamped
+    -- with a confirmed transaction hash, and PRD §10's explorer renders that as
+    -- a settled movement. A transfer to yourself is not a transfer.
+    IF (v_intent->>'fromWallet') = (v_intent->>'toWallet') THEN
+      RAISE EXCEPTION 'a transfer needs a different wallet to go to'
+        USING ERRCODE = 'ADA39';
     END IF;
     IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
       RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';

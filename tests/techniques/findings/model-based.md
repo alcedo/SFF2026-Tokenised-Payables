@@ -442,8 +442,13 @@ able to update a payable without moving it, but the effect is that the approval
 queue can be told the same thing repeatedly and the journal records each telling
 as an event.
 
-**Self-transfers.** `fromWallet` equal to `toWallet` is accepted. Suite case:
-`does not stamp a confirmed transaction hash on a transfer that moved nothing`.
+**Self-transfers.** `fromWallet` equal to `toWallet` was accepted.
+
+**FIXED.** `transfer` refuses it with `ADA39 a transfer needs a different wallet
+to go to`, checked straight after the quantity. The expectation moved to a
+`transfer.toWallet` row in `equivalence-boundary.test.ts`, which is where field
+validation at the `ledger.post()` boundary lives, and the case here is deleted.
+The lifecycle self-edge half of this finding is unchanged and still stands.
 
 ```ts
 await post(pool, { kind: 'transfer', payableId, fromWallet: w, toWallet: w, quantityBase: 5_000 });

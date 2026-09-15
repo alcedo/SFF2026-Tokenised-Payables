@@ -656,6 +656,38 @@ CREATE CONSTRAINT TRIGGER assets_are_conserved
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION ledger.assert_asset_conservation();
 
+-- (4b) A RECEIPT MEANS SOMETHING MOVED. PRD §10 gives issuance, trade
+-- settlement, transfer, redemption and top-up a simulated receipt, and those
+-- are exactly the five kinds that move value. An entry carrying a confirmed
+-- transaction hash and no legs is a receipt over a movement of nothing, which
+-- the explorer renders as a settled transfer.
+--
+-- The three invariants above cannot see it. An entry with no legs balances
+-- trivially, conserves every asset trivially, and disturbs no escrow, so the
+-- books stay HEALTHY while the audit trail gains an event that did not happen.
+-- Two commands reached this, `top_up` with no amountBase and a self-transfer,
+-- and both are refused by name in post.sql now. This is the backstop, so a
+-- sixth receipted command cannot reintroduce it quietly.
+--
+-- Deferred and keyed on the entry, because the legs are inserted after it.
+CREATE FUNCTION ledger.assert_receipt_moved_something() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_entry ledger.journal_entry;
+BEGIN
+  SELECT * INTO v_entry FROM ledger.journal_entry WHERE id = NEW.id;
+  IF v_entry.id IS NULL OR v_entry.chain_tx_hash IS NULL THEN RETURN NULL; END IF;
+  PERFORM 1 FROM ledger.journal_leg WHERE entry_id = v_entry.id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'entry % is a % carrying a chain receipt and no legs',
+      v_entry.id, v_entry.kind USING ERRCODE = 'ADA39';
+  END IF;
+  RETURN NULL;
+END $$;
+CREATE CONSTRAINT TRIGGER receipt_means_something_moved
+  AFTER INSERT ON ledger.journal_entry
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION ledger.assert_receipt_moved_something();
+
 -- (5) NO SILENT REWRITES. The journal is append-only once a receipt exists.
 --
 -- A trigger, not a RULE. The obvious spelling is
@@ -873,7 +905,7 @@ BEGIN
   --   ADA32 issuer_not_certified ADA33 programme_limit_exceeded
   --   ADA34 not_institutional    ADA35 not_graded
   --   ADA36 wrong_actor_role     ADA37 receipt_rejected
-  --   ADA38 below_min_price
+  --   ADA38 below_min_price      ADA39 moved_nothing
   -- ADA22 to ADA26 exist because PRD §8 screen 2's manual entry is the first
   -- form a person types into freely. Folding them into not_permitted would
   -- tell a preparer who mistyped an invoice number that they lack permission,

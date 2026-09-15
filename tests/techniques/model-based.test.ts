@@ -911,6 +911,10 @@ class Transfer extends Step {
     const [id, p] = this.subjectOf(model);
     const quantity = this.quantityOf(model, real);
     if (quantity <= 0n) return refuse('ADA19', 'a transfer must be positive');
+    // Checked straight after the quantity, before maturity and the receipt.
+    if (this.from(model, real) === this.to(real)) {
+      return refuse('ADA39', 'a transfer needs a different wallet to go to');
+    }
     if (model.day >= p.maturity) {
       return refuse('ADA12', `payable ${p.ref} has reached maturity`);
     }
@@ -923,9 +927,6 @@ class Transfer extends Step {
       return refuse('23502', 'null value in column "asset_id" of relation "account_balance"');
     }
     const from = this.from(model, real);
-    // Both legs land on the same account and sum to zero, so nothing is posted
-    // and nothing can be short.
-    if (from === this.to(real)) return legal;
     const have = held(model, from, 'wallet_free', id);
     if (have < quantity) {
       return refuse('ADA21', `wallet ${from} holds ${have} unlisted, needs ${quantity}`);
@@ -1857,7 +1858,7 @@ describe('model-based coverage of the payable workflow', () => {
       '23502', '23505', '23514',
       'ADA01', 'ADA11', 'ADA12', 'ADA15', 'ADA16', 'ADA17', 'ADA19', 'ADA20',
       'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34', 'ADA35',
-      'ADA36', 'ADA37', 'ADA38', 'accepted',
+      'ADA36', 'ADA37', 'ADA38', 'ADA39', 'accepted',
     ]);
   });
 });
@@ -1999,25 +2000,6 @@ describe('behaviours the model reproduces but would not choose', () => {
       buyNowPriceBase: '200',
     });
     expect(result.ok ? '' : result.code ?? '').toMatch(/^ADA/);
-  });
-
-  it.fails('does not stamp a confirmed transaction hash on a transfer that moved nothing', async () => {
-    const result = await post(db.pool, {
-      kind: 'transfer',
-      payableId: listedPayable,
-      fromWallet: sellerWallet,
-      toWallet: sellerWallet,
-      quantityBase: '1000',
-    });
-    expect(result, 'a self-transfer is accepted').toMatchObject({ ok: true });
-    const entryId = result.ok ? String(result.receipt.entryId) : '';
-    const { rows } = await db.pool.query<{ legs: number; hash: string | null }>(
-      `SELECT (SELECT count(*) FROM ledger.journal_leg l WHERE l.entry_id = e.id)::int AS legs,
-              e.chain_tx_hash AS hash
-         FROM ledger.journal_entry e WHERE e.id = $1`,
-      [entryId],
-    );
-    expect(rows[0]).toEqual({ legs: 0, hash: null });
   });
 
   it.fails('names maturity when a draft is issued after its own maturity date', async () => {
