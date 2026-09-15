@@ -3,18 +3,19 @@
  * The mutants Stryker cannot measure.
  *
  * Stryker is the mutation gate for this repo; its score and threshold live in
- * stryker.config.json. It cannot measure two of the files it is pointed at.
- * For src/core/fx.ts and src/core/input.ts it reports "Ran 0.00 tests per
- * mutant" and marks every mutant survived, under every coverage mode and with
- * static filtering off. Both claims are false: planting either mutation by
- * hand fails a test. Rather than let 148 phantom survivors drag the score,
- * those two files are excluded in stryker.config.json and guarded here.
+ * stryker.config.json. It cannot measure three of the files it is pointed at.
+ * For src/core/fx.ts, src/core/input.ts and src/core/nav-active.ts it reports
+ * "Ran 0.00 tests per mutant" and marks every mutant survived, under every
+ * coverage mode and with static filtering off. All three claims are false:
+ * planting any of these mutations by hand fails a test. Rather than let 174
+ * phantom survivors drag the score, those files are excluded in
+ * stryker.config.json and guarded here.
  *
  * So this is not a second mutation tool. It is the gate for the files the
  * first one is blind to, and it is stricter: every mutant must die or the
  * build fails. Mutants in files Stryker measures properly do not belong here.
  *
- * tests/techniques/findings/mutation.md carries the evidence for both files,
+ * tests/techniques/findings/mutation.md carries the evidence for each file,
  * including the hand-planted changes and the tests that caught them.
  */
 import { execFileSync } from 'node:child_process';
@@ -44,6 +45,18 @@ const mutants = [
     file: 'src/core/input.ts',
     find: "if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {\n    return fail('Enter a price between 0 and 100 percent of face.');\n  }\n  const bps = Math.round(pct * 100);\n  if (bps <= 0 || bps > BPS_PER_100_PERCENT) {",
     replace: "if (!Number.isFinite(pct) || pct <= 0) {\n    return fail('Enter a price between 0 and 100 percent of face.');\n  }\n  const bps = Math.round(pct * 100);\n  if (bps <= 0) {",
+  },
+  {
+    id: 'nav-match-off-segment-boundary',
+    file: 'src/core/nav-active.ts',
+    find: "return pathname.startsWith(href) && pathname.charAt(href.length) === '/';",
+    replace: 'return pathname.startsWith(href);',
+  },
+  {
+    id: 'nav-shortest-tab-wins',
+    file: 'src/core/nav-active.ts',
+    find: 'if (best === null || href.length > best.length) best = href;',
+    replace: 'if (best === null || href.length < best.length) best = href;',
   },
 ];
 

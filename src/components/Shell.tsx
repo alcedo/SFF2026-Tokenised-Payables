@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { DemoControls } from './DemoControls';
 import { ExplorerHost } from './explorer/ExplorerHost';
 import { ExplorerOpenButton } from './explorer/ExplorerOpenButton';
+import { NavLinks } from './NavLinks';
 import { NextActionStrip } from './NextActionStrip';
 import { Address } from './primitives';
 import { loadNextActionSnapshot } from '@/app/next-action-data';
@@ -65,26 +66,13 @@ export async function Shell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="chrome-secondary mx-auto max-w-[1600px] px-3">
-          <nav className="chrome-nav gap-0.5">
-            {nav.map((item) => {
-              const count = tabCount(counts, item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="inline-flex items-baseline gap-1 border-b-2 border-transparent px-2.5 py-1.5 text-[12.5px] text-ink-muted hover:border-rule-strong hover:text-ink"
-                  aria-label={count != null ? `${item.label}, ${count} waiting` : undefined}
-                >
-                  {item.label}
-                  {count != null ? (
-                    <span className="num chrome-nav-count" aria-hidden="true">
-                      {count}
-                    </span>
-                  ) : null}
-                </Link>
-              );
-            })}
-          </nav>
+          <NavLinks
+            items={nav.map((item) => ({
+              href: item.href,
+              label: item.label,
+              count: tabCount(counts, item.href) ?? null,
+            }))}
+          />
           <div className="chrome-meta">
             <ExplorerOpenButton />
             <dl className="chrome-balances pb-1.5">
