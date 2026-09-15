@@ -24,6 +24,11 @@ never considered: the absent value, the non-number, and the calendar.
 
 ## EB-01 `parseIsoDate` accepts dates that do not exist
 
+**FIXED.** The guard compares the round trip,
+`new Date(ms).toISOString().slice(0, 10) !== value`, which is what catches the
+day against the length of its month. `2026-02-29`, `2026-02-30` and
+`2026-04-31` all throw now.
+
 **File:** `src/core/clock.ts`, `parseIsoDate`
 
 **Reproduction**
@@ -76,6 +81,11 @@ passing rows pinning the four values the guard does reject and the
 
 ## EB-02 `formatUnits` accepts a NaN `decimals` and renders a trailing point
 
+**FIXED.** The guard establishes `Number.isInteger(decimals)` before bounding
+it, so `NaN` and `2.5` are both refused with `decimals must be a whole number
+between 0 and 4`. The related `2.5` behaviour this entry pinned as harmless
+went with it, since it had the same root.
+
 **File:** `src/core/money.ts`, `formatUnits`
 
 **Reproduction**
@@ -106,6 +116,8 @@ the `2.5` row under `money.formatUnits(value, decimals)`.
 ---
 
 ## EB-03 `allocateProRata` guards the sum of the weights, not each weight
+
+**FIXED.** The guard is per weight. See finding 3 of `findings/properties.md`.
 
 **File:** `src/core/money.ts`, `allocateProRata`
 
@@ -342,6 +354,14 @@ passing rows covering the rest of the partition set.
 ---
 
 ## EB-08 `btrim` strips only spaces, so a tab-only `invoiceRef` is accepted
+
+**FIXED.** Every `btrim` on a name or reference in `db/post.sql` now passes the
+whitespace set explicitly, `E' \t\n\r\f\v'`. A tab-only invoice reference
+reads as empty and is refused with the `ADA25` the field already had, as are
+the organisation and user name fields that had the same call.
+
+The entry below is the state before that change.
+
 
 **File:** `db/post.sql`, the manual branch of `create_payable`
 

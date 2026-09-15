@@ -19,6 +19,20 @@ npx vitest run tests/techniques/properties.test.ts
 
 ## 1. `formatUnits` produces a string `parseUnits` refuses, from 1,000 units up
 
+**FIXED.** `parseUnits` reads the grouping its sibling writes. It validates the
+whole string against the exact shape `formatUnits` emits,
+`^-?\d{1,3}(?:,\d{3})+(?:\.\d*)?$`, and only then strips the commas, so
+`1,0000` is still refused rather than read as ten thousand. The property holds
+for every amount and both signs.
+
+The shape check matters. A first attempt stripped with
+`replace(/^(-?\d{1,3})(,\d{3})+(?=$|\.)/, ...)`, and a repeated capture group
+keeps only its last repetition, so `1,000,000.0000` came back as `1000.0000`.
+The property found it at 2,000 runs. A hand-written example with one comma
+group would not have.
+
+The entry below is the state before that change.
+
 **File:** `src/core/money.ts`, `formatUnits` (the `toLocaleString('en-US')`
 call) against `parseUnits` (the `^(-?)(\d+)(?:\.(\d*))?$` regex).
 
@@ -72,6 +86,15 @@ The failing case stays as the record of that.
 
 ## 2. `parseFilter` throws on a large size bound, which no other query value does
 
+**FIXED.** `units()` checks `Number.isFinite` after the multiplication as well
+as before it, and drops a bound that overflows. That is the function's own
+documented contract, "anything unparseable is dropped rather than rejected", so
+the marketplace renders rather than erroring.
+
+The suite case asserted something stronger than the contract, that every
+exponent yields a bigint. It now asserts the contract plus the threshold either
+side of it. The entry below is the state before that change.
+
 **File:** `src/core/market.ts`, the `units()` helper inside `parseFilter`.
 
 **Suite case:** `market filter parsing > survives a size bound written in exponent notation`.
@@ -111,6 +134,15 @@ surface at all.
 ---
 
 ## 3. `allocateProRata` loses its conservation guarantee on a negative weight
+
+**FIXED.** The guard is per weight rather than on the sum, so the postcondition
+holds for everything the function admits, and a negative weight is refused with
+`allocateProRata cannot split across a negative weight`.
+
+Still latent, as recorded below. No caller could reach it. The reason to fix it
+is that the guard stated a narrower precondition than the function needed, and
+the next caller reads the contract. The entry below is the state before that
+change.
 
 **File:** `src/core/money.ts`, `allocateProRata`.
 

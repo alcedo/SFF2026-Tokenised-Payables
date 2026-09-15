@@ -252,10 +252,10 @@ const PURE_CASES: readonly PureCase[] = [
   },
   {
     field: 'money.parseUnits(input)',
-    partition: 'not a decimal: thousands separator',
+    partition: 'a thousands separator, the shape formatUnits emits',
     input: '"1,000"',
     run: () => money.parseUnits('1,000'),
-    expected: rangeError('not a decimal amount: "1,000"'),
+    expected: returns(10_000_000n),
   },
   {
     field: 'money.parseUnits(input)',
@@ -503,27 +503,27 @@ const PURE_CASES: readonly PureCase[] = [
 
   {
     field: 'money.allocateProRata(total, weights)',
-    partition: 'weights sum just below zero',
+    partition: 'a negative weight, whatever the sum comes to',
     edge: 'below',
     input: '(100n, [10n, -11n])',
     run: () => money.allocateProRata(bu(100n), [bu(10n), bu(-11n)]),
-    expected: rangeError('allocateProRata needs at least one positive weight'),
+    expected: rangeError('allocateProRata cannot split across a negative weight'),
   },
   {
     field: 'money.allocateProRata(total, weights)',
-    partition: 'weights sum exactly zero',
+    partition: 'a negative weight cancelling a positive one',
     edge: 'on',
     input: '(100n, [10n, -10n])',
     run: () => money.allocateProRata(bu(100n), [bu(10n), bu(-10n)]),
-    expected: rangeError('allocateProRata needs at least one positive weight'),
+    expected: rangeError('allocateProRata cannot split across a negative weight'),
   },
   {
     field: 'money.allocateProRata(total, weights)',
-    partition: 'weights sum just above zero',
+    partition: 'a negative weight outweighed by a positive one, which used to pass',
     edge: 'above',
     input: '(100n, [10n, -9n])',
     run: () => money.allocateProRata(bu(100n), [bu(10n), bu(-9n)]),
-    expected: returns([1_000n, -900n]),
+    expected: rangeError('allocateProRata cannot split across a negative weight'),
   },
   {
     field: 'money.allocateProRata(total, weights)',
@@ -565,11 +565,10 @@ const PURE_CASES: readonly PureCase[] = [
   },
   {
     field: 'money.allocateProRata(total, weights)',
-    partition: 'a negative weight with a positive sum should still be refused',
+    partition: 'a negative weight with a positive sum, refused by name',
     input: '(100n, [-5n, 10n])',
     run: () => money.allocateProRata(bu(100n), [bu(-5n), bu(10n)]),
-    expected: rangeError('allocateProRata needs at least one positive weight'),
-    defect: 'EB-03',
+    expected: rangeError('allocateProRata cannot split across a negative weight'),
   },
 
   {
@@ -578,7 +577,7 @@ const PURE_CASES: readonly PureCase[] = [
     edge: 'below',
     input: '(12345n, -1)',
     run: () => money.formatUnits(bu(12_345n), -1),
-    expected: rangeError('decimals must be between 0 and 4'),
+    expected: rangeError('decimals must be a whole number between 0 and 4'),
   },
   {
     field: 'money.formatUnits(value, decimals)',
@@ -602,14 +601,14 @@ const PURE_CASES: readonly PureCase[] = [
     edge: 'above',
     input: '(12345n, 5)',
     run: () => money.formatUnits(bu(12_345n), 5),
-    expected: rangeError('decimals must be between 0 and 4'),
+    expected: rangeError('decimals must be a whole number between 0 and 4'),
   },
   {
     field: 'money.formatUnits(value, decimals)',
-    partition: 'a non-integer decimals is not rejected, it truncates',
+    partition: 'a non-integer decimals, which the range alone used to admit',
     input: '(12345n, 2.5)',
     run: () => money.formatUnits(bu(12_345n), 2.5),
-    expected: returns('1.23'),
+    expected: rangeError('decimals must be a whole number between 0 and 4'),
   },
   {
     field: 'money.formatUnits(value, decimals)',
@@ -680,11 +679,10 @@ const PURE_CASES: readonly PureCase[] = [
   },
   {
     field: 'money.formatUnits(value, decimals)',
-    partition: 'a NaN decimals should be outside 0..4 like any other non-value',
+    partition: 'a NaN decimals, which passes both range comparisons',
     input: '(12345n, NaN)',
     run: () => money.formatUnits(bu(12_345n), NaN),
-    expected: rangeError('decimals must be between 0 and 4'),
-    defect: 'EB-02',
+    expected: rangeError('decimals must be a whole number between 0 and 4'),
   },
 
   {
@@ -1325,30 +1323,27 @@ const PURE_CASES: readonly PureCase[] = [
   },
   {
     field: 'clock.parseIsoDate(value)',
-    partition: 'a leap day in a common year is not a real calendar date, EB-01',
+    partition: 'a leap day in a common year',
     edge: 'above',
     input: '"2026-02-29"',
     run: () => clock.parseIsoDate('2026-02-29'),
     expected: rangeError('not a real calendar date: 2026-02-29'),
-    defect: 'EB-01',
   },
   {
     field: 'clock.parseIsoDate(value)',
-    partition: 'no February ever has thirty days, EB-01',
+    partition: 'no February ever has thirty days',
     edge: 'above',
     input: '"2026-02-30"',
     run: () => clock.parseIsoDate('2026-02-30'),
     expected: rangeError('not a real calendar date: 2026-02-30'),
-    defect: 'EB-01',
   },
   {
     field: 'clock.parseIsoDate(value)',
-    partition: 'April has thirty days, EB-01',
+    partition: 'April has thirty days',
     edge: 'above',
     input: '"2026-04-31"',
     run: () => clock.parseIsoDate('2026-04-31'),
     expected: rangeError('not a real calendar date: 2026-04-31'),
-    defect: 'EB-01',
   },
 
   {
@@ -2360,11 +2355,10 @@ const DB_CASES: readonly DbCase[] = [
   },
   {
     field: 'create_payable.invoiceRef',
-    partition: 'whitespace that is not a space should still read as empty, EB-08',
+    partition: 'whitespace that is not a space, which reads as empty too',
     input: '"\\t"',
     intent: (w, n) => manualPayable(w, n, { invoiceRef: '\t' }),
     expected: refused('ADA25', 'an invoice reference is required'),
-    defect: 'EB-08',
   },
 
   {

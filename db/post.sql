@@ -908,7 +908,13 @@ BEGIN
       v_days        := v_erp.terms_days;
     ELSE
       v_supplier_id := (v_intent->>'supplierId')::uuid;
-      v_invoice_ref := btrim(COALESCE(v_intent->>'invoiceRef', ''));
+      -- btrim with one argument removes spaces and nothing else, so a tab-only
+      -- reference passed the "is required" check below and was stored as "\t".
+      -- The invoice reference is half the key of payable_one_per_invoice, the
+      -- index that stops one supplier's invoice being financed twice, so two
+      -- whitespace-only references of different flavours were two distinct
+      -- keys and two financeable payables a human cannot tell apart.
+      v_invoice_ref := btrim(COALESCE(v_intent->>'invoiceRef', ''), E' \t\n\r\f\v');
       v_qty         := (v_intent->>'faceBase')::bigint;
       v_days        := (v_intent->>'termsDays')::int;
 
@@ -973,13 +979,13 @@ BEGIN
     -- organisation, its custodial wallet and its first user; create_user adds
     -- another user to an organisation that already exists. Sharing the branch
     -- keeps one set of role rules rather than two that drift.
-    v_name := btrim(COALESCE(v_intent->>'userName', ''));
+    v_name := btrim(COALESCE(v_intent->>'userName', ''), E' \t\n\r\f\v');
     IF v_name = '' THEN
       RAISE EXCEPTION 'a user name is required' USING ERRCODE = 'ADA28';
     END IF;
 
     IF v_kind = 'onboard_entity' THEN
-      IF btrim(COALESCE(v_intent->>'name', '')) = '' THEN
+      IF btrim(COALESCE(v_intent->>'name', ''), E' \t\n\r\f\v') = '' THEN
         RAISE EXCEPTION 'an organisation name is required' USING ERRCODE = 'ADA28';
       END IF;
       IF (v_intent->>'entityType') NOT IN ('supplier', 'lender') THEN
@@ -991,14 +997,14 @@ BEGIN
 
       BEGIN
         INSERT INTO app.entity (name, entity_type, certification_status)
-        VALUES (btrim(v_intent->>'name'), (v_intent->>'entityType')::app.entity_type,
+        VALUES (btrim(v_intent->>'name', E' \t\n\r\f\v'), (v_intent->>'entityType')::app.entity_type,
                 -- PRD §8 screen 5: "Mark the account KYC verified on submit."
                 -- No document upload; certification here is the demo's stand-in.
                 'certified')
         RETURNING * INTO v_entity;
       EXCEPTION WHEN unique_violation THEN
         RAISE EXCEPTION 'an organisation called % is already on the platform',
-          btrim(v_intent->>'name') USING ERRCODE = 'ADA27';
+          btrim(v_intent->>'name', E' \t\n\r\f\v') USING ERRCODE = 'ADA27';
       END;
 
       -- Custodial wallet. PRD §8 screen 5 is explicit that no external wallet

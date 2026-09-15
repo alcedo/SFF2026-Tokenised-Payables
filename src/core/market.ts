@@ -151,7 +151,13 @@ export function parseFilter(params: Record<string, string | string[] | undefined
   const units = (key: string): BaseUnits | null => {
     const n = num(key);
     if (n === null || n < 0) return null;
-    return (BigInt(Math.round(n * Number(BASE_UNITS_PER_UNIT))) as BaseUnits);
+    // Checked after the multiplication, not before it. A finite input can still
+    // overflow to Infinity once scaled, and BigInt(Infinity) throws, which is
+    // the one way a browse filter could answer with an error page instead of
+    // the marketplace.
+    const scaled = Math.round(n * Number(BASE_UNITS_PER_UNIT));
+    if (!Number.isFinite(scaled)) return null;
+    return (BigInt(scaled) as BaseUnits);
   };
 
   const maturityRaw = one('by');

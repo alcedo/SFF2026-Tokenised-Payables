@@ -88,8 +88,17 @@ export function fromWholeUnits(units: number): BaseUnits {
  * It rejects rather than rounds when the input carries more precision than the
  * base unit can represent, so "0.00005" is an error instead of a silent 0.
  */
+/** The exact shape `formatUnits` emits, so `1,0000` is still not ten thousand. */
+const GROUPED = /^-?\d{1,3}(?:,\d{3})+(?:\.\d*)?$/;
+
 export function parseUnits(input: string): BaseUnits {
-  const text = input.trim();
+  // formatUnits groups the whole part with toLocaleString, so a figure copied
+  // off a screen arrives with separators in it. This module is the only writer
+  // and the only reader of its own decimal representation, so a value it
+  // formatted has to parse back to itself. Groups of three only, so 1,0000 is
+  // still refused rather than read as ten thousand.
+  const raw = input.trim();
+  const text = GROUPED.test(raw) ? raw.replace(/,/g, '') : raw;
   const match = /^(-?)(\d+)(?:\.(\d*))?$/.exec(text);
   if (!match) {
     throw new RangeError(`not a decimal amount: ${JSON.stringify(input)}`);
@@ -213,6 +222,15 @@ export function roundDiv(product: bigint, denominator: bigint): bigint {
  * residue deterministically, so the credits always reconcile to the debit.
  */
 export function allocateProRata(total: BaseUnits, weights: readonly BaseUnits[]): BaseUnits[] {
+  // Guarded per weight, not on the sum. bigint division truncates toward zero,
+  // which is a ceiling rather than a floor for a negative product, so the
+  // "floors" can sum past the total, the residue comes out negative, and the
+  // largest-remainder loop exits on its first test leaving the over-allocation
+  // in place. The sum alone admitted that, and the postcondition is that the
+  // parts sum back to the total exactly.
+  if (weights.some((weight) => weight < 0n)) {
+    throw new RangeError('allocateProRata cannot split across a negative weight');
+  }
   const weightTotal = weights.reduce<bigint>((acc, w) => acc + w, 0n);
   if (weightTotal <= 0n) {
     throw new RangeError('allocateProRata needs at least one positive weight');
@@ -246,8 +264,11 @@ export function allocateProRata(total: BaseUnits, weights: readonly BaseUnits[])
  * caller picks; the default is the full four so nothing is silently truncated.
  */
 export function formatUnits(value: BaseUnits, decimals: number = DECIMALS): string {
-  if (decimals < 0 || decimals > DECIMALS) {
-    throw new RangeError(`decimals must be between 0 and ${DECIMALS}`);
+  // Integer first. NaN passes both comparisons, and slice(0, NaN) then returns
+  // '' while the suffix branch still takes the `.` path, so the answer was a
+  // number with a decimal point and nothing after it.
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > DECIMALS) {
+    throw new RangeError(`decimals must be a whole number between 0 and ${DECIMALS}`);
   }
   const negative = value < 0n;
   const absolute = negative ? -value : value;
