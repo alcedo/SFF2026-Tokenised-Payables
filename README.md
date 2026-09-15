@@ -62,8 +62,9 @@ npm run verify:fresh         # the same, against a database that has never been 
 
 The middle three need the app running (`scripts/serve.sh`). `scripts/fresh.sh`
 builds its own database and serves it on :3101. A new deployment boots from
-`db/fixtures.sql` rather than the `db/seed.sql` that Reset world replays, so
-that is the world an audience meets first and the one no other driver covers.
+`db/fixtures.sql` rather than `db/seed.sql`, so that is the world an audience
+meets first, and this is the only driver that reaches it the way a new
+deployment does, on a database nobody has ever seeded.
 
 ## Deploy to Vercel
 
@@ -77,10 +78,11 @@ that is the world an audience meets first and the one no other driver covers.
    five acting accounts, and a 24-invoice ERP register. That is a programme
    that has not issued anything yet rather than the PRD §12 catalogue. Both
    ways into create-payable work on arrival, so you do not have to onboard
-   anyone first. Reset world still loads `db/seed.sql` when you want the full
-   demo with its history, listings and bid book. There is no `psql` step.
-4. **Set `ADATA_RESET_PIN`** if the URL is going to be public. Reset restores
-   the seed for *everyone* connected, so it is already restricted to the
+   anyone first. Reset world offers both worlds: `db/seed.sql` for the full
+   demo with its history, listings and bid book, and `db/fixtures.sql` to get
+   this one back. There is no `psql` step.
+4. **Set `ADATA_RESET_PIN`** if the URL is going to be public. Reset rebuilds
+   the world for *everyone* connected, so it is already restricted to the
    StraitsX admin persona and needs the word RESET typed to arm. But the
    persona switcher is open by design (PRD §11), so anyone can become the
    admin. The PIN is the only gate a stranger cannot walk through. Leave it
@@ -106,12 +108,12 @@ The database owner often cannot `CREATE ROLE`. Schema load skips the
 and the app still runs. `adata_app` is created when the owner has
 `CREATEROLE`, which is how a laptop `psql` against local Postgres behaves.
 
-`Reset world` replays `db/schema.sql`, `db/post.sql` and `db/seed.sql` through
-the driver in one transaction, which takes a few seconds on Neon and needs no
-`psql` on the server. The first request against a database with no world row
-loads the schema (if needed) and `db/fixtures.sql` instead, so a freshly
-provisioned Neon opens without a laptop `psql` step and without the demo
-catalogue.
+`Reset world` replays `db/schema.sql`, `db/post.sql` and then the world you
+picked, either `db/seed.sql` or `db/fixtures.sql`, through the driver in one
+transaction, which takes a few seconds on Neon and needs no `psql` on the
+server. The first request against a database with no world row loads the schema
+(if needed) and `db/fixtures.sql` without asking, so a freshly provisioned Neon
+opens without a laptop `psql` step and without the demo catalogue.
 
 `PG_POOL_MAX` defaults to 1 connection per instance. Raise it only if you have
 measured a need and the database can take the total.
