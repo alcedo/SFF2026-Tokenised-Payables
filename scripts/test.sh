@@ -40,7 +40,6 @@ sql_stage() {
 echo "── unit ─────────────────────────────────────────────"
 stage "core, fields, db, and the technique suites (vitest)" npx vitest run
 stage "typecheck" npx tsc --noEmit
-stage "mutation: core parsers and formulas" node scripts/mutate.mjs
 
 echo "── schema ───────────────────────────────────────────"
 scripts/db.sh reset >/dev/null 2>&1
@@ -77,6 +76,7 @@ stage "fault injection: rollback, kill, replay" tests/ledger/fault.sh
 if [ "${SKIP_MUTATION:-}" != "1" ]; then
 	echo "── mutation ─────────────────────────────────────────"
 	stage "mutation score over src/core, against the threshold" npx stryker run
+	stage "the fx.ts mutants Stryker cannot measure" node scripts/mutate.mjs
 fi
 
 echo

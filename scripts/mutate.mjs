@@ -1,67 +1,31 @@
 #!/usr/bin/env node
+/**
+ * The mutants Stryker cannot measure.
+ *
+ * Stryker is the mutation gate for this repo; its score and threshold live in
+ * stryker.config.json. It has one blind spot: for src/core/fx.ts it reports
+ * "Ran 0.00 tests per mutant" and marks all 25 mutants survived, under every
+ * coverage mode and with static filtering off. That is a measurement failure,
+ * not a coverage hole, and it predates this suite.
+ *
+ * So this file is not a second mutation tool. It is a guard over the one file
+ * the first one cannot see. It plants the mutant by hand, runs the suite, and
+ * fails if nothing notices. The other nine mutants it used to carry were
+ * dropped when Stryker became the gate, because Stryker measures those files
+ * properly and two tools scoring the same code is one signal at twice the cost.
+ *
+ * tests/techniques/findings/mutation.md carries the evidence for the blind
+ * spot, including the hand-planted change that fails three tests.
+ */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const mutants = [
   {
-    id: 'accept-amount-between-base-units',
-    file: 'src/core/money.ts',
-    find: 'if (/[^0]/.test(excess)) {',
-    replace: 'if (false && /[^0]/.test(excess)) {',
-  },
-  {
-    id: 'skip-pro-rata-residue',
-    file: 'src/core/money.ts',
-    find: 'if (residue <= 0n) break;\n    floors[index] += 1n;',
-    replace: 'if (residue <= 0n) break;\n    /* floors[index] += 1n; */',
-  },
-  {
-    id: 'truncate-instead-of-round',
-    file: 'src/core/money.ts',
-    find: 'const quotient = (absProduct * 2n + absDenominator) / (absDenominator * 2n);',
-    replace: 'const quotient = absProduct / absDenominator;',
-  },
-  {
-    id: 'annualise-after-maturity',
-    file: 'src/core/pricing.ts',
-    find: "const annualise = maturity === 'live';",
-    replace: 'const annualise = true;',
-  },
-  {
     id: 'xsgd-funds-one-to-one',
     file: 'src/core/fx.ts',
     find: "if (fundingAsset !== 'XSGD') {",
     replace: 'if (true) {',
-  },
-  {
-    id: 'mature-only-after-due-date',
-    file: 'src/core/lifecycle.ts',
-    find: 'return daysRemaining <= 0 ? \'matured\' : \'issued\';',
-    replace: "return daysRemaining < 0 ? 'matured' : 'issued';",
-  },
-  {
-    id: 'skip-actor-check',
-    file: 'src/core/lifecycle.ts',
-    find: 'if (transition.actors.length > 0 && !transition.actors.includes(actor)) {',
-    replace: 'if (false && transition.actors.length > 0 && !transition.actors.includes(actor)) {',
-  },
-  {
-    id: 'accept-zero-amount',
-    file: 'src/core/input.ts',
-    find: 'if (!isPositive(value)) return fail(\'Enter an amount greater than zero.\');',
-    replace: 'if (false && !isPositive(value)) return fail(\'Enter an amount greater than zero.\');',
-  },
-  {
-    id: 'drop-terms-upper-bound',
-    file: 'src/core/input.ts',
-    find: 'if (!Number.isInteger(days) || days < TERMS_MIN || days > TERMS_MAX) {',
-    replace: 'if (!Number.isInteger(days) || days < TERMS_MIN) {',
-  },
-  {
-    id: 'allow-price-above-par',
-    file: 'src/core/input.ts',
-    find: "if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {\n    return fail('Enter a price between 0 and 100 percent of face.');\n  }\n  const bps = Math.round(pct * 100);\n  if (bps <= 0 || bps > BPS_PER_100_PERCENT) {",
-    replace: "if (!Number.isFinite(pct) || pct <= 0) {\n    return fail('Enter a price between 0 and 100 percent of face.');\n  }\n  const bps = Math.round(pct * 100);\n  if (bps <= 0) {",
   },
 ];
 
@@ -114,4 +78,4 @@ if (survivors.length > 0) {
   console.error(`survivors: ${survivors.join(', ')}`);
   process.exit(1);
 }
-console.log('PASS  every mutant was killed');
+console.log('PASS  the suite kills the fx.ts mutants Stryker cannot measure');
