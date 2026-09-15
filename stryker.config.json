@@ -8,7 +8,8 @@
   "mutate": [
     "src/core/*.ts",
     "!src/core/fx.ts",
-    "!src/core/input.ts"
+    "!src/core/input.ts",
+    "!src/core/nav-active.ts"
   ],
   "reporters": [
     "clear-text",

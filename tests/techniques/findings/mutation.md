@@ -120,6 +120,42 @@ across the tests and `money.ts` is measured correctly through both. Whoever
 picks this up should treat a new file reading exactly 0.00% as suspect until a
 hand-planted mutation proves otherwise.
 
+## A third file Stryker cannot measure: nav-active.ts
+
+`src/core/nav-active.ts` arrived with the current-tab fix in the shell
+navigation. It is 22 lines, pure, and imported by one test file,
+`nav-active.test.ts`, with eight cases. Stryker read it at 0.00%: 26 mutants,
+26 survived, `Ran 0.00 tests per mutant`. Same false reading as `fx.ts` and
+`input.ts`.
+
+Proved by hand, four mutants planted one at a time and the original restored
+after each:
+
+| planted change | tests failed |
+|---|---|
+| `=== '/'` to `!== '/'` in the segment-boundary check | 2 of 8 |
+| `href.length > best.length` to `<` (shortest tab wins) | 3 of 8 |
+| exact match returns `false` | 4 of 8 |
+| `return best` to `return null` | 5 of 8 |
+
+One new observation that narrows the cause. Stryker's dry run for this file
+logged `Ran 8 tests`, which is exactly the eight in `nav-active.test.ts`, so the
+runner did select and run the right test file and still attributed none of it
+to any mutant. Run against `tab-badges.ts` the same way, the dry run logs
+`Ran 10 tests` and 0.42 tests per mutant: partial attribution, not none.
+Against `clock.ts` it is 18.92 per mutant. So the failure is in per-test
+coverage attribution inside the vitest runner, not in test selection, and it is
+a matter of degree rather than a switch. `@stryker-mutator/vitest-runner`
+10.0.0 declares `vitest >=2.0.0` and this repo runs vitest 5.0.0; that pairing
+is the most likely place to look next.
+
+Leaving the file in `mutate` would add 26 phantom survivors and read
+196 of 815, or 24.05%, against a break of 24, for a file whose tests kill every
+mutant planted in it. So it is excluded like the other two and guarded by two
+planted mutants in `scripts/mutate.mjs`: one drops the segment-boundary check
+so `/admin` would light on `/administration`, the other makes the shortest
+matching tab win so `/adata/create` would light "Dashboard".
+
 ## What the surviving mutants say
 
 613 mutants still survive, so 22.60% is a floor to build on, not a good score.

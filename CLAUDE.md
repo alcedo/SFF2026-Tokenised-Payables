@@ -58,7 +58,8 @@ vitest reports a failure: that means the gap it described has been closed, so
 delete the case rather than reverting the change.
 
 Mutation testing is the gate on test quality. Stryker scores `src/core` and
-breaks below 24. It cannot measure `src/core/fx.ts` or `src/core/input.ts`, for
-reasons nobody has explained, so those two are excluded and guarded by
-`scripts/mutate.mjs` instead. Treat any file Stryker scores at exactly 0.00% as
-a measurement failure until a hand-planted mutation proves otherwise.
+breaks below 24. It cannot measure `src/core/fx.ts`, `src/core/input.ts` or
+`src/core/nav-active.ts`, for reasons nobody has explained, so those three are
+excluded and guarded by `scripts/mutate.mjs` instead. Treat any file Stryker
+scores at exactly 0.00% as a measurement failure until a hand-planted mutation
+proves otherwise.

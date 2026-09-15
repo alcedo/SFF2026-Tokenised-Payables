@@ -76,7 +76,7 @@ stage "fault injection: rollback, kill, replay" tests/ledger/fault.sh
 if [ "${SKIP_MUTATION:-}" != "1" ]; then
 	echo "── mutation ─────────────────────────────────────────"
 	stage "mutation score over src/core, against the threshold" npx stryker run
-	stage "the fx.ts mutants Stryker cannot measure" node scripts/mutate.mjs
+	stage "the mutants Stryker cannot measure (fx, input, nav-active)" node scripts/mutate.mjs
 fi
 
 echo
