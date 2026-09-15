@@ -1,5 +1,3 @@
-import Link from 'next/link';
-
 import { DemoControls } from './DemoControls';
 import { ExplorerHost } from './explorer/ExplorerHost';
 import { ExplorerOpenButton } from './explorer/ExplorerOpenButton';
@@ -50,18 +48,10 @@ export async function Shell({ children }: { children: React.ReactNode }) {
       />
 
       <header className="border-b border-rule bg-surface">
-        <div className="chrome-primary mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-3 py-2">
-          <div className="flex items-baseline gap-3">
-            <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
-              ADATA Tokenised Payables
-            </Link>
-            <span className="text-[11px] text-ink-faint">Project BLOOM · StraitsX</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-right">
-              <div className="text-[12px] font-medium text-ink">{persona.entityName}</div>
-              <Address value={persona.wallet} />
-            </div>
+        <div className="chrome-primary mx-auto flex max-w-[1600px] justify-end px-3 py-2">
+          <div className="text-right">
+            <div className="text-[12px] font-medium text-ink">{persona.entityName}</div>
+            <Address value={persona.wallet} />
           </div>
         </div>
 
