@@ -498,6 +498,9 @@ BEGIN
   ELSIF v_kind = 'transfer' THEN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
     v_asset := ledger.payable_asset(v_payable.id);
+    IF v_asset IS NULL THEN
+      RAISE EXCEPTION 'payable % has not been issued yet', v_payable.ref USING ERRCODE = 'ADA15';
+    END IF;
     v_qty   := (v_intent->>'quantityBase')::bigint;
     IF v_qty IS NULL OR v_qty <= 0 THEN
       RAISE EXCEPTION 'a transfer must be positive' USING ERRCODE = 'ADA19';
@@ -565,8 +568,11 @@ BEGIN
     ELSE
       SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
       v_asset := ledger.payable_asset(v_payable.id);
+      IF v_asset IS NULL THEN
+        RAISE EXCEPTION 'payable % has not been issued yet', v_payable.ref USING ERRCODE = 'ADA15';
+      END IF;
       v_qty   := (v_intent->>'quantityBase')::bigint;
-      IF v_qty <= 0 THEN
+      IF v_qty IS NULL OR v_qty <= 0 THEN
         RAISE EXCEPTION 'a listing must be positive' USING ERRCODE = 'ADA19';
       END IF;
       IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
@@ -601,6 +607,9 @@ BEGIN
 
   ELSIF v_kind = 'cancel_listing' THEN
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
+    IF v_listing.id IS NULL THEN
+      RAISE EXCEPTION 'no such listing' USING ERRCODE = 'ADA11';
+    END IF;
     IF v_listing.status <> 'open' THEN
       RAISE EXCEPTION 'listing is %', v_listing.status USING ERRCODE = 'ADA11';
     END IF;
@@ -618,6 +627,9 @@ BEGIN
 
   ELSIF v_kind = 'place_bid' THEN
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
+    IF v_listing.id IS NULL THEN
+      RAISE EXCEPTION 'no such listing' USING ERRCODE = 'ADA11';
+    END IF;
     IF v_listing.status <> 'open' THEN
       RAISE EXCEPTION 'listing is %', v_listing.status USING ERRCODE = 'ADA11';
     END IF;
@@ -646,8 +658,14 @@ BEGIN
     RETURNING * INTO v_bid;
 
   ELSIF v_kind = 'withdraw_bid' THEN
-    UPDATE app.bid SET status = 'withdrawn'
-     WHERE id = (v_intent->>'bidId')::uuid AND status = 'placed';
+    SELECT * INTO v_bid FROM app.bid WHERE id = (v_intent->>'bidId')::uuid FOR UPDATE;
+    IF v_bid.id IS NULL THEN
+      RAISE EXCEPTION 'no such bid' USING ERRCODE = 'ADA11';
+    END IF;
+    IF v_bid.status <> 'placed' THEN
+      RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
+    END IF;
+    UPDATE app.bid SET status = 'withdrawn' WHERE id = v_bid.id;
 
   ELSIF v_kind IN ('accept_bid', 'buy_now') THEN
     -- One settlement path for both. Buy-now is an acceptance the buyer performs
@@ -678,6 +696,9 @@ BEGIN
       RETURNING * INTO v_bid;
     ELSE
       SELECT * INTO v_bid FROM app.bid WHERE id = (v_intent->>'bidId')::uuid FOR UPDATE;
+      IF v_bid.id IS NULL THEN
+        RAISE EXCEPTION 'no such bid' USING ERRCODE = 'ADA11';
+      END IF;
       IF v_bid.status <> 'placed' THEN
         RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
       END IF;
@@ -831,13 +852,17 @@ BEGIN
 
   ELSIF v_kind = 'advance_clock' THEN
     v_days := (v_intent->>'days')::int;
-    IF v_days < 0 THEN
+    IF v_days IS NULL OR v_days < 0 THEN
       RAISE EXCEPTION 'the demo clock only moves forward' USING ERRCODE = 'ADA19';
     END IF;
     UPDATE app.world SET offset_days = offset_days + v_days WHERE only_row;
 
   ELSIF v_kind IN ('accept_receipt', 'reject_receipt') THEN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
+    IF v_payable.receipt_status IS NULL THEN
+      RAISE EXCEPTION 'payable % has not been issued yet, so there is nothing to take delivery of',
+        v_payable.ref USING ERRCODE = 'ADA15';
+    END IF;
     IF v_payable.receipt_status <> 'pending' THEN
       RAISE EXCEPTION 'payable % was already %', v_payable.ref, v_payable.receipt_status
         USING ERRCODE = 'ADA15';
@@ -1034,9 +1059,12 @@ BEGIN
       -- hiding it, and issuance is blocked until it unwinds.
       UPDATE app.entity SET programme_limit_base = v_limit WHERE id = v_entity.id;
     ELSE
-      IF (v_intent->>'status') NOT IN ('uncertified', 'certified', 'suspended') THEN
-        RAISE EXCEPTION 'unknown certification status %', v_intent->>'status'
-          USING ERRCODE = 'ADA19';
+      -- An absent status is outside the enum too, and NULL NOT IN (...) is NULL
+      -- rather than true, which used to let it reach the NOT NULL column.
+      IF (v_intent->>'status') IS NULL
+         OR (v_intent->>'status') NOT IN ('uncertified', 'certified', 'suspended') THEN
+        RAISE EXCEPTION 'unknown certification status %',
+          COALESCE(v_intent->>'status', 'none given') USING ERRCODE = 'ADA19';
       END IF;
       UPDATE app.entity
          SET certification_status = (v_intent->>'status')::app.certification_status

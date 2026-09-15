@@ -794,10 +794,12 @@ class Receipt extends Step {
     const p = aimed(model, this.kind, this.index, this.guided)[1];
     if (p.receipt === 'pending') return legal;
     // A payable that was never issued has no receipt state at all, and the
-    // guard in post.sql compares against NULL, which is never true. The write
-    // then falls through to the receipt_only_once_issued CHECK.
+    // guard now checks for that missing state before it checks for pending.
     if (p.receipt === null) {
-      return refuse('23514', 'violates check constraint "receipt_only_once_issued"');
+      return refuse(
+        'ADA15',
+        `payable ${p.ref} has not been issued yet, so there is nothing to take delivery of`,
+      );
     }
     return refuse('ADA15', `payable ${p.ref} was already ${p.receipt}`);
   }
@@ -909,6 +911,11 @@ class Transfer extends Step {
 
   protected predict(model: Model, real: Real): Verdict {
     const [id, p] = this.subjectOf(model);
+    // The guard resolves the asset before anything else, so a never-issued
+    // payable refuses here, whatever quantity was asked for.
+    if (p.status !== 'issued' && p.status !== 'settled') {
+      return refuse('ADA15', `payable ${p.ref} has not been issued yet`);
+    }
     const quantity = this.quantityOf(model, real);
     if (quantity <= 0n) return refuse('ADA19', 'a transfer must be positive');
     // Checked straight after the quantity, before maturity and the receipt.
@@ -920,11 +927,6 @@ class Transfer extends Step {
     }
     if (p.receipt === 'pending') {
       return refuse('ADA15', `payable ${p.ref} has not been accepted by its supplier yet`);
-    }
-    // No token asset exists before issuance, so the legs carry a null asset and
-    // the balance row they pre-create is refused by NOT NULL.
-    if (p.status !== 'issued' && p.status !== 'settled') {
-      return refuse('23502', 'null value in column "asset_id" of relation "account_balance"');
     }
     const from = this.from(model, real);
     const have = held(model, from, 'wallet_free', id);
@@ -1002,6 +1004,11 @@ class PublishListing extends Step {
 
   protected predict(model: Model, real: Real): Verdict {
     const [id, p] = this.subjectOf(model);
+    // The guard resolves the asset before anything else, so a never-issued
+    // payable refuses here, whatever quantity was asked for.
+    if (p.status !== 'issued' && p.status !== 'settled') {
+      return refuse('ADA15', `payable ${p.ref} has not been issued yet`);
+    }
     const quantity = this.quantityOf(model, real);
     if (quantity <= 0n) return refuse('ADA19', 'a listing must be positive');
     if (model.day >= p.maturity) {
@@ -1009,9 +1016,6 @@ class PublishListing extends Step {
     }
     if (p.receipt === 'pending') {
       return refuse('ADA15', `payable ${p.ref} has not been accepted by its supplier yet`);
-    }
-    if (p.status !== 'issued' && p.status !== 'settled') {
-      return refuse('23502', 'null value in column "asset_id" of relation "listing_leg"');
     }
     const seller = this.seller(model, real);
     for (const listing of model.listings.values()) {
@@ -1165,8 +1169,10 @@ class WithdrawBid extends Step {
     return (listing && model.payables.get(listing.payableId)?.status) ?? NO_PAYABLE;
   }
 
-  /** PRD has no "no such bid"; the UPDATE simply matches nothing. */
-  protected predict(): Verdict {
+  protected predict(model: Model): Verdict {
+    const bid = this.target(model);
+    if (!bid) return refuse('ADA11', 'no such bid');
+    if (bid.status !== 'placed') return refuse('ADA11', `bid is ${bid.status}`);
     return legal;
   }
 
@@ -1175,8 +1181,7 @@ class WithdrawBid extends Step {
   }
 
   protected apply(model: Model): void {
-    const bid = this.target(model);
-    if (bid && bid.status === 'placed') bid.status = 'withdrawn';
+    this.target(model)!.status = 'withdrawn';
   }
 
   toString(): string {
@@ -1377,9 +1382,7 @@ class CancelListing extends Step {
 
   protected predict(model: Model): Verdict {
     const found = this.target(model);
-    // A listing id that matches nothing leaves status NULL, and `NULL <> 'open'`
-    // is not true, so the command falls through to an UPDATE of no rows.
-    if (!found) return legal;
+    if (!found) return refuse('ADA11', 'no such listing');
     if (found[1].status !== 'open') return refuse('ADA11', `listing is ${found[1].status}`);
     return legal;
   }
@@ -1855,7 +1858,7 @@ describe('model-based coverage of the payable workflow', () => {
     // fixture anchor's limit is 250,000,000,000 base units and the generated
     // faces never come within three orders of magnitude of it.
     expect([...coverage.verdicts.keys()].sort()).toEqual([
-      '23502', '23505', '23514',
+      '23505', '23514',
       'ADA01', 'ADA11', 'ADA12', 'ADA15', 'ADA16', 'ADA17', 'ADA19', 'ADA20',
       'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34', 'ADA35',
       'ADA36', 'ADA37', 'ADA38', 'ADA39', 'accepted',
@@ -1866,7 +1869,7 @@ describe('model-based coverage of the payable workflow', () => {
 // --- what the model had to bend to fit --------------------------------------
 
 /**
- * Ten behaviours the model predicts because the ledger does them, not because
+ * Two behaviours the model predicts because the ledger does them, not because
  * they look right.
  *
  * The property above is green only because the model reproduces each of these,
@@ -1878,19 +1881,15 @@ describe('model-based coverage of the payable workflow', () => {
  */
 describe('behaviours the model reproduces but would not choose', () => {
   let db: Database;
-  let draftPayable: string;
   let listedPayable: string;
   let sellerWallet: string;
-  let lenderWallet: string;
 
   const LISTING = '00000000-0000-4000-f000-000000000001';
-  const NOWHERE = '00000000-0000-4000-f000-0000000000ee';
 
   beforeAll(async () => {
     db = await freshWorld('model_based_defects');
     const real = await bootReal(db);
     sellerWallet = real.wallets.find((w) => w.label === real.suppliers[0]!.name)!.address;
-    lenderWallet = real.wallets.find((w) => w.institutional)!.address;
 
     const idOf = async (ref: string) =>
       (await db.pool.query<{ id: string }>('SELECT id::text FROM app.payable WHERE ref = $1', [ref]))
@@ -1904,9 +1903,6 @@ describe('behaviours the model reproduces but would not choose', () => {
         faceBase: '1000000',
         termsDays: 90,
       });
-
-    await create('DEF-DRAFT', 'DEF-INV-1');
-    draftPayable = await idOf('DEF-DRAFT');
 
     await create('DEF-LIVE', 'DEF-INV-2');
     listedPayable = await idOf('DEF-LIVE');
@@ -1936,57 +1932,6 @@ describe('behaviours the model reproduces but would not choose', () => {
 
   afterAll(async () => {
     await db.close();
-  });
-
-  it.fails('names the payable when a receipt is accepted before issuance', async () => {
-    const result = await post(db.pool, { kind: 'accept_receipt', payableId: draftPayable });
-    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
-  });
-
-  it.fails('names the payable when a receipt is rejected before issuance', async () => {
-    const result = await post(db.pool, {
-      kind: 'reject_receipt',
-      payableId: draftPayable,
-      holderWallet: sellerWallet,
-    });
-    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
-  });
-
-  it.fails('refuses a transfer of a payable that was never issued', async () => {
-    const result = await post(db.pool, {
-      kind: 'transfer',
-      payableId: draftPayable,
-      fromWallet: sellerWallet,
-      toWallet: lenderWallet,
-      quantityBase: '1',
-    });
-    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
-  });
-
-  it.fails('refuses a cancellation of a listing that does not exist', async () => {
-    const result = await post(db.pool, { kind: 'cancel_listing', listingId: NOWHERE });
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('refuses a bid on a listing that does not exist', async () => {
-    const result = await post(db.pool, {
-      kind: 'place_bid',
-      bidId: '00000000-0000-4000-f000-000000000002',
-      listingId: NOWHERE,
-      bidderWallet: lenderWallet,
-      priceBase: '100',
-      fundingCode: 'XUSD',
-    });
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('says which bid is missing rather than blaming the bidder', async () => {
-    const result = await post(db.pool, {
-      kind: 'accept_bid',
-      listingId: LISTING,
-      bidId: '00000000-0000-4000-f000-0000000000dd',
-    });
-    expect(result.ok ? '' : result.message).toContain('bid');
   });
 
   it.fails('refuses a second open listing with a named code rather than a raw index error', async () => {

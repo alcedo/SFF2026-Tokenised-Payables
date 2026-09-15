@@ -59,6 +59,14 @@ Two orderings are worth naming because they hide a friendlier message:
 
 ## 1. `withdraw_bid` has no row check, so it succeeds against anything
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `withdraw_bid` reads the row first and answers `ADA11 no such bid` or `ADA11 bid is <status>`.
+
+The entry below is the state before that change.
+
+
 File: `db/post.sql:577-579`
 
 ```sql
@@ -89,6 +97,14 @@ exist`, `should refuse withdraw_bid for a bid that has already been accepted`.
 
 ## 2. `accept_bid` on an unknown bid id is refused for the wrong reason
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `accept_bid` answers `ADA11 no such bid`.
+
+The entry below is the state before that change.
+
+
 File: `db/post.sql:609-612`
 
 ```sql
@@ -116,6 +132,14 @@ the message sends the operator to the wrong screen.
 `it.fails` case: `should refuse accept_bid for a bid id that does not exist`.
 
 ## 3. The receipt guard is skipped before issuance, for the same NULL reason
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. The branch answers `ADA15 payable <ref> has not been issued yet, so there is nothing to take delivery of` before it reaches the CHECK.
+
+The entry below is the state before that change.
+
 
 File: `db/post.sql:747-752`
 

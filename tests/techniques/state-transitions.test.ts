@@ -1065,13 +1065,17 @@ describe('machine 3: app.bid_status', () => {
       'placed/accept_bid': 'accepted -> accepted',
       'placed/withdraw_bid': 'accepted -> withdrawn',
       'accepted/accept_bid': 'ADA11: bid is accepted -> accepted',
-      'accepted/withdraw_bid': 'accepted -> accepted',
+      // withdraw_bid now reads the row first, so a non-placed bid is refused
+      // instead of the old no-match UPDATE silently touching nothing.
+      'accepted/withdraw_bid': 'ADA11: bid is accepted -> accepted',
       'withdrawn/accept_bid': 'ADA11: bid is withdrawn -> withdrawn',
-      'withdrawn/withdraw_bid': 'accepted -> withdrawn',
+      'withdrawn/withdraw_bid': 'ADA11: bid is withdrawn -> withdrawn',
       'superseded/accept_bid': 'ADA11: bid is superseded -> superseded',
-      'superseded/withdraw_bid': 'accepted -> superseded',
-      'absent/accept_bid': 'ADA34: only institutional lender accounts can buy -> absent',
-      'absent/withdraw_bid': 'accepted -> absent',
+      'superseded/withdraw_bid': 'ADA11: bid is superseded -> superseded',
+      // A missing bid id is now caught before either command reaches its
+      // status or institutional-buyer checks.
+      'absent/accept_bid': 'ADA11: no such bid -> absent',
+      'absent/withdraw_bid': 'ADA11: no such bid -> absent',
     };
 
     for (const status of BID_STATUSES) {
@@ -1233,7 +1237,7 @@ describe('machine 3: app.bid_status', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('journals a bid_withdrawn entry even when no bid row was touched', async () => {
+  it('refuses withdraw_bid for an absent bid without journaling anything', async () => {
     const before = await db.pool.query<{ n: bigint }>(
       "SELECT count(*) AS n FROM ledger.journal_entry WHERE kind = 'bid_withdrawn'",
     );
@@ -1242,61 +1246,13 @@ describe('machine 3: app.bid_status', () => {
       { kind: 'withdraw_bid', bidId: ABSENT_BID },
       { actorUserId: world.buyer },
     );
-    expect(phantom).toMatchObject({ ok: true });
+    expect(phantom).toEqual({ ok: false, code: 'ADA11', message: 'no such bid' });
 
     const after = await db.pool.query<{ n: bigint }>(
       "SELECT count(*) AS n FROM ledger.journal_entry WHERE kind = 'bid_withdrawn'",
     );
-    expect(Number(after.rows[0]!.n)).toBe(Number(before.rows[0]!.n) + 1);
-
-    const { rows } = await db.pool.query<{ bid_id: string | null; legs: bigint }>(
-      `SELECT e.bid_id::text,
-              (SELECT count(*) FROM ledger.journal_leg l WHERE l.entry_id = e.id) AS legs
-         FROM ledger.journal_entry e
-        WHERE e.kind = 'bid_withdrawn'
-        ORDER BY e.seq DESC LIMIT 1`,
-    );
-    expect(rows[0]).toEqual({ bid_id: null, legs: 0n });
+    expect(Number(after.rows[0]!.n)).toBe(Number(before.rows[0]!.n));
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-  });
-
-  it.fails('should refuse accept_bid for a bid id that does not exist', async () => {
-    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-    const lot = await publishLot(world, 'BD-should-refuse-accept');
-    const result = await post(
-      db.pool,
-      { kind: 'accept_bid', listingId: lot.listingId, bidId: ABSENT_BID },
-      { actorUserId: world.supplier },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('should refuse withdraw_bid for a bid id that does not exist', async () => {
-    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-    const result = await post(
-      db.pool,
-      { kind: 'withdraw_bid', bidId: ABSENT_BID },
-      { actorUserId: world.buyer },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('should refuse withdraw_bid for a bid that has already been accepted', async () => {
-    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-    const lot = await publishLot(world, 'BD-should-refuse-withdraw');
-    expect(
-      await post(
-        db.pool,
-        { kind: 'accept_bid', listingId: lot.listingId, bidId: lot.bidId },
-        { actorUserId: world.supplier },
-      ),
-    ).toMatchObject({ ok: true });
-    const result = await post(
-      db.pool,
-      { kind: 'withdraw_bid', bidId: lot.bidId },
-      { actorUserId: world.buyer },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
   });
 });
 
@@ -1396,9 +1352,9 @@ describe('machine 4: app.payable.receipt_status', () => {
         observed[key] = `${code} -> ${await receiptOf(db.pool, id)}`;
 
         if (state === 'null') {
-          // The ADA15 guard tests `receipt_status <> 'pending'`, which is NULL
-          // rather than true before issuance, so the row CHECK is what refuses.
-          expected[key] = '23514 -> null';
+          // The pre-issuance case is now caught by its own ADA15 guard before
+          // the CHECK constraint ever sees the row.
+          expected[key] = 'ADA15 -> null';
         } else if (state === 'pending') {
           expected[key] = command === 'accept_receipt' ? 'accepted -> accepted' : 'accepted -> rejected';
         } else {
@@ -1471,17 +1427,6 @@ describe('machine 4: app.payable.receipt_status', () => {
     ]);
     expect(await receiptOf(db.pool, payableId)).toBe('pending');
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-  });
-
-  it.fails('should refuse accept_receipt before issuance with the ADA15 it has for the purpose', async () => {
-    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-    const payableId = await park(world, 'RC-should-refuse', 'certified', LONG_TERM);
-    const result = await post(
-      db.pool,
-      { kind: 'accept_receipt', payableId },
-      { actorUserId: world.supplier },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
   });
 });
 

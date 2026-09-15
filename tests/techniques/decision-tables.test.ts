@@ -908,11 +908,7 @@ const BUYER_SHORT = refused(
 );
 const TRADED = accepted('filled');
 
-const BID_MISSING_READS_AS_INELIGIBLE = refused(
-  'ADA34',
-  'only institutional lender accounts can buy',
-  'open',
-);
+const NO_SUCH_BID = refused('ADA11', 'no such bid', 'open');
 
 interface GateRow extends TableRow {
   readonly verb: Verb;
@@ -926,7 +922,7 @@ const GATE_OUTCOME: Readonly<Record<Gate, Expected>> = {
   no_buy_now_price: NO_BUY_NOW,
   bid_withdrawn: BID_WITHDRAWN,
   bid_superseded: BID_SUPERSEDED,
-  bid_missing: BID_MISSING_READS_AS_INELIGIBLE,
+  bid_missing: NO_SUCH_BID,
   bid_below_min_price: refused('ADA38', 'a bid must be at least {minPrice}, the minimum this listing asks', 'open'),
   none: TRADED,
 };

@@ -2489,11 +2489,10 @@ const DB_CASES: readonly DbCase[] = [
   },
   {
     field: 'set_certification.status',
-    partition: 'absent, which the enum guard should catch, EB-07',
+    partition: 'absent, which the enum guard catches with the rest',
     input: 'field omitted',
     intent: (w) => ({ kind: 'set_certification', entityId: w.lenderId }),
-    expected: refused('ADA19', 'unknown certification status <NULL>'),
-    defect: 'EB-07',
+    expected: refused('ADA19', 'unknown certification status none given'),
   },
 
   {
@@ -2522,11 +2521,10 @@ const DB_CASES: readonly DbCase[] = [
   },
   {
     field: 'advance_clock.days',
-    partition: 'absent, which the forward-only guard should catch, EB-09',
+    partition: 'absent, which the forward-only guard catches along with negative',
     input: 'field omitted',
     intent: () => ({ kind: 'advance_clock' }),
     expected: refused('ADA19', 'the demo clock only moves forward'),
-    defect: 'EB-09',
   },
 ];
 

@@ -297,6 +297,14 @@ first, and a known one still builds legs whose amounts are NULL.
 
 ## EB-07 `set_certification` with `status` absent leaks a NOT NULL violation
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. An absent status answers `ADA19 unknown certification status none given`.
+
+The entry below is the state before that change.
+
+
 **File:** `db/post.sql`, the `set_certification` branch
 
 **Reproduction**
@@ -373,6 +381,14 @@ passing empty, spaces-only, absent, one-character, padded and duplicate rows.
 ---
 
 ## EB-09 `advance_clock` with `days` absent leaks a NOT NULL violation
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. An absent `days` answers `ADA19 the demo clock only moves forward`.
+
+The entry below is the state before that change.
+
 
 **File:** `db/post.sql`, the `advance_clock` branch
 

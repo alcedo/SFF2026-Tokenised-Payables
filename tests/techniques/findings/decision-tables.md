@@ -330,6 +330,15 @@ The line is not wrong, it is unreachable on the path its comment describes.
 
 ## 7. `accept_bid` with an unknown `bidId` reports the buyer as ineligible
 
+**FIXED** as part of the NULL-guard family. `accept_bid` answers
+`ADA11 no such bid`, checked after the listing and before the bid status, the
+self-trade check and the eligibility check that used to answer first. Seven
+other sites shared the root cause and moved with it; see finding 4 of
+`findings/model-based.md` for the list.
+
+The entry below is the state before that change.
+
+
 File: `db/post.sql` lines 608 to 627.
 
 `SELECT * INTO v_bid FROM app.bid WHERE id = ...` leaves every field NULL when

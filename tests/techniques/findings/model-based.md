@@ -89,8 +89,12 @@ and asserts it.
 | lifecycle states | **6** | 6 |
 | command classes | **18** | 18 |
 | (state, command) pairs | **75** | 75 reachable |
-| commands executed | **6,121** | across 25 sequences |
-| accepted / refused | 2,348 / 3,773 | |
+| commands executed | **6,194** | across 25 sequences |
+| accepted / refused | 1,430 / 4,764 | |
+
+The accepted share fell from 2,348 as the fixes below landed. A command the
+system used to take silently, a `cancel_listing` naming nothing or a
+`withdraw_bid` against a bid that was never placed, is a refusal now.
 
 Pair space is 7 subject states (`none` plus the six lifecycle states) by 18
 commands, so 126 in total, of which **51 are unreachable by construction** and
@@ -113,8 +117,13 @@ ever reached, so a wrong exclusion fails the run rather than inflating the score
   they have no "names nothing" form and cannot pair with `none`.
 
 Refusal codes reached, asserted as an exact set:
-`23502 23505 23514 ADA01 ADA11 ADA12 ADA15 ADA16 ADA17 ADA19 ADA20 ADA21 ADA22
-ADA23 ADA24 ADA25 ADA26 ADA34`.
+`23505 23514 ADA01 ADA11 ADA12 ADA15 ADA16 ADA17 ADA19 ADA20 ADA21 ADA22 ADA23
+ADA24 ADA25 ADA26 ADA34 ADA35 ADA36 ADA37 ADA38 ADA39`.
+
+`23502` has left the set. Every route to it was a guard that did not fire on a
+row that was not found or a field that was not given, and each of those now
+answers with a code of its own. A raw NOT NULL violation is no longer something
+the write surface can produce.
 
 **Not reached: `ADA33`,** the programme limit. The fixture anchor's
 `programme_limit_base` is 250,000,000,000 and generated faces are 1,000,000 or
@@ -161,6 +170,14 @@ mints listing and bid ids. It creates the payable and reads the id back by
 
 ## 2. A receipt decision before issuance raises a raw check-constraint violation
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `accept_receipt` and `reject_receipt` answer `ADA15 payable <ref> has not been issued yet, so there is nothing to take delivery of`, checked before the already-decided case.
+
+The entry below is the state before that change.
+
+
 **File:** `db/post.sql`, the `accept_receipt` / `reject_receipt` branch.
 
 **Suite cases:** `names the payable when a receipt is accepted before issuance`,
@@ -200,6 +217,14 @@ production code and was not touched.
 
 ## 3. `transfer` and `publish_listing` on a never-issued payable surface NOT NULL violations
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. Both answer `ADA15 payable <ref> has not been issued yet`, checked as soon as `ledger.payable_asset` comes back NULL, which is before the quantity, maturity and receipt checks.
+
+The entry below is the state before that change.
+
+
 **File:** `db/post.sql`, the `transfer` and `publish_listing` branches.
 
 **Suite case:** `refuses a transfer of a payable that was never issued`.
@@ -234,6 +259,14 @@ market state.
 ---
 
 ## 4. `cancel_listing` and `withdraw_bid` accept ids that match nothing
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `cancel_listing` answers `ADA11 no such listing`. `withdraw_bid` reads the row, answers `ADA11 no such bid` for an id matching nothing and `ADA11 bid is <status>` for one that is not placed, so neither writes a journal entry for an event that did not happen.
+
+The entry below is the state before that change.
+
 
 **File:** `db/post.sql`, the `cancel_listing` and `withdraw_bid` branches.
 
@@ -271,6 +304,14 @@ it that describe events that did not happen.
 
 ## 5. `place_bid` on a listing that does not exist raises NOT NULL, not `ADA11`
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `place_bid` answers `ADA11 no such listing`, matching `accept_bid`.
+
+The entry below is the state before that change.
+
+
 **File:** `db/post.sql`, the `place_bid` branch.
 
 **Suite case:** `refuses a bid on a listing that does not exist`.
@@ -297,6 +338,14 @@ was not found has a NULL status. `accept_bid` is the only one that checks.
 ---
 
 ## 6. `accept_bid` on a bid that does not exist blames the bidder
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `accept_bid` answers `ADA11 no such bid`, checked after the listing and before the bid status, the self-trade check and the eligibility check that used to answer first.
+
+The entry below is the state before that change.
+
 
 **File:** `db/post.sql`, the `accept_bid` branch.
 
