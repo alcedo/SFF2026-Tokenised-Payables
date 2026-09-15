@@ -1717,7 +1717,7 @@ describe('model-based coverage of the payable workflow', () => {
 // --- what the model had to bend to fit --------------------------------------
 
 /**
- * Eight behaviours the model predicts because the ledger does them, not because
+ * Ten behaviours the model predicts because the ledger does them, not because
  * they look right.
  *
  * The property above is green only because the model reproduces each of these,
@@ -1863,6 +1863,64 @@ describe('behaviours the model reproduces but would not choose', () => {
     });
     expect(result).toMatchObject({ ok: false, code: 'ADA11' });
   });
+
+  it.fails('does not stamp a confirmed transaction hash on a transfer that moved nothing', async () => {
+    const result = await post(db.pool, {
+      kind: 'transfer',
+      payableId: listedPayable,
+      fromWallet: sellerWallet,
+      toWallet: sellerWallet,
+      quantityBase: '1000',
+    });
+    expect(result, 'a self-transfer is accepted').toMatchObject({ ok: true });
+    const entryId = result.ok ? String(result.receipt.entryId) : '';
+    const { rows } = await db.pool.query<{ legs: number; hash: string | null }>(
+      `SELECT (SELECT count(*) FROM ledger.journal_leg l WHERE l.entry_id = e.id)::int AS legs,
+              e.chain_tx_hash AS hash
+         FROM ledger.journal_entry e WHERE e.id = $1`,
+      [entryId],
+    );
+    expect(rows[0]).toEqual({ legs: 0, hash: null });
+  });
+
+  it.fails('names maturity when a draft is issued after its own maturity date', async () => {
+    // Its own database: the clock is global and monotone, and advancing it here
+    // would decide the outcome of every case above for the wrong reason.
+    const own = await freshDatabase('model_based_late_issue', 'fixtures');
+    try {
+      const real = await bootReal(own);
+      const wallet = real.wallets.find((w) => w.label === real.suppliers[0]!.name)!.address;
+      await post(own.pool, {
+        kind: 'create_payable',
+        ref: 'LATE-1',
+        supplierId: real.suppliers[0]!.id,
+        invoiceRef: 'LATE-INV-1',
+        faceBase: '1000000',
+        termsDays: 2,
+      });
+      const payableId = (await own.pool.query<{ id: string }>(
+        `SELECT id::text FROM app.payable WHERE ref = 'LATE-1'`,
+      )).rows[0]!.id;
+      for (const intent of [
+        { kind: 'submit', payableId },
+        { kind: 'approve', payableId },
+        { kind: 'grade', payableId, grade: 'A' },
+        { kind: 'certify', payableId },
+        { kind: 'advance_clock', days: 30 },
+      ]) {
+        expect(await post(own.pool, intent), `setup: ${intent.kind}`).toMatchObject({ ok: true });
+      }
+      const result = await post(own.pool, {
+        kind: 'issue_payable',
+        payableId,
+        toWallet: wallet,
+        tokenId: 11,
+      });
+      expect(result).toMatchObject({ ok: false, code: 'ADA12' });
+    } finally {
+      await own.close();
+    }
+  }, 60_000);
 
   it('leaves the books balanced after every one of those refusals', async () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
