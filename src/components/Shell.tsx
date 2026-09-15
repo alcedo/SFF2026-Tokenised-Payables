@@ -13,11 +13,6 @@ import { deriveNextAction } from '@/core/next-action';
 import { deriveTabCounts, tabCount } from '@/core/tab-badges';
 import { readBalances, readPersonas, readWorld } from '@/db/read';
 
-/**
- * The next-step strip is derived here so it follows the acting persona, not the
- * route. Balances stay in the header because PRD §10 wants them visible
- * whenever a payment is possible.
- */
 export async function Shell({ children }: { children: React.ReactNode }) {
   const [persona, personas, world] = await Promise.all([
     currentPersona(),
