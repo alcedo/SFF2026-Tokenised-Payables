@@ -59,3 +59,16 @@ export function deriveTabCounts(snapshot: NextActionSnapshot): TabCounts {
   }
   return counts;
 }
+
+export function tabCount(counts: TabCounts, href: string): number | undefined {
+  switch (href) {
+    case '/adata/approvals':
+    case '/adata/settlement':
+    case '/supplier':
+    case '/supplier/offers':
+    case '/admin/grading':
+      return counts[href];
+    default:
+      return undefined;
+  }
+}

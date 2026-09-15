@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { NextActionHolding, NextActionPayable, NextActionSnapshot } from '../next-action';
 import type { Role } from '../lifecycle';
-import { deriveTabCounts } from '../tab-badges';
+import { deriveTabCounts, tabCount } from '../tab-badges';
 
 function actor(role: Role, wallet = '0xsupplier'): NextActionSnapshot['actor'] {
   return { role, name: 'Test', wallet };
@@ -134,5 +134,26 @@ describe('deriveTabCounts', () => {
 
   it('hides every badge for an empty admin', () => {
     expect(deriveTabCounts(empty('straitsx_admin'))).toEqual({});
+  });
+
+  it('looks up a count by href and ignores tabs that cannot badge', () => {
+    const counts = deriveTabCounts({
+      actor: actor('adata_checker'),
+      payables: [
+        payable({
+          id: 'p1',
+          ref: 'TP-OVERDUE',
+          storedStatus: 'issued',
+          status: 'overdue',
+          daysRemaining: -1,
+          grade: 'A',
+        }),
+      ],
+      holdings: [],
+      listings: [],
+    });
+    expect(tabCount(counts, '/adata/settlement')).toBe(1);
+    expect(tabCount(counts, '/adata')).toBeUndefined();
+    expect(tabCount(counts, '/adata/create')).toBeUndefined();
   });
 });

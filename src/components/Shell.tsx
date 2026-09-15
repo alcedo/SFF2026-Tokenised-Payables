@@ -5,10 +5,12 @@ import { ExplorerHost } from './explorer/ExplorerHost';
 import { ExplorerOpenButton } from './explorer/ExplorerOpenButton';
 import { NextActionStrip } from './NextActionStrip';
 import { Address } from './primitives';
-import { loadNextAction } from '@/app/next-action-data';
+import { loadNextActionSnapshot } from '@/app/next-action-data';
 import { currentPersona, navFor } from '@/app/session';
-import { formatUnits } from '@/core/money';
 import { formatClock } from '@/core/clock';
+import { formatUnits } from '@/core/money';
+import { deriveNextAction } from '@/core/next-action';
+import { deriveTabCounts, tabCount } from '@/core/tab-badges';
 import { readBalances, readPersonas, readWorld } from '@/db/read';
 
 /**
@@ -22,10 +24,12 @@ export async function Shell({ children }: { children: React.ReactNode }) {
     readPersonas(),
     readWorld(),
   ]);
-  const [balances, next] = await Promise.all([
+  const [balances, snapshot] = await Promise.all([
     readBalances(persona.wallet),
-    loadNextAction(persona, world),
+    loadNextActionSnapshot(persona, world),
   ]);
+  const next = deriveNextAction(snapshot);
+  const counts = deriveTabCounts(snapshot);
   const nav = navFor(persona);
 
   return (
@@ -67,15 +71,24 @@ export async function Shell({ children }: { children: React.ReactNode }) {
 
         <div className="chrome-secondary mx-auto max-w-[1600px] px-3">
           <nav className="chrome-nav gap-0.5">
-            {nav.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="border-b-2 border-transparent px-2.5 py-1.5 text-[12.5px] text-ink-muted hover:border-rule-strong hover:text-ink"
-              >
-                {item.label}
-              </Link>
-            ))}
+            {nav.map((item) => {
+              const count = tabCount(counts, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="inline-flex items-baseline gap-1 border-b-2 border-transparent px-2.5 py-1.5 text-[12.5px] text-ink-muted hover:border-rule-strong hover:text-ink"
+                  aria-label={count != null ? `${item.label}, ${count} waiting` : undefined}
+                >
+                  {item.label}
+                  {count != null ? (
+                    <span className="num chrome-nav-count" aria-hidden="true">
+                      {count}
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
           </nav>
           <div className="chrome-meta">
             <ExplorerOpenButton />
