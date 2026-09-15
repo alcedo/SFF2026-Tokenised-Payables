@@ -59,6 +59,14 @@ form to show the grouping is the whole of the problem:
 parseUnits(formatUnits(value, 4).replace(/,/g, '')) === value  // holds for all values, both signs
 ```
 
+**Update after merging main.** `src/core/input.ts`, added on main by PR #11
+while this branch was running, calls `stripCommas` before `parseUnits` in
+`parseAmount`. That is the repaired form above, applied at the form boundary,
+so a figure pasted off a screen into a form now parses. The asymmetry inside
+`money.ts` is unchanged: `formatUnits` output still does not round-trip through
+`parseUnits`, and any future caller that skips `input.ts` inherits the defect.
+The failing case stays as the record of that.
+
 ---
 
 ## 2. `parseFilter` throws on a large size bound, which no other query value does
