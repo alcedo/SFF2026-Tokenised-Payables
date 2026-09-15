@@ -75,12 +75,12 @@ deployment does, on a database nobody has ever seeded.
 3. **Deploy.** The first request against a database with no `app.world` row
    loads `db/schema.sql` and `db/post.sql` if the schema is missing, then
    `db/fixtures.sql`: ADATA, StraitsX, two suppliers, two funded lenders, the
-   five acting accounts, and a 24-invoice ERP register. That is a programme
-   that has not issued anything yet rather than the PRD §12 catalogue. Both
-   ways into create-payable work on arrival, so you do not have to onboard
-   anyone first. Reset world offers both worlds: `db/seed.sql` for the full
-   demo with its history, listings and bid book, and `db/fixtures.sql` to get
-   this one back. There is no `psql` step.
+   seven accounts covering the five roles, and a 24-invoice ERP register. That
+   is a programme that has not issued anything yet rather than the PRD §12
+   catalogue. Both ways into create-payable work on arrival, so you do not
+   have to onboard anyone first. Reset world offers both worlds: `db/seed.sql`
+   for the full demo with its history, listings and bid book, and
+   `db/fixtures.sql` to get this one back. There is no `psql` step.
 4. **Set `ADATA_RESET_PIN`** if the URL is going to be public. Reset rebuilds
    the world for *everyone* connected, so it is already restricted to the
    StraitsX admin persona and needs the word RESET typed to arm. But the
