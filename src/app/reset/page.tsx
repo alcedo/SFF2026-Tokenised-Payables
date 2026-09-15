@@ -2,7 +2,25 @@ import Link from 'next/link';
 
 import { Button, Notice, Panel } from '@/components/primitives';
 import { currentPersona } from '@/app/session';
+import { WORLD_TARGETS, type WorldTarget } from '@/db/reset';
 import { resetWorld } from './action';
+
+/**
+ * What each world is called in front of a room. "Fixtures" is a file name, so
+ * the copy says what the world holds instead.
+ */
+const WORLDS: Record<WorldTarget, { label: string; holds: string }> = {
+  seed: {
+    label: 'Demo catalogue',
+    holds:
+      'Five lots on the market with bids against them, one position already settled and one overdue. The world the runbook is written for.',
+  },
+  fixtures: {
+    label: 'Minimal world',
+    holds:
+      'ADATA, StraitsX, two suppliers, two funded lenders and the 24-invoice ERP register. Nothing issued, listed or traded yet, which is how a new deployment starts.',
+  },
+};
 
 /**
  * PRD §11: "Because the world is shared, show that reset and time changes
@@ -29,7 +47,7 @@ export default async function ResetPage({
         <div>
           <h1 className="text-[15px] font-semibold">Reset world</h1>
           <p className="text-[11.5px] text-ink-muted">
-            Restores the seeded world for every connected session.
+            Rebuilds the world for every connected session.
           </p>
         </div>
         <Panel title="Not available to you">
@@ -57,7 +75,7 @@ export default async function ResetPage({
       <div>
         <h1 className="text-[15px] font-semibold">Reset world</h1>
         <p className="text-[11.5px] text-ink-muted">
-          Restores the seeded world for every connected session.
+          Rebuilds the world for every connected session.
         </p>
       </div>
       <Panel title="Confirm">
@@ -75,18 +93,47 @@ export default async function ResetPage({
               That persona cannot reset the world. Nothing was changed.
             </Notice>
           ) : null}
+          {e === 'target' ? (
+            <Notice tone="critical">
+              Choose which world to restore. Nothing was changed.
+            </Notice>
+          ) : null}
 
           <Notice tone="caution">
-            This restores the complete seed state, including the demo clock and the mocked FX rate.
-            The world is shared, so it affects every connected session, not just this tab.
+            This rebuilds the world from the schema up, including the demo clock and the mocked FX
+            rate. The world is shared, so it affects every connected session, not just this tab.
           </Notice>
           <p className="text-[12.5px] text-ink-muted">
             Everything issued, listed, traded, transferred or settled since the last reset is
-            discarded. The seeded entities, listings, balances and histories come back exactly as
-            they were at T0, and T0 becomes today.
+            discarded, whichever world you choose below. That world comes back exactly as it starts,
+            the clock returns to T0, and T0 becomes today.
           </p>
 
           <form action={resetWorld} className="space-y-3">
+            <fieldset className="space-y-1.5">
+              <legend className="mb-1 text-[10.5px] tracking-wide text-ink-muted uppercase">
+                World to restore
+              </legend>
+              {WORLD_TARGETS.map((target) => (
+                <label key={target} className="flex items-start gap-2">
+                  <input
+                    type="radio"
+                    name="target"
+                    value={target}
+                    defaultChecked={target === 'seed'}
+                    aria-label={WORLDS[target].label}
+                    className="mt-[3px]"
+                  />
+                  <span>
+                    <span className="block text-[12.5px]">{WORLDS[target].label}</span>
+                    <span className="block text-[11.5px] text-ink-muted">
+                      {WORLDS[target].holds}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+
             <label className="block">
               <span className="mb-0.5 block text-[10.5px] tracking-wide text-ink-muted uppercase">
                 Type RESET to confirm
