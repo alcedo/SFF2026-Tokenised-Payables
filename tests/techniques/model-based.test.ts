@@ -1431,6 +1431,22 @@ class SettleMaturity extends Step {
 
 // --- booting the real world -------------------------------------------------
 
+/**
+ * A database of this suite's own, with the pool's idle-error event absorbed.
+ *
+ * `Database.close()` ends the pool and then drops the database `WITH (FORCE)`,
+ * which terminates any backend the pool has not finished releasing. That
+ * arrives as a 57P01 on the pool's `error` event, and with no listener node
+ * reports it as an unhandled error that fails the file after the test has
+ * already passed. Query failures still surface through `post()`, which is where
+ * this suite reads them.
+ */
+async function freshWorld(suite: string): Promise<Database> {
+  const db = await freshDatabase(suite, 'fixtures');
+  db.pool.on('error', () => {});
+  return db;
+}
+
 async function bootReal(db: Database): Promise<Real> {
   const wallets = await db.pool.query<{
     address: string;
@@ -1509,6 +1525,7 @@ const leaning = (max: number) =>
 const payableIndex = leaning(5);
 const marketIndex = leaning(4);
 const sizeMode = fc.constantFrom<SizeMode>('zero', 'all', 'half', 'over', 'one');
+
 /** Listings stay affordable, so that buy-now and acceptance can actually settle. */
 const listPrice = fc.bigInt({ min: 1n, max: 5_000n });
 
@@ -1524,11 +1541,14 @@ const bidPrice = fc.oneof(
 );
 
 /**
- * Two runs in three aim at a payable that is ready for the command; the third
- * aims blind. The blind third is what keeps the out-of-order commands, and so
- * the refusal codes, in the generated sequences.
+ * True two times in three.
+ *
+ * Every switch that decides whether a command aims at a subject ready for it,
+ * names a referent that exists, or carries the field it needs draws from this.
+ * The remaining third is what keeps the out-of-order commands, and so the
+ * refusal codes, in the generated sequences.
  */
-const guided = fc.oneof(
+const mostly = fc.oneof(
   { weight: 2, arbitrary: fc.constant(true) },
   { weight: 1, arbitrary: fc.constant(false) },
 );
@@ -1552,19 +1572,19 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     })
     .map((p) => new CreatePayable(p.supplier, p.face, p.terms, p.flaw));
 
-  const aim = fc.record({ i: payableIndex, g: guided });
+  const aim = fc.record({ i: payableIndex, g: mostly });
   const submit = aim.map((c) => new Advance('submit', 'pending_approval', c.i, c.g));
   const approve = aim.map((c) => new Advance('approve', 'approved', c.i, c.g));
   const certify = aim.map((c) => new Advance('certify', 'certified', c.i, c.g));
   const grade = fc
     .record({
       i: payableIndex,
-      g: guided,
+      g: mostly,
       letter: fc.constantFrom('AAA' as const, 'AA' as const, 'A' as const),
     })
     .map((c) => new Grade(c.i, c.letter, c.g));
   const issue = fc
-    .record({ i: payableIndex, w: walletIndex, g: guided })
+    .record({ i: payableIndex, w: walletIndex, g: mostly })
     .map((c) => new Issue(c.i, c.w, c.g));
   const acceptReceipt = aim.map((c) => new Receipt('accept_receipt', c.i, c.g));
   const rejectReceipt = aim.map((c) => new Receipt('reject_receipt', c.i, c.g));
@@ -1574,33 +1594,33 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
   const transfer = fc
     .record({
       i: payableIndex, from: walletIndex, to: walletIndex, q: sizeMode,
-      holder: guided, g: guided,
+      holder: mostly, g: mostly,
     })
     .map((c) => new Transfer(c.i, c.from, c.to, c.q, c.holder, c.g));
   const publish = fc
     .record({
       i: payableIndex, s: walletIndex, q: sizeMode, p: listPrice,
-      holder: guided, g: guided,
+      holder: mostly, g: mostly,
     })
     .map((c) => new PublishListing(c.i, c.s, c.q, c.p, c.holder, c.g));
   const placeBid = fc
-    .record({ i: marketIndex, b: walletIndex, p: bidPrice, open: guided })
+    .record({ i: marketIndex, b: walletIndex, p: bidPrice, open: mostly })
     .map((c) => new PlaceBid(c.i, c.b, c.p, c.open));
   // Withdrawal and acceptance draw their subject blind half the time rather
   // than two thirds: a bid on a listing whose payable has since settled is only
   // ever reachable through the blind arm, and it is the state these two say the
   // least about anywhere else.
   const withdrawBid = fc
-    .record({ i: marketIndex, known: guided, open: fc.boolean() })
+    .record({ i: marketIndex, known: mostly, open: fc.boolean() })
     .map((c) => new WithdrawBid(c.i, c.known, c.open));
   const acceptBid = fc
     .record({ i: marketIndex, open: fc.boolean() })
     .map((c) => new AcceptBid(c.i, c.open));
   const buyNow = fc
-    .record({ i: marketIndex, b: walletIndex, open: guided })
+    .record({ i: marketIndex, b: walletIndex, open: mostly })
     .map((c) => new BuyNow(c.i, c.b, c.open));
   const cancel = fc
-    .record({ i: marketIndex, known: guided, open: guided })
+    .record({ i: marketIndex, known: mostly, open: mostly })
     .map((c) => new CancelListing(c.i, c.known, c.open));
   // The large arm is what carries a run from its market phase into its matured
   // phase, where settle_maturity and the ADA12 refusals live.
@@ -1612,7 +1632,7 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     )
     .map((d) => new AdvanceClock(d));
   const settle = fc
-    .record({ i: payableIndex, funded: guided, g: guided })
+    .record({ i: payableIndex, funded: mostly, g: mostly })
     .map((c) => new SettleMaturity(c.i, c.funded, c.g));
 
   // Repetition is the weighting: fc.commands draws uniformly from this list, so
@@ -1643,7 +1663,7 @@ describe('model-based coverage of the payable workflow', () => {
         fc.asyncProperty(
           fc.commands(commandArbitraries(), { maxCommands: 600, size: 'max' }),
           async (commands) => {
-            const db = await freshDatabase('model_based', 'fixtures');
+            const db = await freshWorld('model_based');
             try {
               const real = await bootReal(db);
               const model = await initialModel(real);
@@ -1738,7 +1758,7 @@ describe('behaviours the model reproduces but would not choose', () => {
   const NOWHERE = '00000000-0000-4000-f000-0000000000ee';
 
   beforeAll(async () => {
-    db = await freshDatabase('model_based_defects', 'fixtures');
+    db = await freshWorld('model_based_defects');
     const real = await bootReal(db);
     sellerWallet = real.wallets.find((w) => w.label === real.suppliers[0]!.name)!.address;
     lenderWallet = real.wallets.find((w) => w.institutional)!.address;
@@ -1886,7 +1906,7 @@ describe('behaviours the model reproduces but would not choose', () => {
   it.fails('names maturity when a draft is issued after its own maturity date', async () => {
     // Its own database: the clock is global and monotone, and advancing it here
     // would decide the outcome of every case above for the wrong reason.
-    const own = await freshDatabase('model_based_late_issue', 'fixtures');
+    const own = await freshWorld('model_based_late_issue');
     try {
       const real = await bootReal(own);
       const wallet = real.wallets.find((w) => w.label === real.suppliers[0]!.name)!.address;
