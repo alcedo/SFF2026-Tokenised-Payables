@@ -156,7 +156,11 @@ try {
   );
   say(`the invoice reference opens pre-filled with ${suggested}`);
 
-  const payableRef = (await page.locator('body').innerText()).match(/TP-2026-\d{4}/)?.[0];
+  // Read the reference off the summary that shows it, not off the page. The
+  // chrome strip names a payable of its own on every screen, so a body-wide
+  // match picks whichever the acting persona is being nudged towards.
+  const summary = page.locator('dl', { hasText: 'New reference' }).first();
+  const payableRef = (await summary.innerText()).match(/TP-2026-\d{4}/)?.[0];
   if (!payableRef) throw new Error('manual entry showed no new payable reference');
 
   // Accept the suggestion untouched. If it collides with anything already on
