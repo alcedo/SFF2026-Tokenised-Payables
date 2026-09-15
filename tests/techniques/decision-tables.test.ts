@@ -206,7 +206,7 @@ async function buildPayable(pool: Pool, spec: BuildSpec): Promise<BuiltPayable> 
     LIFECYCLE_ORDER.indexOf(spec.upTo) >= LIFECYCLE_ORDER.indexOf(state);
 
   // The id is read back rather than supplied. Supplying one is refused by a
-  // foreign key at the idempotency gate; the case below records that defect.
+  // foreign key at the idempotency gate. The case below records that defect.
   await must(pool, {
     kind: 'create_payable',
     ref,
@@ -418,6 +418,66 @@ describe('table 1: issuance against certification and programme limit', () => {
 
   it('declares every combination of its four conditions', () => {
     expect(shapeOf(ISSUANCE_TABLE)).toEqual({ rows: 48, feasible: 24, infeasible: 24 });
+  });
+
+  it('treats a limit of zero as a cap of zero and a NULL limit as uncapped', async () => {
+    const supplier = world.suppliers[1];
+    await must(db.pool, {
+      kind: 'set_certification',
+      entityId: world.anchor.id,
+      status: 'certified',
+    });
+
+    const capped = await buildPayable(db.pool, {
+      supplierId: supplier.id,
+      faceBase: FACE,
+      termsDays: 90,
+      upTo: 'certified',
+    });
+    await must(db.pool, {
+      kind: 'set_programme_limit',
+      entityId: world.anchor.id,
+      limitBase: '0',
+    });
+    const outstanding = await scalar<bigint>(
+      db.pool,
+      `SELECT COALESCE(SUM(sup.outstanding_base), 0)::bigint AS value
+         FROM app.payable p
+         JOIN ledger.v_payable_supply sup ON sup.payable_id = p.id
+        WHERE p.anchor_id = $1`,
+      [world.anchor.id],
+    );
+    tokenSeq += 1;
+    const atZero = await post(db.pool, {
+      kind: 'issue_payable',
+      payableId: capped.id,
+      toWallet: supplier.wallet,
+      tokenId: tokenSeq,
+    });
+    expect(observe(atZero, await lifecycleOf(db.pool, capped.id))).toEqual(
+      refused(
+        'ADA33',
+        `issuing ${capped.ref} would take ${world.anchor.name} to ${
+          outstanding + BigInt(FACE)
+        } outstanding, over its 0 programme limit`,
+        'certified',
+      ),
+    );
+
+    await must(db.pool, {
+      kind: 'set_programme_limit',
+      entityId: world.anchor.id,
+      limitBase: null,
+    });
+    tokenSeq += 1;
+    const uncapped = await post(db.pool, {
+      kind: 'issue_payable',
+      payableId: capped.id,
+      toWallet: supplier.wallet,
+      tokenId: tokenSeq,
+    });
+    expect(observe(uncapped, await lifecycleOf(db.pool, capped.id))).toEqual(accepted('issued'));
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
   for (const row of ISSUANCE_TABLE) {
@@ -1110,7 +1170,7 @@ describe('table 3: bid acceptance', () => {
     }
 
     it(`${row.conditions} -> ${summarise(row.expected)}`, async () => {
-      // A wallet that must be short of funds has to be freshly onboarded: the
+      // A wallet that must be short of funds has to be freshly onboarded. The
       // fixture lenders are funded, and topping a wallet back down is not a
       // command this system has.
       const party: string = row.institutional
