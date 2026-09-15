@@ -283,6 +283,11 @@ The “Demo environment — no real funds” ribbon is always visible. Because t
 
 ## 12. Seed data
 
+> **Revised 2026-09-15.** The series lot was specified as twelve originators with entity
+> records for all of them, which meant twelve supplier organisations nobody could sign in
+> as. It now draws on the five interactive suppliers, one invoice each, at the same 180,000
+> face and the same single-holder rule. The reasoning is in `docs/ASSUMPTIONS.md`.
+
 Use fictional supplier names, invoice numbers, financials, grades, and histories. ADATA is the intentional named-anchor exception. Dates are relative to demo T0; fixed references are identifiers rather than live dates.
 
 | Reference | Original supplier(s) | Face (XUSD) | Days remaining at T0 | Grade | Ask (% of face) | Lender yield | Initial state |
@@ -290,13 +295,13 @@ Use fictional supplier names, invoice numbers, financials, grades, and histories
 | TP-2026-0143 | Ming Kuo Components | 1,200,000 | 30 | AAA | 99.42 | 7.1% | Issued / Listed |
 | TP-2026-0141 | Chien Yu Precision | 250,000 | 90 | AA | 97.85 | 8.9% | Issued / Listed |
 | TP-2026-0142 | Hsin Ta Electronics | 48,000 | 60 | A | 98.40 | 9.9% | Issued / Listed |
-| SERIES-2026-Q4-30D | 12 fictional suppliers; one current holder | 180,000 | 30 | A | 99.20 | 9.8% | Issued / Listed |
+| SERIES-2026-Q4-30D | 5 fictional suppliers; one current holder | 180,000 | 30 | A | 99.20 | 9.8% | Issued / Listed |
 | TP-2026-0128 | Yung Sheng Metals | 320,000 | — | AA | — | 9.2% realised annualised yield | Settled |
 | TP-2026-0119 | Fu Hsing Plastics | 75,000 | Past due | A | — | — | Overdue / showcase demo recovery |
 
 Listed yields are calculated from the remaining days and asks above, rounded to one decimal place. The settled row needs a historical purchase price and holding period that support the displayed 9.2%; overdue data needs an explicit due date and sample recovery timeline. Seeded listings are whole holdings so the five-minute runbook stays a full-invoice story; partial-quantity listing and transfer remain available in the live demo.
 
-Seed one ADATA preparer, one ADATA checker, three interactive supplier accounts, two institutional lenders (one bank and one fund), and one StraitsX admin. Include fictional supplier entity records and wallets for all remaining invoice originators. Pre-fund both lenders in all four assets, with one predominantly funded in USDC and the other in XUSD, and add portfolio history.
+Seed one ADATA preparer, one ADATA checker, five interactive supplier accounts, two institutional lenders (one bank and one fund), and one StraitsX admin. Every seeded organisation has a live account behind it, including every invoice originator: a supplier with no account can never accept delivery of what it is issued, so seeding one puts a name on screen that nobody can switch to or act as. Pre-fund both lenders in all four assets, with one predominantly funded in USDC and the other in XUSD, and add portfolio history.
 
 Also seed an **unissued ERP invoice** for the core runbook: XUSD 250,000, 90 days from issuance, payable to the active supplier. Give it a distinct invoice/payable reference so the pitch can issue and list a new position without colliding with the existing listed example. Include a suggested 97.85% price and two competing bids on another seeded listing to make the bid book immediately visible.
 

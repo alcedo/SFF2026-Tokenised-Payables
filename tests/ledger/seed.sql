@@ -86,10 +86,22 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS  TP-2026-0119 is % days past due and unpaid', -v_n;
 
-  -- PRD §12: twelve fictional suppliers, one current holder.
+  -- PRD §12: "5 fictional suppliers; one current holder". One invoice from each
+  -- interactive supplier, so no organisation exists without an account behind
+  -- it. The section was revised from twelve to five and docs/ASSUMPTIONS.md
+  -- records why; the face and the single-holder rule never changed, which is
+  -- what the lot is for.
   SELECT count(*) INTO v_n FROM app.payable p
     JOIN app.series s ON s.id = p.series_id WHERE s.ref = 'SERIES-2026-Q4-30D';
-  IF v_n <> 12 THEN RAISE EXCEPTION 'FAIL: the series has % members, expected 12', v_n; END IF;
+  IF v_n <> 5 THEN RAISE EXCEPTION 'FAIL: the series has % members, expected 5', v_n; END IF;
+
+  -- Every member comes from a different supplier, or it is one invoice split
+  -- five ways rather than a bundle of five suppliers' paper.
+  SELECT count(DISTINCT p.original_supplier_id) INTO v_n FROM app.payable p
+    JOIN app.series s ON s.id = p.series_id WHERE s.ref = 'SERIES-2026-Q4-30D';
+  IF v_n <> 5 THEN
+    RAISE EXCEPTION 'FAIL: the series draws on % suppliers, expected 5', v_n;
+  END IF;
 
   SELECT count(DISTINCT a.wallet_address) INTO v_n
     FROM app.payable p
@@ -99,7 +111,7 @@ BEGIN
     JOIN ledger.account a ON a.id = b.account_id AND a.class = 'wallet'
    WHERE s.ref = 'SERIES-2026-Q4-30D';
   IF v_n <> 1 THEN RAISE EXCEPTION 'FAIL: the series has % holders, expected 1', v_n; END IF;
-  RAISE NOTICE 'PASS  the series bundles 12 invoices under a single holder';
+  RAISE NOTICE 'PASS  the series bundles 5 suppliers'' invoices under a single holder';
 
   -- PRD §12: at least two competing bids so the bid book is visible on arrival.
   SELECT count(*) INTO v_n FROM app.bid b
@@ -109,14 +121,38 @@ BEGIN
   IF v_n < 2 THEN RAISE EXCEPTION 'FAIL: TP-2026-0142 has % open bids, expected 2 or more', v_n; END IF;
   RAISE NOTICE 'PASS  a seeded listing already carries competing bids';
 
-  -- A public demo is judged on whether the data looks like a real programme.
+  -- Depth, held to what PRD §12 names rather than to a bigger round number.
+  -- The seed is deliberately small: every ledger entry it writes is one more
+  -- row a presenter scrolls past on the explorer, and the screens are judged on
+  -- whether each has something real on it, not on volume.
   SELECT count(*) INTO v_n FROM app.payable WHERE series_id IS NULL;
-  IF v_n < 12 THEN RAISE EXCEPTION 'FAIL: only % standalone payables seeded', v_n; END IF;
+  IF v_n < 7 THEN RAISE EXCEPTION 'FAIL: only % standalone payables seeded', v_n; END IF;
   SELECT count(DISTINCT grade) INTO v_n FROM app.payable WHERE grade IS NOT NULL;
   IF v_n <> 3 THEN RAISE EXCEPTION 'FAIL: % grades seeded, expected all of AAA, AA and A', v_n; END IF;
   SELECT count(*) INTO v_n FROM app.payable WHERE lifecycle_status = 'settled';
-  IF v_n < 3 THEN RAISE EXCEPTION 'FAIL: only % settled payables for portfolio history', v_n; END IF;
+  IF v_n < 1 THEN RAISE EXCEPTION 'FAIL: no settled payable for portfolio history'; END IF;
   RAISE NOTICE 'PASS  the seed has depth: payables across all three grades, with history';
+
+  -- Every organisation is one somebody can act as. A supplier with no account
+  -- can never accept delivery of what it is issued, so a seeded one is a name
+  -- on a screen nobody can reach.
+  SELECT count(*) INTO v_n FROM app.entity e
+   WHERE NOT EXISTS (SELECT 1 FROM app.app_user u
+                      WHERE u.entity_id = e.id AND u.deactivated_at IS NULL);
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: % seeded organisations have no account behind them', v_n;
+  END IF;
+  SELECT count(*) INTO v_n FROM app.entity WHERE entity_type = 'supplier';
+  IF v_n <> 5 THEN RAISE EXCEPTION 'FAIL: % suppliers seeded, expected 5', v_n; END IF;
+  RAISE NOTICE 'PASS  five suppliers, every one of them with a live account';
+
+  -- The whole point of the trim. The explorer is a scrollable audit trail, and
+  -- a seed that writes hundreds of entries buries the handful the demo creates.
+  SELECT count(*) INTO v_n FROM ledger.journal_entry;
+  IF v_n > 60 THEN
+    RAISE EXCEPTION 'FAIL: the seed wrote % ledger entries, budget is 60', v_n;
+  END IF;
+  RAISE NOTICE 'PASS  the whole seeded world costs % ledger entries', v_n;
 
   -- PRD §6's partial-quantity story needs a split holding to exist on arrival.
   SELECT count(*) INTO v_n FROM (

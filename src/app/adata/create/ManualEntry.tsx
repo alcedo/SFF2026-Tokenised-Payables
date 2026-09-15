@@ -4,10 +4,17 @@
  * PRD §8 screen 2's other path: "manual entry or Import from ERP."
  *
  * Manual entry exists for the invoice the ERP picker does not have, so it asks
- * for exactly the four facts the ERP row would have supplied — supplier,
- * invoice reference, face, terms — and derives everything else. The derived
- * values are shown as they are typed, because a preparer entering 90-day terms
- * should see the maturity date before they commit, not after.
+ * for the four facts the ERP row would have supplied (supplier, invoice
+ * reference, face, terms) and derives everything else. The derived values are
+ * shown as they are typed, because a preparer entering 90-day terms should see
+ * the maturity date before they commit, not after.
+ *
+ * The invoice reference arrives filled in. It is the one field of the four with
+ * no natural default and a uniqueness rule behind it, so an empty box asks the
+ * preparer to invent a number that will not collide with the several hundred
+ * already on the books. The suggestion continues the series instead, and is
+ * ordinary editable text: the invoice being copied in has a real number, and
+ * that number should win whenever the preparer has it.
  *
  * Nothing is validated twice. The form stops obvious nonsense from being
  * submittable, and `ledger.post()` refuses the rest with a message the button
@@ -32,18 +39,25 @@ export interface SupplierOption {
 export function ManualEntry({
   suppliers,
   worldDate,
-  nextSequence,
+  payableRef,
+  suggestedInvoiceRef,
 }: {
   suppliers: SupplierOption[];
   worldDate: string;
-  nextSequence: number;
+  payableRef: string;
+  suggestedInvoiceRef: string;
 }) {
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? '');
-  const [invoiceRef, setInvoiceRef] = useState('');
+  // What the preparer typed, or null while they are happy with the suggestion.
+  // Storing the override rather than a copy of the suggestion means a newly
+  // created payable moves the suggestion on without discarding the supplier,
+  // face and terms already entered, and "have they touched this?" is a null
+  // check rather than a string comparison.
+  const [override, setOverride] = useState<string | null>(null);
+  const invoiceRef = override ?? suggestedInvoiceRef;
   const [amount, setAmount] = useState('');
   const [terms, setTerms] = useState('90');
 
-  const ref = `TP-2026-${String(nextSequence).padStart(4, '0')}`;
   const supplier = suppliers.find((s) => s.id === supplierId) ?? null;
 
   // Display units in, base units out, at the edge. Nothing downstream sees a
@@ -92,8 +106,13 @@ export function ManualEntry({
             autoComplete="off"
             className="w-full rounded-[3px] border border-rule-strong bg-surface px-2 py-1.5 text-[13px]"
             value={invoiceRef}
-            onChange={(e) => setInvoiceRef(e.target.value)}
+            onChange={(e) => setOverride(e.target.value)}
           />
+          <span className="mt-0.5 block text-[10.5px] text-ink-faint">
+            {override === null
+              ? `Suggested: the next free number after the ones already on the books. Type over it with the supplier's own reference.`
+              : 'Must not already be financed for this supplier.'}
+          </span>
         </label>
 
         <label className="block">
@@ -126,7 +145,7 @@ export function ManualEntry({
       </div>
 
       <dl className="mt-3 grid gap-x-6 gap-y-1 rounded-[4px] border border-rule bg-surface-sunken p-2.5 text-[12.5px] md:grid-cols-2">
-        <Row label="New reference">{ref}</Row>
+        <Row label="New reference">{payableRef}</Row>
         <Row label="Anchor obligor">ADATA Technology Co., Ltd.</Row>
         <Row label="Face value">
           {faceBase === null ? (
@@ -148,14 +167,14 @@ export function ManualEntry({
             label="Create payable"
             confirm={
               <>
-                Creates {ref} as a draft against {supplier.name}&apos;s invoice{' '}
+                Creates {payableRef} as a draft against {supplier.name}&apos;s invoice{' '}
                 {invoiceRef.trim()} for {formatUnits(faceBase as BaseUnits, 2)} XUSD, maturing{' '}
                 {maturity}. It then needs a checker&apos;s approval and StraitsX certification
                 before it can be issued.
               </>
             }
             action={createPayableManually}
-            args={[ref, supplierId, invoiceRef.trim(), String(faceBase), String(termsDays)]}
+            args={[payableRef, supplierId, invoiceRef.trim(), String(faceBase), String(termsDays)]}
           />
         ) : (
           <Notice tone="info">

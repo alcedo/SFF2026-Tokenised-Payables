@@ -57,6 +57,12 @@ interface Transition {
    */
   readonly actors: readonly Role[];
   readonly label: string;
+  /**
+   * The same move in the imperative, for the sentence that says what a queue is
+   * waiting for. `label` is the past tense the journal records after the fact;
+   * this is the ask, before anyone has acted.
+   */
+  readonly action: string;
 }
 
 /**
@@ -73,42 +79,49 @@ export const TRANSITIONS: Readonly<Record<LifecycleEvent, Transition>> = {
     to: 'pending_approval',
     actors: ['adata_preparer'],
     label: 'Submitted for approval',
+    action: 'submit it for approval',
   },
   approve: {
     from: 'pending_approval',
     to: 'approved',
     actors: ['adata_checker'],
     label: 'Approved by ADATA checker',
+    action: 'approve it',
   },
   certify: {
     from: 'approved',
     to: 'certified',
     actors: ['straitsx_admin'],
     label: 'Certified and graded by StraitsX',
+    action: 'certify it',
   },
   issue: {
     from: 'certified',
     to: 'issued',
     actors: ['adata_preparer', 'adata_checker', 'straitsx_admin'],
     label: 'Issued to supplier wallet',
+    action: 'issue it to the supplier',
   },
   mature: {
     from: 'issued',
     to: 'matured',
     actors: [],
     label: 'Reached maturity',
+    action: 'reach maturity',
   },
   settle: {
     from: 'matured',
     to: 'settled',
     actors: ['adata_preparer', 'adata_checker'],
     label: 'Settled to holders',
+    action: 'settle it to the holders',
   },
   mark_overdue: {
     from: 'matured',
     to: 'overdue',
     actors: [],
     label: 'Passed due date unpaid',
+    action: 'mark it overdue',
   },
 };
 
@@ -134,6 +147,25 @@ export function isDue(status: LifecycleStatus): boolean {
   return status === 'matured' || status === 'overdue';
 }
 
+/**
+ * How a role is written inside a sentence. PRD section 5 names them in prose,
+ * and swapping the underscores for spaces yields "adata preparer" and
+ * "straitsx admin", which is neither the PRD's wording nor an organisation a
+ * presenter can point at.
+ *
+ * Mid-sentence form only, which is what a refusal and the approval queue need.
+ * The accounts table and the persona switcher keep their own title-case and
+ * dotted spellings, because a table cell and a dropdown entry are not
+ * sentences.
+ */
+export const ROLE_LABELS: Readonly<Record<Role, string>> = {
+  adata_preparer: 'ADATA preparer',
+  adata_checker: 'ADATA checker',
+  supplier: 'supplier',
+  lender: 'lender',
+  straitsx_admin: 'StraitsX admin',
+};
+
 export type TransitionResult =
   | { readonly ok: true; readonly to: LifecycleStatus; readonly label: string }
   | { readonly ok: false; readonly reason: string };
@@ -158,9 +190,47 @@ export function attempt(
     };
   }
   if (transition.actors.length > 0 && !transition.actors.includes(actor)) {
-    return { ok: false, reason: `${actor.replace(/_/g, ' ')} may not ${event} a payable` };
+    return { ok: false, reason: `${ROLE_LABELS[actor]} may not ${event} a payable` };
   }
   return { ok: true, to: transition.to, label: transition.label };
+}
+
+export interface PendingStep {
+  readonly event: LifecycleEvent;
+  readonly to: LifecycleStatus;
+  /** Every role permitted to fire it. `issue` admits three. */
+  readonly actors: readonly Role[];
+  readonly action: string;
+}
+
+/**
+ * Who the obligation is waiting on, and what it is waiting for them to do.
+ *
+ * PRD section 8 screen 3 is a queue, and a queue that says only what a payable
+ * *is* leaves the presenter guessing which persona to become next. The answer
+ * is already in {@link TRANSITIONS}: the pending step is the one transition out
+ * of this state that a person fires. Deriving it here rather than branching per
+ * status in the screen is what stops a new state being added without the queue
+ * learning who owns it.
+ *
+ * Null where nobody is being waited on. `settled` is terminal, `issued` moves
+ * on the clock rather than on anyone's say-so (see {@link dueStatusFor}), and
+ * `overdue` has no transition out of it at all, because PRD section 4 puts
+ * recovery workflows out of scope.
+ */
+export function pendingStep(status: LifecycleStatus): PendingStep | null {
+  for (const event of LIFECYCLE_EVENTS) {
+    const transition = TRANSITIONS[event];
+    if (transition.from === status && transition.actors.length > 0) {
+      return {
+        event,
+        to: transition.to,
+        actors: transition.actors,
+        action: transition.action,
+      };
+    }
+  }
+  return null;
 }
 
 /**

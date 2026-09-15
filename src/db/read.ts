@@ -17,7 +17,7 @@
 import { query, queryOne } from './client';
 import { type DemoClock, clockAt, daysBetween, type IsoDate, parseIsoDate, today } from '@/core/clock';
 import { type Asset, type BaseUnits, fromBaseUnits } from '@/core/money';
-import { type LifecycleStatus, dueStatusFor, isOverdueByClock, type ReceiptStatus } from '@/core/lifecycle';
+import { type LifecycleStatus, dueStatusFor, isOverdueByClock, type ReceiptStatus, type Role } from '@/core/lifecycle';
 import { type Quote, quote } from '@/core/pricing';
 
 // --- the world --------------------------------------------------------------
@@ -49,7 +49,7 @@ export async function readWorld(): Promise<World> {
 export interface Persona {
   userId: string;
   name: string;
-  role: 'adata_preparer' | 'adata_checker' | 'supplier' | 'lender' | 'straitsx_admin';
+  role: Role;
   entityId: string;
   entityName: string;
   entityType: 'anchor' | 'supplier' | 'lender' | 'platform';
@@ -622,7 +622,7 @@ export interface EventRow {
   kind: string;
   worldDate: IsoDate;
   actorName: string;
-  actorRole: string;
+  actorRole: Role;
   payableRef: string | null;
   txHash: string | null;
   blockNumber: bigint | null;
@@ -644,7 +644,7 @@ export async function readEvents(
     kind: string;
     world_date: Date;
     actor_name: string;
-    actor_role: string;
+    actor_role: Role;
     payable_ref: string | null;
     tx_hash: string | null;
     block_number: bigint | null;
@@ -749,6 +749,30 @@ export interface ErpInvoice {
   approvedOn: IsoDate;
   costCentre: string;
   consumed: boolean;
+}
+
+/**
+ * Every reference already in use, for the create screen's two suggestions.
+ *
+ * Deliberately not `readPayables()`. That is the priced marketplace projection
+ * and it hides series members behind `series_id IS NULL`, so the
+ * `TP-2026-05xx` refs in the seeded lot are invisible to it. A generator that
+ * claims to continue the series has to see the whole table. An unconsumed ERP
+ * row counts too: its invoice reference exists the moment someone imports it.
+ */
+export async function readReferencesInUse(): Promise<{
+  payableRefs: string[];
+  invoiceRefs: string[];
+}> {
+  const rows = await query<{ ref: string | null; invoice_ref: string }>(
+    `SELECT ref, invoice_ref FROM app.payable
+      UNION ALL
+     SELECT NULL AS ref, invoice_ref FROM app.erp_invoice WHERE consumed_by IS NULL`,
+  );
+  return {
+    payableRefs: rows.map((r) => r.ref).filter((r): r is string => r !== null),
+    invoiceRefs: rows.map((r) => r.invoice_ref),
+  };
 }
 
 export async function readErpInbox(): Promise<ErpInvoice[]> {

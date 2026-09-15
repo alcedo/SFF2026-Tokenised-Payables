@@ -59,6 +59,7 @@ fi
 
 echo "── ledger ───────────────────────────────────────────"
 RESET_ARG=reset sql_stage "seed matches PRD section 12" tests/ledger/seed.sql
+RESET_ARG=bare sql_stage "fixtures: the world a fresh database boots into" tests/ledger/fixtures.sql
 RESET_ARG=reset sql_stage "lifecycle: ERP invoice to issued token" tests/ledger/lifecycle.sql
 RESET_ARG=reset sql_stage "accounts: onboarding, personas, removal" tests/ledger/accounts.sql
 RESET_ARG=reset sql_stage "programme: limits and issuer certification" tests/ledger/programme.sql

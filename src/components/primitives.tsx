@@ -229,7 +229,7 @@ export function Notice({
   tone = 'critical',
   children,
 }: {
-  tone?: 'critical' | 'caution' | 'positive' | 'info';
+  tone?: 'critical' | 'caution' | 'positive' | 'info' | 'accent';
   children: ReactNode;
 }) {
   const styles = {
@@ -237,6 +237,7 @@ export function Notice({
     caution: 'border-caution/30 bg-caution-soft text-caution',
     positive: 'border-positive/30 bg-positive-soft text-positive',
     info: 'border-rule-strong bg-surface-raised text-ink-muted',
+    accent: 'border-accent/30 bg-accent-soft text-accent',
   }[tone];
   return <div className={`rounded-[3px] border px-2.5 py-2 text-[12px] ${styles}`}>{children}</div>;
 }

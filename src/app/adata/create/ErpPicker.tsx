@@ -23,15 +23,14 @@ interface ErpRow {
 export function ErpPicker({
   invoices,
   worldDate,
-  nextSequence,
+  payableRef,
 }: {
   invoices: ErpRow[];
   worldDate: string;
-  nextSequence: number;
+  payableRef: string;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const chosen = invoices.find((i) => i.id === selected) ?? null;
-  const ref = `TP-2026-${String(nextSequence).padStart(4, '0')}`;
 
   return (
     <div>
@@ -94,7 +93,7 @@ export function ErpPicker({
         {chosen ? (
           <div className="space-y-2">
             <dl className="grid gap-x-6 gap-y-1 text-[12.5px] md:grid-cols-2">
-              <Row label="New reference">{ref}</Row>
+              <Row label="New reference">{payableRef}</Row>
               <Row label="Anchor obligor">ADATA Technology Co., Ltd.</Row>
               <Row label="Supplier">{chosen.supplierName}</Row>
               <Row label="Invoice reference">{chosen.invoiceRef}</Row>
@@ -111,13 +110,13 @@ export function ErpPicker({
               label="Create payable"
               confirm={
                 <>
-                  Creates {ref} as a draft against {chosen.supplierName}&apos;s invoice{' '}
+                  Creates {payableRef} as a draft against {chosen.supplierName}&apos;s invoice{' '}
                   {chosen.invoiceRef}. It then needs a checker&apos;s approval and StraitsX
                   certification before it can be issued.
                 </>
               }
               action={createPayableFromErp}
-              args={[chosen.id, ref]}
+              args={[chosen.id, payableRef]}
             />
           </div>
         ) : (

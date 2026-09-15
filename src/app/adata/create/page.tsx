@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { ErpPicker } from './ErpPicker';
 import { ManualEntry } from './ManualEntry';
 import { Panel } from '@/components/primitives';
-import { readEntities, readErpInbox, readPayables, readWorld } from '@/db/read';
+import { nextPayableRef, suggestInvoiceRef } from '@/core/references';
+import { readEntities, readErpInbox, readReferencesInUse, readWorld } from '@/db/read';
 
 /**
  * PRD §8 screen 2. Create payable.
@@ -27,9 +28,9 @@ export default async function CreatePayablePage({
   searchParams: Promise<{ mode?: string }>;
 }) {
   const [world, { mode }] = await Promise.all([readWorld(), searchParams]);
-  const [inbox, payables, suppliers] = await Promise.all([
+  const [inbox, references, suppliers] = await Promise.all([
     readErpInbox(),
-    readPayables(world),
+    readReferencesInUse(),
     readEntities('supplier'),
   ]);
 
@@ -41,10 +42,11 @@ export default async function CreatePayablePage({
   // have one; they are real history, not candidates for a new payable.
   const onboarded = suppliers.filter((s) => s.userCount > 0);
 
-  // References are sequential within the year, continuing the seeded series.
-  const highest = payables
-    .map((p) => Number(p.ref.match(/TP-2026-(\d+)$/)?.[1] ?? 0))
-    .reduce((a, b) => Math.max(a, b), 0);
+  // Both references continue the series already on the books, and both read the
+  // whole payable table rather than the marketplace projection, which hides the
+  // series lot's member refs.
+  const payableRef = nextPayableRef(references.payableRefs);
+  const suggestedInvoiceRef = suggestInvoiceRef(references.invoiceRefs);
 
   return (
     <div className="space-y-3">
@@ -70,7 +72,8 @@ export default async function CreatePayablePage({
         <Panel title="Manual entry" dense>
           <ManualEntry
             worldDate={world.today}
-            nextSequence={highest + 1}
+            payableRef={payableRef}
+            suggestedInvoiceRef={suggestedInvoiceRef}
             suppliers={onboarded.map((s) => ({
               id: s.id,
               name: s.name,
@@ -82,7 +85,7 @@ export default async function CreatePayablePage({
         <Panel title="Import from ERP" dense>
           <ErpPicker
             worldDate={world.today}
-            nextSequence={highest + 1}
+            payableRef={payableRef}
             invoices={inbox.map((i) => ({
               id: i.id,
               docNo: i.docNo,

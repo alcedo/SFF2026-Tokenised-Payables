@@ -143,12 +143,12 @@ marked **Settled** and cannot move or settle again.
 
 ## The series lot (add 30 seconds if asked)
 
-One marketplace row is a **series**: twelve tier-2 supplier invoices against the
-same anchor, sharing one maturity, traded as a single lot. Open it and expand
-**Series members** to show all twelve, each with its own invoice reference and
+One marketplace row is a **series**: five supplier invoices against the same
+anchor, sharing one maturity, traded as a single lot. Open it and expand
+**Series members** to show all five, each with its own invoice reference and
 its holder.
 
-> "A bank does not want twelve 15,000 tickets. It wants one 180,000 ticket. The
+> "A bank does not want five 36,000 tickets. It wants one 180,000 ticket. The
 > grade is assigned to the lot, and every member is wholly held by one wallet,
 > so the lot moves as one thing."
 

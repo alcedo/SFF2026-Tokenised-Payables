@@ -38,21 +38,32 @@ lender, and the StraitsX admin — covering every screen PRD §8 lists:
 | **Admin** | issuer certification · grading · accounts · programme oversight · overdue and recovery |
 | **Anyone** | onboarding with a custodial wallet · transfer · mock chain explorer · reset |
 
-The demo world seeds itself with 26 organisations, 19 accounts, 29 payables
-across all three grades and 30 to 180 day tenors, nine open listings with live
-bids, a 12-invoice series lot, a settled position, an overdue one, and a
-24-invoice ERP register. T0 is the day the world was seeded, so the tenors stay
-realistic however long the URL stays up.
+The demo world seeds itself with 9 organisations, 11 accounts, 12 payables
+across all three grades and 30 to 100 day tenors, five open listings with a live
+bid book, a five-invoice series lot, a settled position, an overdue one, and a
+24-invoice ERP register. Every organisation has a live account behind it, so
+there is nobody on screen a viewer cannot switch to and act as.
+
+The whole of that costs 50 ledger entries. The explorer is an audit trail and
+the entries a presenter creates in front of a room are the point, so the seed is
+kept small enough not to bury them; `tests/ledger/seed.sql` holds the budget.
+T0 is the day the world was seeded, so the tenors stay realistic however long
+the URL stays up.
 
 ## Verify it
 
 ```bash
-npm test                     # unit, schema, ledger, invariants, concurrency
+npm test                     # unit, schema, ledger, fixtures, invariants, concurrency
 npm run verify:screens       # every screen, every persona, in a real browser
 npm run verify:runbook       # the whole runbook driven click by click
+npm run verify:demo          # the register, the suggested reference, the queue handover
+npm run verify:fresh         # the same, against a database that has never been seeded
 ```
 
-The last two need the app running (`scripts/serve.sh`).
+The middle three need the app running (`scripts/serve.sh`). `scripts/fresh.sh`
+builds its own database and serves it on :3101. A new deployment boots from
+`db/fixtures.sql` rather than the `db/seed.sql` that Reset world replays, so
+that is the world an audience meets first and the one no other driver covers.
 
 ## Deploy to Vercel
 
@@ -62,10 +73,12 @@ The last two need the app running (`scripts/serve.sh`).
 2. **Set `DATABASE_URL`** in the Vercel project's environment variables.
 3. **Deploy.** The first request against a database with no `app.world` row
    loads `db/schema.sql` and `db/post.sql` if the schema is missing, then
-   `db/fixtures.sql` (ADATA, StraitsX, and the three acting accounts). It does
-   not load the demo catalogue. You can create payables and onboard
-   counterparties from there. Reset world still loads `db/seed.sql` when you
-   want the PRD §12 demo. There is no `psql` step.
+   `db/fixtures.sql`: ADATA, StraitsX, two suppliers, two funded lenders, the
+   five acting accounts, and a 24-invoice ERP register. That is a programme
+   that has not issued anything yet rather than the PRD §12 catalogue. Both
+   ways into create-payable work on arrival, so you do not have to onboard
+   anyone first. Reset world still loads `db/seed.sql` when you want the full
+   demo with its history, listings and bid book. There is no `psql` step.
 4. **Set `ADATA_RESET_PIN`** if the URL is going to be public. Reset restores
    the seed for *everyone* connected, so it is already restricted to the
    StraitsX admin persona and needs the word RESET typed to arm. But the

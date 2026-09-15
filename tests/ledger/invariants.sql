@@ -10,27 +10,7 @@
 \set ON_ERROR_STOP on
 \i tests/ledger/fixture.sql
 
--- A wallet's free balance in a cash asset, and system_fx's, zero when no row
--- exists yet. The funded-settlement cases compare many of these before and
--- after, and a missing row must read as zero rather than as a NULL that makes
--- every comparison silently true.
-CREATE FUNCTION pg_temp.cash(p_wallet text, p_code ledger.cash_code) RETURNS bigint
-LANGUAGE sql AS $$
-  SELECT COALESCE((SELECT b.balance
-                     FROM ledger.account_balance b
-                     JOIN ledger.account a ON a.id = b.account_id
-                     JOIN ledger.asset   s ON s.id = b.asset_id
-                    WHERE a.wallet_address = p_wallet AND a.purpose = 'wallet_free'
-                      AND s.cash_code = p_code), 0)
-$$;
-CREATE FUNCTION pg_temp.fx(p_code ledger.cash_code) RETURNS bigint
-LANGUAGE sql AS $$
-  SELECT COALESCE((SELECT b.balance
-                     FROM ledger.account_balance b
-                     JOIN ledger.account a ON a.id = b.account_id
-                     JOIN ledger.asset   s ON s.id = b.asset_id
-                    WHERE a.purpose = 'system_fx' AND s.cash_code = p_code), 0)
-$$;
+\i tests/ledger/helpers.sql
 
 \echo '=============================================================='
 \echo ' INVARIANTS'

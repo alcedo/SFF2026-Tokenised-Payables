@@ -159,9 +159,9 @@ fresh world.
 
 ## Suppliers on the ERP register versus suppliers on the platform
 
-Not every supplier ADATA buys from has an account. The seed has twelve tier-2
-suppliers who originated the invoices in the series lot, sold their whole
-position, and have no live account — which is a real state, not a broken one.
+Not every supplier ADATA buys from need have an account, and the ERP register is
+a company's own book rather than a list of platform members. Nothing in the
+schema requires the two to line up.
 
 **Built:** manual entry only offers suppliers with a live account, and
 `ledger.post()` refuses a payable raised against one without. A payable issues
@@ -264,3 +264,120 @@ made on the screen and a command without one is a bug, not a preference.
 **If wrong:** the default is one line in `FundingPanel.tsx`, and the XSGD
 balance is one top-up in `db/seed.sql` with one assertion in
 `tests/ledger/seed.sql`.
+
+## What a database with no world row boots into
+
+Section 12 specifies the demo catalogue and section 11 gives Reset world the job
+of restoring it. Neither says what a database that has never been seeded should
+contain, because on a laptop the question does not arise: `scripts/db.sh reset`
+loads the seed before the app starts.
+
+A hosted deployment takes the other path. `src/db/ensure.ts` loads
+`db/fixtures.sql` on the first request against a database with no `app.world`
+row, and that file held only the three accounts `ledger.post()` needs to accept
+a command at all. That is enough to render every screen and not enough to use
+one: with no supplier holding a live account the manual-entry dropdown is empty,
+and with an empty `app.erp_invoice` the import path is an empty table.
+
+**Built:** the fixtures seed the smallest world in which every screen has
+something to show. Two suppliers, two lenders funded in all four assets, the
+five acting accounts, and a 24-invoice ERP register. No payables, because a
+fresh deployment is a programme that has not issued anything yet rather than a
+replay of section 12's history. Names, ids and wallets are `db/seed.sql`'s, so a
+database that boots on the fixtures and is later Reset keeps the same people
+instead of reading as a different universe. `tests/ledger/fixtures.sql` asserts
+the contract, and asserts that loading the file twice converges, because two
+serverless instances can cold-start on the same empty database.
+
+**If wrong:** the party list and the funding table are two `VALUES` blocks in
+`db/fixtures.sql`, and the counts they have to satisfy are named in
+`tests/ledger/fixtures.sql`.
+
+## Naming who the approval queue is waiting on
+
+Section 8 screen 3 asks for "preparer submission and separate checker approval,
+with actor and timestamp history". History is what already happened. The screen
+said nothing about what happens next, so a presenter reading a row had to know
+the lifecycle by heart to work out which persona to become.
+
+**Built:** each row names the role that owes the next move, the people who hold
+that role, and the move itself, and reads "Your turn" to whoever that is. The
+header counts how many rows are waiting on the acting persona. All of it derives
+from the `TRANSITIONS` table in `src/core/lifecycle.ts`, the same table the
+buttons are disabled by, so the sentence and the controls cannot disagree.
+Where no live account holds the awaited role, which the admin can cause by
+removing the last one, the row says that instead of naming nobody.
+
+**If wrong:** `pendingStep` in `src/core/lifecycle.ts` and the notice block in
+`src/app/adata/approvals/page.tsx`.
+
+## Suggesting an invoice reference
+
+Section 8 screen 2 lists the facts manual entry collects and says nothing about
+where the invoice reference comes from. The database is definite about what
+makes one wrong, since `payable_one_per_invoice` guards the pair of supplier and
+invoice reference, and silent about what makes one right.
+
+**Built:** the field opens on the next free number in the `INV-TW-nnnnn` series,
+counting past both the payables already raised and the ERP register waiting to
+be imported, and it stays ordinary editable text. A preparer copying a real
+invoice has its real number and should type it. A presenter creating the tenth
+payable of a demo should not have to invent one. A reference with a non-numeric
+tail, like the runbook's `INV-TW-88Q4A`, is a real invoice number rather than a
+member of the sequence, so it does not count toward the maximum.
+
+**If wrong:** `suggestInvoiceRef` in `src/core/references.ts`, with its cases in
+`src/core/__tests__/references.test.ts`.
+
+## How many suppliers the series lot draws on
+
+Section 12 originally wrote the bundled lot as "SERIES-2026-Q4-30D | 12 fictional
+suppliers; one current holder", and asked separately to "include fictional
+supplier entity records and wallets for all remaining invoice originators".
+Taken literally that meant twelve supplier organisations that existed only as a
+name and a wallet, with nobody able to sign in as any of them.
+
+That state is reachable and the product handles it, but as seed data it was a
+liability. A supplier with no account can never accept delivery of what it is
+issued, so those twelve appeared in counts, in the explorer and on the programme
+oversight screen as organisations a viewer could not switch to or act as. They
+also cost the demo twenty-four ledger entries, more than the entire rest of the
+live world.
+
+**Built:** the lot carries five members, one invoice from each of the five
+interactive suppliers, still 180,000 XUSD in total and still wholly held by one
+seller. Every organisation in the seeded world has a live account behind it,
+which `tests/ledger/seed.sql` asserts. What the lot demonstrates is unchanged:
+several suppliers' invoices against one anchor, one maturity, one price, sold as
+a unit no single invoice would be worth.
+
+**The PRD was revised to match** rather than left contradicting the build, since
+a specification the code knowingly ignores stops being worth reading. Section 12
+now states five originators and requires every seeded organisation to have an
+account. This entry is the record of why it moved.
+
+**If wrong:** the member count is one loop bound and one array in `db/seed.sql`,
+with the expected counts named in `tests/ledger/seed.sql` and
+`tests/db/read.test.ts`. Restoring twelve originators means restoring twelve
+account-less entity rows with it, and reverting the section 12 revision note.
+
+## How much history the seed writes
+
+Section 12 names six payables and asks for portfolio history, competing bids and
+a pre-funded pair of lenders. It says nothing about volume, and an earlier build
+read that as licence to add depth: twenty-nine payables, twenty organisations,
+nine listings, 116 ledger entries.
+
+The explorer is an append-only audit trail, and the thing a viewer is being
+shown at a demo is the handful of entries the presenter creates in front of
+them. Seeded history is the backdrop, not the subject, and 116 rows of it buries
+the five that matter.
+
+**Built:** the smallest world in which every screen still has something real on
+it. Two historical payables (the settled row and the overdue one), five live
+ones, a five-member series, two lenders, five suppliers. Fifty ledger entries.
+`tests/ledger/seed.sql` holds a budget of sixty and fails if it creeps back up,
+because this is the kind of thing that grows one convenient row at a time.
+
+**If wrong:** raise the budget in `tests/ledger/seed.sql` and add rows to
+`seed_history` or `seed_live` in `db/seed.sql`. Both are plain tables.

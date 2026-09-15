@@ -7,6 +7,9 @@ import {
   isTradeable,
   LIFECYCLE_STATUSES,
   type LifecycleStatus,
+  pendingStep,
+  ROLE_LABELS,
+  ROLES,
   TRANSITIONS,
 } from '../lifecycle';
 
@@ -124,5 +127,79 @@ describe('the transition table is internally consistent', () => {
     const reachable = new Set(Object.values(TRANSITIONS).map((t) => t.to));
     const unreachable = LIFECYCLE_STATUSES.filter((s) => s !== 'draft' && !reachable.has(s));
     expect(unreachable).toEqual([]);
+  });
+});
+
+/**
+ * The approval queue asks the obligation who it is waiting for. PRD section 8
+ * screen 3 shows certification and issuance status after approval, so the
+ * question is live for four of the eight states and must answer honestly for
+ * the other four rather than inventing an actor.
+ */
+describe('who the queue is waiting on', () => {
+  it('names the next actor and the ask for each state a person moves', () => {
+    expect(pendingStep('draft')).toEqual({
+      event: 'submit',
+      to: 'pending_approval',
+      actors: ['adata_preparer'],
+      action: 'submit it for approval',
+    });
+    expect(pendingStep('pending_approval')).toEqual({
+      event: 'approve',
+      to: 'approved',
+      actors: ['adata_checker'],
+      action: 'approve it',
+    });
+    expect(pendingStep('approved')).toEqual({
+      event: 'certify',
+      to: 'certified',
+      actors: ['straitsx_admin'],
+      action: 'certify it',
+    });
+    expect(pendingStep('certified')).toEqual({
+      event: 'issue',
+      to: 'issued',
+      actors: ['adata_preparer', 'adata_checker', 'straitsx_admin'],
+      action: 'issue it to the supplier',
+    });
+  });
+
+  it('prefers the settlement a person owes over the overdue mark the clock makes', () => {
+    expect(pendingStep('matured')).toEqual({
+      event: 'settle',
+      to: 'settled',
+      actors: ['adata_preparer', 'adata_checker'],
+      action: 'settle it to the holders',
+    });
+  });
+
+  it('waits on nobody where the clock moves it, it is finished, or recovery is out of scope', () => {
+    expect(pendingStep('issued')).toBeNull();
+    expect(pendingStep('settled')).toBeNull();
+    expect(pendingStep('overdue')).toBeNull();
+  });
+
+  /**
+   * The screen disables a button using `attempt` and explains it using
+   * `pendingStep`. Two derivations of the same rule that disagree would show a
+   * live button under a line saying someone else has to act.
+   */
+  it('agrees with the transition checker on who may act', () => {
+    for (const status of LIFECYCLE_STATUSES) {
+      const step = pendingStep(status);
+      if (!step) continue;
+      for (const role of ROLES) {
+        expect(attempt(status, step.event, role).ok, `${role} on ${status}`).toBe(
+          step.actors.includes(role),
+        );
+      }
+    }
+  });
+
+  it('writes every role the way the PRD names it', () => {
+    expect(ROLE_LABELS.adata_preparer).toBe('ADATA preparer');
+    expect(ROLE_LABELS.adata_checker).toBe('ADATA checker');
+    expect(ROLE_LABELS.straitsx_admin).toBe('StraitsX admin');
+    expect(ROLES.filter((r) => !ROLE_LABELS[r])).toEqual([]);
   });
 });
