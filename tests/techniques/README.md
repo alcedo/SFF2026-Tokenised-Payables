@@ -75,7 +75,12 @@ under `.audit/mutation/`.
 
 `tests/support/database.ts` gives every database-backed suite its own database,
 cloned from a template in about 80ms, so no suite shares mutable state with
-another and none needs a lock. `tests/support/CONTRACT.md` is the recipe the
+another and none needs a lock. A template is built only when it is missing, so
+its name carries a digest of the `db/*.sql` files it is built from: edited SQL
+asks for a template that does not exist yet, and the rebuild follows from the
+edit. Under the fixed names this replaced, a run after a `db/` edit cloned the
+schema as it was **before**, and every suite passed against SQL that was no
+longer in the tree, which reads exactly like a green run. `tests/support/CONTRACT.md` is the recipe the
 suites were written against. `tests/support/harness.test.ts` checks the harness
 itself, including that the ledger oracle fails on a book corrupted on purpose,
 because an oracle only ever seen passing cannot be told from one that always
