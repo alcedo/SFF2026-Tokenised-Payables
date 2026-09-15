@@ -258,11 +258,6 @@ async function entriesWithKey(ex: Pool | PoolClient, key: string): Promise<numbe
   return countOf(ex, 'SELECT count(*) AS n FROM ledger.journal_entry WHERE idempotency_key = $1', [key]);
 }
 
-async function backendPid(client: PoolClient): Promise<number> {
-  const { rows } = await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
-  return rows[0]!.pid;
-}
-
 /**
  * Wait for a backend to be parked on a lock.
  *
@@ -312,11 +307,26 @@ async function blockingPids(pool: Pool, pid: number): Promise<number[]> {
   return rows[0]?.blockers ?? [];
 }
 
+async function backendPid(client: PoolClient): Promise<number> {
+  const { rows } = await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+  return rows[0]!.pid;
+}
+
+/** Polls rather than sleeps, so a slow machine waits and a fast one does not. */
+async function parksBehind(pool: Pool, pid: number, blocker: number): Promise<boolean> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    if ((await blockingPids(pool, pid)).includes(blocker)) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 // --- 1. lock-order inversion ------------------------------------------------
 
-describe('lock-order inversion between settle_maturity and accept_bid', () => {
-  it('deadlocks ABBA, names one victim with 40P01, and settles the other side', async () => {
-    const s = await stage('abba');
+describe('lock order between settle_maturity and accept_bid', () => {
+  it('queues both commands on the payable, so neither can deadlock the other', async () => {
+    const s = await stage('lock_order');
     const supplier = s.suppliers[0]!;
     const lender = s.lenders[0]!;
     const payable = await issuePayable(s, {
@@ -364,19 +374,27 @@ describe('lock-order inversion between settle_maturity and accept_bid', () => {
       'advance_clock',
     );
 
-    await withClients(s.pool, 2, async ([settler, accepter]) => {
-      // settle_maturity takes app.payable then app.listing; accept_bid takes
-      // app.listing then app.payable. Each session is given the first lock of
-      // its own path by hand, so the cycle is closed by construction rather
-      // than by timing. deadlock_timeout chooses the victim, because the
-      // backend whose timer expires first runs the detector and aborts itself.
-      await settler!.query('BEGIN');
-      await settler!.query("SET LOCAL deadlock_timeout = '5s'");
-      await settler!.query('SELECT 1 FROM app.payable WHERE id = $1 FOR NO KEY UPDATE', [payable.id]);
+    await withClients(s.pool, 3, async ([holder, settler, accepter]) => {
+      // post.sql states one lock order for the whole system, payable then
+      // series then listing. accept_bid used to take the listing first, so two
+      // ordinary product actions on one payable closed a cycle and a caller got
+      // 40P01, which is not an ADA code and has no wording behind it.
+      //
+      // One session holds the payable row and nothing else. Both commands park
+      // on it, and that is the proof: the listing is free, so a branch still
+      // reaching for it first would be running rather than queued, and the two
+      // would end up holding each other's next lock. Held by hand so the
+      // ordering is evidenced rather than raced for.
+      await holder!.query('BEGIN');
+      await holder!.query('SELECT 1 FROM app.payable WHERE id = $1 FOR NO KEY UPDATE', [payable.id]);
+      const holderPid = await backendPid(holder!);
 
+      await settler!.query('BEGIN');
+      await settler!.query("SET LOCAL deadlock_timeout = '40ms'");
       await accepter!.query('BEGIN');
       await accepter!.query("SET LOCAL deadlock_timeout = '40ms'");
-      await accepter!.query('SELECT 1 FROM app.listing WHERE id = $1 FOR UPDATE', [listingId]);
+      const settlerPid = await backendPid(settler!);
+      const accepterPid = await backendPid(accepter!);
 
       const settling = post(
         settler!,
@@ -388,15 +406,23 @@ describe('lock-order inversion between settle_maturity and accept_bid', () => {
         { kind: 'accept_bid', listingId, bidId },
         { actorUserId: s.users.supplier },
       );
+
+      expect(await parksBehind(s.pool, settlerPid, holderPid)).toBe(true);
+      expect(await parksBehind(s.pool, accepterPid, holderPid)).toBe(true);
+
+      await holder!.query('ROLLBACK');
       const [settled, accepted] = await Promise.all([settling, accepting]);
+      await settler!.query('COMMIT').catch(() => undefined);
+      await accepter!.query('ROLLBACK').catch(() => undefined);
 
-      const victim = refused(accepted);
-      expect(victim.code).toBe('40P01');
-      expect(victim.message).toContain('deadlock detected');
+      expect([settled, accepted].filter((r): r is PostErr => !r.ok).map((r) => r.code)).not.toContain(
+        '40P01',
+      );
+      // Either order gives the same answer. Maturity closes the market, so the
+      // acceptance meets a business refusal whichever of the two runs first.
       expect(settled.ok).toBe(true);
-
-      await settler!.query('COMMIT');
-      await accepter!.query('ROLLBACK');
+      expect(refused(accepted).code).toBe('ADA12');
+      expect(refused(accepted).message).toBe('payable TP-ABBA-0001 has reached maturity');
     });
 
     const { rows } = await s.pool.query<{ lifecycle: string; listing: string; bid: string }>(
@@ -408,98 +434,6 @@ describe('lock-order inversion between settle_maturity and accept_bid', () => {
     expect(rows[0]).toEqual({ lifecycle: 'settled', listing: 'cancelled', bid: 'superseded' });
     expect(await tokenBalance(s.pool, supplier.wallet, 'wallet_listed', payable.assetId)).toBe(0n);
     expect(await cashBalance(s.pool, supplier.wallet, 'XUSD')).toBe(BigInt(FACE));
-    expect(await ledgerHealth(s.pool)).toEqual(HEALTHY);
-  });
-
-  it('refuses the acceptance with ADA12 when the deadlock victim is the settlement', async () => {
-    const s = await stage('abba_flip');
-    const supplier = s.suppliers[0]!;
-    const lender = s.lenders[0]!;
-    const payable = await issuePayable(s, {
-      supplier,
-      toWallet: supplier.wallet,
-      ref: 'TP-ABBA-0002',
-      invoiceRef: 'INV-ABBA-0002',
-      tokenId: 9002,
-    });
-
-    const listingId = randomUUID();
-    const bidId = randomUUID();
-    must(
-      await post(
-        s.pool,
-        {
-          kind: 'publish_listing',
-          listingId,
-          payableId: payable.id,
-          sellerWallet: supplier.wallet,
-          quantityBase: FACE,
-          minPriceBase: PRICE,
-        },
-        { actorUserId: s.users.supplier },
-      ),
-      'publish_listing',
-    );
-    must(
-      await post(
-        s.pool,
-        {
-          kind: 'place_bid',
-          bidId,
-          listingId,
-          bidderWallet: lender.wallet,
-          priceBase: PRICE,
-          fundingCode: 'XUSD',
-        },
-        { actorUserId: s.users.lender },
-      ),
-      'place_bid',
-    );
-    must(
-      await post(s.pool, { kind: 'advance_clock', days: TERMS_DAYS }, { actorUserId: s.users.straitsx_admin }),
-      'advance_clock',
-    );
-
-    await withClients(s.pool, 2, async ([settler, accepter]) => {
-      await settler!.query('BEGIN');
-      await settler!.query("SET LOCAL deadlock_timeout = '40ms'");
-      await settler!.query('SELECT 1 FROM app.payable WHERE id = $1 FOR NO KEY UPDATE', [payable.id]);
-
-      await accepter!.query('BEGIN');
-      await accepter!.query("SET LOCAL deadlock_timeout = '5s'");
-      await accepter!.query('SELECT 1 FROM app.listing WHERE id = $1 FOR UPDATE', [listingId]);
-
-      const settling = post(
-        settler!,
-        { kind: 'settle_maturity', payableId: payable.id, fundingCode: 'XUSD' },
-        { actorUserId: s.users.adata_preparer },
-      );
-      const accepting = post(
-        accepter!,
-        { kind: 'accept_bid', listingId, bidId },
-        { actorUserId: s.users.supplier },
-      );
-      const [settled, accepted] = await Promise.all([settling, accepting]);
-
-      expect(refused(settled).code).toBe('40P01');
-      // The survivor finishes its own lock order and then meets the maturity
-      // check it was blocked ahead of, so the loser of the race still gets a
-      // sentence a presenter can read out.
-      expect(refused(accepted).code).toBe('ADA12');
-      expect(refused(accepted).message).toContain('has reached maturity');
-
-      await settler!.query('ROLLBACK');
-      await accepter!.query('ROLLBACK');
-    });
-
-    const { rows } = await s.pool.query<{ lifecycle: string; listing: string; bid: string }>(
-      `SELECT p.lifecycle_status::text AS lifecycle, l.status::text AS listing, b.status::text AS bid
-         FROM app.payable p, app.listing l, app.bid b
-        WHERE p.id = $1 AND l.id = $2 AND b.id = $3`,
-      [payable.id, listingId, bidId],
-    );
-    expect(rows[0]).toEqual({ lifecycle: 'issued', listing: 'open', bid: 'placed' });
-    expect(await tokenBalance(s.pool, supplier.wallet, 'wallet_listed', payable.assetId)).toBe(BigInt(FACE));
     expect(await ledgerHealth(s.pool)).toEqual(HEALTHY);
   });
 });
@@ -1481,90 +1415,14 @@ async function marketplace(
 }
 
 /**
- * The two defects above, stated as the behaviour a reader expects.
+ * This file used to end with `describe('outcomes these races should not have')`,
+ * two `it.fails` cases stating what a reader expects where the system gave
+ * `40P01` on the settlement path and `ADA04` on a series redemption. Both are
+ * fixed, so both were deleted and the block with them.
  *
- * Everything else in this file pins what the system does, which is the right
- * record for a concurrency suite: `40P01` and `ADA04` are what actually
- * happens, and a test asserting otherwise would just fail for the whole life of
- * the defect. The cost is that both findings are green, so a reader running
- * `npm test` sees a clean sheet over a deadlock on the settlement path and a
- * series lot that cannot be redeemed.
- *
- * These two cases carry the expectation instead. Each is `it.fails`, so the day
- * either is fixed this file turns red and someone deletes the case on purpose.
- * Both are written up in tests/techniques/findings/concurrency-faults.md.
+ * The convention still holds for the next one. A concurrency suite's right
+ * record is what actually happens, because a test asserting otherwise just
+ * fails for the whole life of the defect, and the cost is that the finding
+ * reads green. An `it.fails` case beside it is what makes the day it closes
+ * visible.
  */
-describe('outcomes these races should not have', () => {
-  it.fails('settles and accepts on one payable without either side deadlocking', async () => {
-    const s = await stage('abba_expected');
-    const supplier = s.suppliers[0]!;
-    const lender = s.lenders[0]!;
-    const payable = await issuePayable(s, {
-      supplier,
-      toWallet: supplier.wallet,
-      ref: 'TP-ABBAX-0001',
-      invoiceRef: 'INV-ABBAX-0001',
-      tokenId: 9301,
-    });
-
-    const listingId = randomUUID();
-    const bidId = randomUUID();
-    must(
-      await post(
-        s.pool,
-        {
-          kind: 'publish_listing',
-          listingId,
-          payableId: payable.id,
-          sellerWallet: supplier.wallet,
-          quantityBase: FACE,
-          minPriceBase: PRICE,
-        },
-        { actorUserId: s.users.supplier },
-      ),
-      'publish_listing',
-    );
-    must(
-      await post(
-        s.pool,
-        { kind: 'place_bid', bidId, listingId, bidderWallet: lender.wallet, priceBase: PRICE, fundingCode: 'XUSD' },
-        { actorUserId: s.users.lender },
-      ),
-      'place_bid',
-    );
-    must(
-      await post(s.pool, { kind: 'advance_clock', days: TERMS_DAYS }, { actorUserId: s.users.straitsx_admin }),
-      'advance_clock',
-    );
-
-    // The same cycle the test above constructs, so this case fails for the
-    // lock ordering and not for a race that happened not to occur.
-    await withClients(s.pool, 2, async ([settler, accepter]) => {
-      await settler!.query('BEGIN');
-      await settler!.query("SET LOCAL deadlock_timeout = '5s'");
-      await settler!.query('SELECT 1 FROM app.payable WHERE id = $1 FOR NO KEY UPDATE', [payable.id]);
-
-      await accepter!.query('BEGIN');
-      await accepter!.query("SET LOCAL deadlock_timeout = '40ms'");
-      await accepter!.query('SELECT 1 FROM app.listing WHERE id = $1 FOR UPDATE', [listingId]);
-
-      const [settled, accepted] = await Promise.all([
-        post(
-          settler!,
-          { kind: 'settle_maturity', payableId: payable.id, fundingCode: 'XUSD' },
-          { actorUserId: s.users.adata_preparer },
-        ),
-        post(accepter!, { kind: 'accept_bid', listingId, bidId }, { actorUserId: s.users.supplier }),
-      ]);
-
-      const codes = [settled, accepted]
-        .filter((r): r is PostErr => !r.ok)
-        .map((r) => r.code);
-      await settler!.query('ROLLBACK');
-      await accepter!.query('ROLLBACK');
-
-      expect(codes).not.toContain('40P01');
-    });
-  });
-
-});

@@ -343,6 +343,8 @@ DECLARE
   v_listing     app.listing;
   v_bid         app.bid;
   v_asset       uuid;
+  v_target_kind app.listing_target;
+  v_target_id   uuid;
   v_cash        uuid;
   v_qty         bigint;
   v_price       bigint;
@@ -674,6 +676,28 @@ BEGIN
     -- branch would mean two places that move money, which is exactly what this
     -- design exists to avoid.
     --
+    -- The header states one lock order for the whole system, payable then
+    -- series then listing, and this branch used to take the listing first.
+    -- settle_maturity takes the payable and then expires its listings, so two
+    -- ordinary product actions on one payable deadlocked and a caller got
+    -- 40P01, which is not an ADA code and has no wording behind it.
+    --
+    -- A listing's target is set at INSERT and no command changes it, so an
+    -- unlocked read is enough to learn which instrument to lock first. Nothing
+    -- is decided on that read: the status and everything else are taken off the
+    -- locked row below.
+    SELECT target_kind, COALESCE(target_payable_id, target_series_id)
+      INTO v_target_kind, v_target_id
+      FROM app.listing WHERE id = (v_intent->>'listingId')::uuid;
+    IF v_target_kind IS NULL THEN
+      RAISE EXCEPTION 'no such listing' USING ERRCODE = 'ADA11';
+    END IF;
+    IF v_target_kind = 'series' THEN
+      SELECT * INTO v_series FROM app.series WHERE id = v_target_id FOR NO KEY UPDATE;
+    ELSE
+      SELECT * INTO v_payable FROM app.payable WHERE id = v_target_id FOR NO KEY UPDATE;
+    END IF;
+
     -- Lock by primary key only. See the header note on EvalPlanQual.
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
     IF v_listing.id IS NULL THEN
@@ -718,14 +742,13 @@ BEGIN
       RAISE EXCEPTION 'only institutional lender accounts can buy' USING ERRCODE = 'ADA34';
     END IF;
 
-    -- Maturity closes the market whichever kind of lot this is.
+    -- Maturity closes the market whichever kind of lot this is. The instrument
+    -- is already locked, above, in the order the header states.
     IF v_listing.target_kind = 'series' THEN
-      SELECT * INTO v_series FROM app.series WHERE id = v_listing.target_series_id FOR NO KEY UPDATE;
       IF (v_world.t0 + v_world.offset_days) >= v_series.maturity_date THEN
         RAISE EXCEPTION 'series % has reached maturity', v_series.ref USING ERRCODE = 'ADA12';
       END IF;
     ELSE
-      SELECT * INTO v_payable FROM app.payable WHERE id = v_listing.target_payable_id FOR NO KEY UPDATE;
       IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
         RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
       END IF;
