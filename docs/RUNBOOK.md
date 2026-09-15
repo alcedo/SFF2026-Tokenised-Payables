@@ -8,15 +8,17 @@ It uses a seeded unissued ERP invoice from section 12, which exists precisely so
 the pitch can issue and list a new position without colliding with the payables
 already on the market at T0.
 
-`scripts/runbook.mjs` drives every step below through the real UI in about 45
-seconds of machine time, and fails if any of it stops working. If you are about
+`scripts/runbook.mjs` drives every step below through the real UI in about a
+minute of machine time, and fails if any of it stops working. If you are about
 to present, run it first.
 
-**Before starting:** switch to **StraitsX admin**, press **Reset world**, type
-RESET and confirm. Every step below assumes the clock is at T0 and balances are
-seeded. Reset is the administrator's control only — a lender or supplier
-persona cannot see it, because the URL is public and a reset lands on every
-connected session.
+**Before starting:** switch to **StraitsX admin**, press **Reset world**, leave
+**Demo catalogue** selected, type RESET and confirm. Every step below assumes
+the clock is at T0 and balances are seeded. The other choice, **Minimal
+world**, is what a new deployment boots into, and it has nothing on the market
+for section 0 to open on. Reset is the administrator's control only — a lender
+or supplier persona cannot see it, because the URL is public and a reset lands
+on every connected session.
 
 ---
 
@@ -204,10 +206,10 @@ operational recovery workflow behind it, and the screen says so.
 
 - **A figure looks wrong.** Every yield on screen comes from one function. Check
   the days remaining first; the clock is the usual culprit.
-- **The world looks wrong.** Switch to StraitsX admin, open Reset, type RESET.
-  It restores everything including the clock and the FX rate, and takes a few
-  seconds. It affects every connected session, so warn anyone else on a second
-  screen first.
+- **The world looks wrong.** Switch to StraitsX admin, open Reset, keep **Demo
+  catalogue** selected, type RESET. It restores everything including the clock
+  and the FX rate, and takes a few seconds. It affects every connected session,
+  so warn anyone else on a second screen first.
 - **Someone else reset it mid-demo.** Only the admin persona can, and the URL is
   public, so if the room is large set `ADATA_RESET_PIN` in the deployment
   environment before the day.

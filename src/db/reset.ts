@@ -1,8 +1,23 @@
+import type { PoolClient } from 'pg';
+
 import { closePool, pool } from './client';
-import { applySchemaAndPost, applySeed, beginWorldLoad } from './sql';
+import { applyFixtures, applySchemaAndPost, applySeed, beginWorldLoad } from './sql';
+
+export const WORLD_TARGETS = ['seed', 'fixtures'] as const;
+
+export type WorldTarget = (typeof WORLD_TARGETS)[number];
 
 /**
- * Rebuild the world from the schema and the seed.
+ * A record rather than a branch, so a third world is a compile error at every
+ * site that has to name one instead of a default somebody forgot to widen.
+ */
+const LOAD: Record<WorldTarget, (client: PoolClient) => Promise<void>> = {
+  seed: applySeed,
+  fixtures: applyFixtures,
+};
+
+/**
+ * Rebuild the world from the schema and whichever target was asked for.
  *
  * PRD §11 requires a reset that "restores the complete seed state, including
  * the clock and the mocked FX rate". The clock is a fixed T0 plus a
@@ -13,7 +28,7 @@ import { applySchemaAndPost, applySeed, beginWorldLoad } from './sql';
  * because on Vercel there is no shell, no psql and no scripts directory. The
  * files themselves are traced into the deployment by next.config.mjs.
  */
-export async function resetWorld(): Promise<void> {
+export async function resetWorld(target: WorldTarget): Promise<void> {
   const client = await pool().connect();
   try {
     // One transaction: a half-reset world would be worse than no reset, and a
@@ -23,7 +38,7 @@ export async function resetWorld(): Promise<void> {
     await client.query('DROP SCHEMA IF EXISTS app CASCADE');
     await client.query('DROP SCHEMA IF EXISTS ledger CASCADE');
     await applySchemaAndPost(client);
-    await applySeed(client);
+    await LOAD[target](client);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
@@ -32,7 +47,7 @@ export async function resetWorld(): Promise<void> {
     client.release();
   }
 
-  // The seed recreates every table, so any pooled connection still holding a
+  // The reset recreates every table, so any pooled connection still holding a
   // plan against the old ones would fail its next query.
   await closePool();
 }

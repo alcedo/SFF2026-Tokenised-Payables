@@ -63,6 +63,16 @@ async function expectText(needle, where, within = page.locator('body')) {
   if (!text.includes(needle)) throw new Error(`expected "${needle}" on ${where}`);
 }
 
+/**
+ * The clock's offset label, matched whole. "T0 + 90d" contains "T0", so a
+ * substring check for T0 also passes on a world that never reset.
+ */
+async function expectClock(expected, where) {
+  if ((await page.getByText(expected, { exact: true }).count()) === 0) {
+    throw new Error(`expected the clock to read exactly "${expected}" on ${where}`);
+  }
+}
+
 try {
   // ---------------------------------------------------------------- 1. issue
   await page.goto(`${BASE}/adata/create`, { waitUntil: 'domcontentloaded' });
@@ -380,15 +390,32 @@ try {
   await expectText('T0 + 90d', 'the clock after a refused reset');
   await say('a mistyped confirmation is refused, and the clock has not moved');
 
+  // Reset offers a choice of world. The minimal one is what a fresh deployment
+  // boots into, and it is taken first so the demo catalogue below is still the
+  // world the next presenter inherits.
+  await page.getByLabel('Minimal world').check();
   await page.getByLabel('Type RESET to confirm').fill('RESET');
   await page.getByRole('button', { name: 'Reset the world' }).click();
   await page.waitForTimeout(6000);
-  await expectText('T0', 'the clock after the reset');
+  await expectClock('T0', 'the world after resetting to the minimal one');
   await page.goto(`${BASE}/lender`, { waitUntil: 'domcontentloaded' });
+  await expectText('Nothing is listed right now.', 'the minimal marketplace');
+  await shot('after-reset-minimal');
+  await say('resets to the minimal world, which has nothing on the market and the clock back at T0');
+
+  await become('Nadia Rahman');
+  await page.goto(`${BASE}/reset`, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel('Demo catalogue').check();
+  await page.getByLabel('Type RESET to confirm').fill('RESET');
+  await page.getByRole('button', { name: 'Reset the world' }).click();
+  await page.waitForTimeout(6000);
+  await expectClock('T0', 'the world after restoring the demo catalogue');
+  await page.goto(`${BASE}/lender`, { waitUntil: 'domcontentloaded' });
+  await expectText('TP-2026-0141', 'the restored catalogue');
   const body = await page.locator('body').innerText();
   if (body.includes(created)) throw new Error(`${created} survived the reset`);
   await shot('after-reset');
-  await say('the admin resets the world, and it is seeded and ready for the next run');
+  await say('the admin restores the demo catalogue, and it is seeded and ready for the next run');
 
   const seconds = Math.round((Date.now() - started) / 1000);
   console.log(`\nrunbook complete in ${seconds}s of machine time`);
