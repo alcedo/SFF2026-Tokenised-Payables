@@ -519,8 +519,17 @@ BEGIN
     IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
       RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
     END IF;
-    IF v_payable.receipt_status = 'pending' THEN
-      RAISE EXCEPTION 'payable % has not been accepted by its supplier yet', v_payable.ref
+    -- PRD §3 q7 gives the supplier the choice, and core/lifecycle.canTradeReceipt
+    -- reads it as only an accepted payable may move. This guard used to refuse
+    -- 'pending' alone, so a rejection left the whole quantity in the anchor's
+    -- own wallet and free to move on. Anyone it reached would hold a token that
+    -- settlement refuses (ADA37) and that cancel_payable can no longer burn,
+    -- because the anchor no longer holds the face (ADA40). Refusing here is
+    -- what keeps a refused payable in one place where it can still be withdrawn.
+    IF v_payable.receipt_status IS DISTINCT FROM 'accepted' THEN
+      RAISE EXCEPTION '%', CASE WHEN v_payable.receipt_status = 'rejected'
+        THEN format('payable %s was rejected by its supplier and cannot be traded', v_payable.ref)
+        ELSE format('payable %s has not been accepted by its supplier yet', v_payable.ref) END
         USING ERRCODE = 'ADA15';
     END IF;
     v_legs := ARRAY[
@@ -590,8 +599,13 @@ BEGIN
       --
       -- PRD §8 screen 6 presents an inbox: a payable the supplier has not yet
       -- accepted is visible but not yet actionable.
-      IF v_payable.receipt_status = 'pending' THEN
-        RAISE EXCEPTION 'payable % has not been accepted by its supplier yet', v_payable.ref
+      -- Same rule as transfer: only an accepted payable moves. A rejected one
+      -- sits in the anchor's wallet waiting to be cancelled, and listing it
+      -- would sell a token settlement refuses to pay.
+      IF v_payable.receipt_status IS DISTINCT FROM 'accepted' THEN
+        RAISE EXCEPTION '%', CASE WHEN v_payable.receipt_status = 'rejected'
+          THEN format('payable %s was rejected by its supplier and cannot be traded', v_payable.ref)
+          ELSE format('payable %s has not been accepted by its supplier yet', v_payable.ref) END
           USING ERRCODE = 'ADA15';
       END IF;
       INSERT INTO app.listing (id, target_kind, target_payable_id, seller_wallet,

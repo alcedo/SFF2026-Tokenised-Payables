@@ -293,6 +293,41 @@ is recorded so that the contrast with machine 1 is deliberate rather than
 accidental. It is also what makes findings 3's CHECK the only backstop: there
 is no trigger behind it.
 
+## 11. The trade gate refused a pending receipt but not a rejected one
+
+**FIXED.** Both gates now refuse anything that is not `accepted`, and name a
+rejection when that is what they found.
+
+Found while adding the `cancelled` state, not by the suite. `db/post.sql`
+refused a trade on `receipt_status = 'pending'` in two places, the `transfer`
+branch and `publish_listing`. `src/core/lifecycle.canTradeReceipt` reads the
+rule as `receipt === 'accepted'` and every screen gates on that, and
+`docs/ASSUMPTIONS.md` says a payable "cannot be listed or transferred until
+accepted". The database was the loosest of the three, which is the direction
+that matters: the UI drew no button, so nothing in the product exercised the
+gap, and nothing in the suites looked for it.
+
+**Impact.** A rejection returns the whole quantity to the anchor's own wallet.
+From there the anchor could transfer or list it, and whoever received it held a
+token that `settle_maturity` refuses to pay (`ADA37`) and that `cancel_payable`
+can no longer burn, because the anchor no longer holds the face (`ADA40`). The
+tokens would sit outstanding against an obligation nobody can discharge and
+nobody can withdraw.
+
+The `ADA37` guard is what made this reachable, so it dates from the commit that
+stopped a rejected payable redeeming for free rather than from the original
+design. Cancellation is what makes it matter: the refused payable now has
+exactly one way out, and it only works while the quantity is still whole and
+still in the anchor's wallet.
+
+**Reproduction.** `machine 4 > refuses to move a rejected payable, which is the
+only place it can be withdrawn from`: reject a receipt, then try both a
+transfer and a listing from the anchor's wallet, then cancel it.
+
+```
+ADA15 payable RC-rejected-trade was rejected by its supplier and cannot be traded
+```
+
 ## 10. The suite ran dark for four of its five machines
 
 Found while triaging this file, not by the suite. Recorded here because it

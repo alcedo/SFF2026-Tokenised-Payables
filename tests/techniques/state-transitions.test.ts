@@ -1460,6 +1460,68 @@ describe('machine 4: app.payable.receipt_status', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
+  it('refuses to move a rejected payable, which is the only place it can be withdrawn from', async () => {
+    const payableId = await park(world, 'RC-rejected-trade', 'issued', LONG_TERM);
+    const rejected = await post(
+      db.pool,
+      { kind: 'reject_receipt', payableId, holderWallet: world.supplierWallet },
+      { actorUserId: world.supplier },
+    );
+    expect(rejected).toMatchObject({ ok: true });
+
+    // The rejection put the whole quantity in the anchor's own wallet, which is
+    // where cancel_payable burns it from. Moving it on would strand a token
+    // settlement refuses (ADA37) somewhere cancellation can no longer reach.
+    const { rows } = await db.pool.query<{ address: string }>(
+      'SELECT address FROM app.wallet WHERE entity_id = $1 LIMIT 1',
+      [world.anchorId],
+    );
+    const anchorWallet = rows[0]!.address;
+
+    expect(
+      await post(
+        db.pool,
+        {
+          kind: 'transfer',
+          payableId,
+          fromWallet: anchorWallet,
+          toWallet: world.buyerWallet,
+          quantityBase: FACE_BASE,
+        },
+        { actorUserId: world.preparer },
+      ),
+    ).toEqual({
+      ok: false,
+      code: 'ADA15',
+      message: 'payable RC-rejected-trade was rejected by its supplier and cannot be traded',
+    });
+
+    expect(
+      await post(
+        db.pool,
+        {
+          kind: 'publish_listing',
+          payableId,
+          sellerWallet: anchorWallet,
+          quantityBase: FACE_BASE,
+          minPriceBase: 1,
+        },
+        { actorUserId: world.preparer },
+      ),
+    ).toEqual({
+      ok: false,
+      code: 'ADA15',
+      message: 'payable RC-rejected-trade was rejected by its supplier and cannot be traded',
+    });
+
+    // Still whole, still where the checker can cancel it.
+    expect(
+      await post(db.pool, { kind: 'cancel_payable', payableId }, { actorUserId: world.checker }),
+    ).toMatchObject({ ok: true });
+    expect(await lifecycleOf(db.pool, payableId)).toBe('cancelled');
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
+  });
+
   it('has no edge table of its own, so a direct write may walk the receipt backwards', async () => {
     const payableId = await park(world, 'RC-backwards', 'issued', LONG_TERM);
     expect(

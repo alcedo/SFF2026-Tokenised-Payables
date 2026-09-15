@@ -934,8 +934,16 @@ class Transfer extends Step {
     if (model.day >= p.maturity) {
       return refuse('ADA12', `payable ${p.ref} has reached maturity`);
     }
-    if (p.receipt === 'pending') {
-      return refuse('ADA15', `payable ${p.ref} has not been accepted by its supplier yet`);
+    // Only an accepted payable moves. A rejected one is refused by name, so
+    // the quantity sitting in the anchor's wallet stays where cancel_payable
+    // can still burn it.
+    if (p.receipt !== 'accepted') {
+      return refuse(
+        'ADA15',
+        p.receipt === 'rejected'
+          ? `payable ${p.ref} was rejected by its supplier and cannot be traded`
+          : `payable ${p.ref} has not been accepted by its supplier yet`,
+      );
     }
     const from = this.from(model, real);
     const have = held(model, from, 'wallet_free', id);
@@ -1025,8 +1033,16 @@ class PublishListing extends Step {
     if (model.day >= p.maturity) {
       return refuse('ADA12', `payable ${p.ref} has reached maturity`);
     }
-    if (p.receipt === 'pending') {
-      return refuse('ADA15', `payable ${p.ref} has not been accepted by its supplier yet`);
+    // Only an accepted payable moves. A rejected one is refused by name, so
+    // the quantity sitting in the anchor's wallet stays where cancel_payable
+    // can still burn it.
+    if (p.receipt !== 'accepted') {
+      return refuse(
+        'ADA15',
+        p.receipt === 'rejected'
+          ? `payable ${p.ref} was rejected by its supplier and cannot be traded`
+          : `payable ${p.ref} has not been accepted by its supplier yet`,
+      );
     }
     const seller = this.seller(model, real);
     for (const listing of model.listings.values()) {
