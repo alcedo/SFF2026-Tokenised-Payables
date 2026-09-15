@@ -22,10 +22,7 @@ import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
  */
 export default async function AdataDashboard() {
   const world = await readWorld();
-  const [totals, payables] = await Promise.all([
-    readProgrammeTotals(world),
-    readPayables(world),
-  ]);
+  const [totals, payables] = await Promise.all([readProgrammeTotals(world), readPayables(world)]);
 
   const live = payables.filter(
     (p) => p.status === 'issued' || p.status === 'matured' || p.status === 'overdue',

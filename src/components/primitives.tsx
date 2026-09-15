@@ -110,21 +110,7 @@ export function Address({ value, full = false }: { value: string; full?: boolean
   );
 }
 
-/**
- * PRD section 10: "Label every hash, block number, and receipt as simulated."
- * The label is part of the component so a screen cannot render a hash without it.
- */
-export function MockTxRef({ hash, block }: { hash: string; block?: number }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="addr">{hash.length > 13 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash}</span>
-      {block !== undefined ? <span className="text-[10px] text-ink-faint">block {block}</span> : null}
-      <span className="rounded-[3px] border border-caution/30 bg-caution-soft px-1 py-px text-[10px] font-medium text-caution">
-        Simulated
-      </span>
-    </span>
-  );
-}
+export { MockTxRef } from './MockTxRef';
 
 export function Panel({
   title,

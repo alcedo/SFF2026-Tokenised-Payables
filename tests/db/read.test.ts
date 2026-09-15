@@ -10,6 +10,8 @@ import { execFileSync } from 'node:child_process';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
 import { closePool } from '@/db/client';
+import { loadNextAction, loadNextActionSnapshot } from '@/app/next-action-data';
+import { deriveTabCounts } from '@/core/tab-badges';
 import {
   readBalances,
   readBids,
@@ -23,6 +25,7 @@ import {
   readPayables,
   readPersonas,
   readProgrammeTotals,
+  readSimulatedReceipt,
   readWorld,
   type World,
 } from '@/db/read';
@@ -229,6 +232,19 @@ describe('audit history', () => {
     const published = events.find((e) => e.kind === 'listing_published')!;
     expect(published.txHash).toBeNull();
   });
+
+  it('reopens a chain receipt by hash with its legs', async () => {
+    const events = await readEvents({ limit: 200 });
+    const issuance = events.find((e) => e.kind === 'issuance' && e.txHash)!;
+    const receipt = await readSimulatedReceipt(issuance.txHash!);
+    expect(receipt).not.toBeNull();
+    expect(receipt!.simulated).toBe(true);
+    expect(receipt!.txHash).toBe(issuance.txHash);
+    expect(receipt!.kind).toBe('issuance');
+    expect(receipt!.movements.length).toBeGreaterThan(0);
+    expect(receipt!.movements.every((m) => m.amountBase > 0n)).toBe(true);
+    expect(await readSimulatedReceipt('0xdeadbeef')).toBeNull();
+  });
 });
 
 describe('programme totals', () => {
@@ -285,5 +301,75 @@ describe('a listing can be found from its target', () => {
     const tp141 = payables.find((p) => p.ref === 'TP-2026-0141')!;
     const listing = await readListingForTarget(tp141.id, world);
     expect(listing?.targetRef).toBe('TP-2026-0141');
+  });
+});
+
+describe('the next action for a seeded persona', () => {
+  it('sends the ADATA checker to fund the overdue payable', async () => {
+    const personas = await readPersonas();
+    const checker = personas.find((p) => p.name === 'Hsu Po-Chun');
+    expect(checker).toBeDefined();
+    expect(await loadNextAction(checker!, world)).toEqual({
+      kind: 'yours',
+      verb: 'Fund settlement of TP-2026-0119',
+      href: '/adata/settlement',
+      detail: 'Maturity does not pay anyone. Settlement is an explicit act.',
+    });
+  });
+
+  it('sends a lender to an open lot even when payables exist', async () => {
+    const personas = await readPersonas();
+    const lender = personas.find((p) => p.name === 'Rina Okafor');
+    expect(lender).toBeDefined();
+    const action = await loadNextAction(lender!, world);
+    expect(action.kind).toBe('yours');
+    if (action.kind !== 'yours') return;
+    expect(action.verb).toMatch(/^Review TP-/);
+    expect(action.href).toMatch(/^\/lender\//);
+  });
+
+  it('tells the admin the programme is current', async () => {
+    const personas = await readPersonas();
+    const admin = personas.find((p) => p.name === 'Nadia Rahman');
+    expect(admin).toBeDefined();
+    expect(await loadNextAction(admin!, world)).toEqual({
+      kind: 'clear',
+      heading: 'Programme is current.',
+      detail: 'Open Explorer to show the trail, or Accounts to add a user.',
+    });
+  });
+});
+
+describe('tab counts for a seeded persona', () => {
+  it('badges Hsu Po-Chun settlement only', async () => {
+    const personas = await readPersonas();
+    const hsu = personas.find((p) => p.name === 'Hsu Po-Chun');
+    expect(hsu).toBeDefined();
+    expect(deriveTabCounts(await loadNextActionSnapshot(hsu!, world))).toEqual({
+      '/adata/settlement': 1,
+    });
+  });
+
+  it('sums Lin Ya-Ting offers from placed bids on her listing', async () => {
+    const personas = await readPersonas();
+    const lin = personas.find((p) => p.name === 'Lin Ya-Ting');
+    expect(lin).toBeDefined();
+    expect(deriveTabCounts(await loadNextActionSnapshot(lin!, world))).toEqual({
+      '/supplier/offers': 2,
+    });
+  });
+
+  it('gives Nadia Rahman no queue badges', async () => {
+    const personas = await readPersonas();
+    const nadia = personas.find((p) => p.name === 'Nadia Rahman');
+    expect(nadia).toBeDefined();
+    expect(deriveTabCounts(await loadNextActionSnapshot(nadia!, world))).toEqual({});
+  });
+
+  it('does not badge the marketplace for Rina Okafor', async () => {
+    const personas = await readPersonas();
+    const rina = personas.find((p) => p.name === 'Rina Okafor');
+    expect(rina).toBeDefined();
+    expect(deriveTabCounts(await loadNextActionSnapshot(rina!, world))).toEqual({});
   });
 });

@@ -165,6 +165,13 @@ main .grid > * {
   flex: 1 1 auto;
 }
 
+.chrome-nav-count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-accent);
+}
+
 .chrome-balances {
   display: flex;
   flex-wrap: wrap;
@@ -234,6 +241,21 @@ main .grid > * {
   .addr {
     overflow-wrap: anywhere;
   }
+}
+
+dialog.explorer-overlay {
+  padding: 0;
+  margin: auto;
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  width: min(960px, calc(100vw - 1.5rem));
+  max-height: min(90vh, 840px);
+}
+
+dialog.explorer-overlay::backdrop {
+  background: rgb(15 23 42 / 0.45);
 }
 
 /* Focus stays visible for keyboard use at the booth. */

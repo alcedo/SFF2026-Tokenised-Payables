@@ -63,21 +63,18 @@ export function navFor(persona: Persona): NavItem[] {
         { href: '/adata/create', label: 'Create payable' },
         { href: '/adata/approvals', label: 'Approval queue' },
         { href: '/adata/settlement', label: 'Settlement' },
-        { href: '/explorer', label: 'Explorer' },
       ];
     case 'supplier':
       return [
         { href: '/supplier', label: 'My tokenised payables' },
         { href: '/supplier/offers', label: 'Offers received' },
         { href: '/transfer', label: 'Send payable' },
-        { href: '/explorer', label: 'Explorer' },
       ];
     case 'lender':
       return [
         { href: '/lender', label: 'Marketplace' },
         { href: '/lender/portfolio', label: 'Portfolio' },
         { href: '/transfer', label: 'Send payable' },
-        { href: '/explorer', label: 'Explorer' },
       ];
     case 'straitsx_admin':
       return [
@@ -85,7 +82,6 @@ export function navFor(persona: Persona): NavItem[] {
         { href: '/admin/certification', label: 'Issuer certification' },
         { href: '/admin/grading', label: 'Grading' },
         { href: '/admin/accounts', label: 'Accounts' },
-        { href: '/explorer', label: 'Explorer' },
       ];
   }
 }
