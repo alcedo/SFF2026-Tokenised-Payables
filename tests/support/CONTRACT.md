@@ -35,17 +35,22 @@ suite.
    point of the system.
 4. **Do not change production code.** Not `src/`, not `db/`. If a test exposes
    what looks like a defect, keep the test and write the finding into
-   `tests/techniques/FINDINGS.md` with the file, the reproduction and the
-   observed versus expected behaviour. A failing test that documents a real
-   defect is a deliverable, not a problem to hide. If a suite cannot pass
-   because the system is wrong, mark that single case `it.fails(...)` so the
-   suite still runs green while recording the defect, and write it up.
+   **your own** findings file, `tests/techniques/findings/<your-suite>.md`,
+   with the file, the reproduction and the observed versus expected behaviour.
+   Never write to a findings file that is not yours, and never to the shared
+   `FINDINGS.md`. A failing test that documents a real defect is a deliverable,
+   not a problem to hide. If a suite cannot pass because the system is wrong,
+   mark that single case `it.fails(...)` so the suite still runs green while
+   recording the defect, and write it up.
 5. **Do not edit any other suite, this contract, or anything under
-   `tests/support/`.** Suites run in parallel and must not collide.
-6. **Comments explain a non-obvious why, never a what.** No phase-narrating
+   `tests/support/`.** Suites are written in parallel and must not collide. You
+   own exactly two paths: your suite file and your findings file.
+6. **Never run git.** No add, no commit, no branch, no stash. The work is
+   reviewed and committed by the coordinator.
+7. **Comments explain a non-obvious why, never a what.** No phase-narrating
    comments such as `// Step 1: create the payable`. Let the assertion message
    carry the narration.
-7. **No long-dash character anywhere** in code, comments or prose.
+8. **No long-dash character anywhere** in code, comments or prose.
 
 ## Facts about the system you will need
 
@@ -73,4 +78,4 @@ suite.
 - `npx vitest run tests/techniques/<your-file>` is green.
 - `npx tsc --noEmit` is clean.
 - Every case asserts a literal or a named error code.
-- Any defect found is written up in `tests/techniques/FINDINGS.md`.
+- Any defect found is written up in `tests/techniques/findings/<your-suite>.md`.
