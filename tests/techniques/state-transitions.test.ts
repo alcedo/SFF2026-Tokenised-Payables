@@ -159,21 +159,30 @@ async function park(
   for (let step = 1; step <= stop; step += 1) {
     tokenSeq += 1;
     const state = LIFECYCLE_ORDER[step];
-    const intent: Record<string, unknown> =
+    const intents: Record<string, unknown>[] =
       state === 'pending_approval'
-        ? { kind: 'submit', payableId }
+        ? [{ kind: 'submit', payableId }]
         : state === 'approved'
-          ? { kind: 'approve', payableId }
+          ? [{ kind: 'approve', payableId }]
           : state === 'certified'
-            ? { kind: 'certify', payableId, grade: 'AAA', gradeRationale: 'matrix fixture' }
-            : {
-                kind: 'issue_payable',
-                payableId,
-                toWallet: world.supplierWallet,
-                tokenId: 900_000 + tokenSeq,
-              };
-    const done = await post(world.pool, intent, { actorUserId: world.admin });
-    if (!done.ok) throw new Error(`could not park ${ref} at ${state}: ${done.code} ${done.message}`);
+            ? [
+                { kind: 'grade', payableId, grade: 'AAA', gradeRationale: 'matrix fixture' },
+                { kind: 'certify', payableId },
+              ]
+            : [
+                {
+                  kind: 'issue_payable',
+                  payableId,
+                  toWallet: world.supplierWallet,
+                  tokenId: 900_000 + tokenSeq,
+                },
+              ];
+    for (const intent of intents) {
+      const done = await post(world.pool, intent, { actorUserId: world.admin });
+      if (!done.ok) {
+        throw new Error(`could not park ${ref} at ${state}: ${done.code} ${done.message}`);
+      }
+    }
   }
   return payableId;
 }
@@ -454,7 +463,11 @@ describe('machine 1: the obligation lifecycle', () => {
         observed[key] = `${outcome(result)} -> ${await lifecycleOf(db.pool, id)}`;
 
         const to = TARGET_OF[command];
-        if (command === 'issue_payable' && from !== 'certified') {
+        const graded =
+          LIFECYCLE_ORDER.indexOf(from) >= LIFECYCLE_ORDER.indexOf('certified');
+        if (command === 'certify' && !graded) {
+          expected[key] = `ADA35: payable ${ref} has no grade yet -> ${from}`;
+        } else if (command === 'issue_payable' && from !== 'certified') {
           expected[key] =
             `ADA15: payable ${ref} is ${from} and must be certified before issuance -> ${from}`;
         } else if (command === 'settle_maturity' && from === 'settled') {
@@ -472,23 +485,39 @@ describe('machine 1: the obligation lifecycle', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('lets the row CHECK win over the edge trigger when the edge itself is legal', async () => {
+  it('refuses an ungraded certify by name, ahead of both the trigger and the CHECK', async () => {
     const payableId = await park(world, 'GUARD-ungraded', 'approved', LONG_TERM);
     const refused = await post(
       db.pool,
       { kind: 'certify', payableId },
       { actorUserId: world.admin },
     );
-    expect(refused).toMatchObject({ ok: false, code: '23514' });
-    expect((refused as { message: string }).message).toContain('graded_before_certified');
+    expect(refused).toEqual({
+      ok: false,
+      code: 'ADA35',
+      message: 'payable GUARD-ungraded has no grade yet',
+    });
     expect(await lifecycleOf(db.pool, payableId)).toBe('approved');
 
-    const graded = await post(
+    // The grade is its own command, so an inline grade on certify is refused
+    // too: the guard reads the stored column, not the intent.
+    const inline = await post(
       db.pool,
       { kind: 'certify', payableId, grade: 'AA', gradeRationale: 'graded on the retry' },
       { actorUserId: world.admin },
     );
+    expect(inline).toMatchObject({ ok: false, code: 'ADA35' });
+    expect(await lifecycleOf(db.pool, payableId)).toBe('approved');
+
+    const graded = await post(
+      db.pool,
+      { kind: 'grade', payableId, grade: 'AA', gradeRationale: 'graded on the retry' },
+      { actorUserId: world.admin },
+    );
     expect(graded).toMatchObject({ ok: true });
+    expect(
+      await post(db.pool, { kind: 'certify', payableId }, { actorUserId: world.admin }),
+    ).toMatchObject({ ok: true });
     expect(await lifecycleOf(db.pool, payableId)).toBe('certified');
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
@@ -528,10 +557,18 @@ describe('machine 1: the obligation lifecycle', () => {
     // only (from_state, to_state), so the column constrains nothing. Driving
     // the whole chain as a supplier is the cheapest proof of that.
     const payableId = await park(world, 'ROLE-wrong', 'draft', SHORT_TERM);
+    // grade is not a lifecycle edge, so it is setup here rather than a step.
+    expect(
+      await post(
+        db.pool,
+        { kind: 'grade', payableId, grade: 'A' },
+        { actorUserId: world.supplier },
+      ),
+    ).toMatchObject({ ok: true });
     const walk = [
       { kind: 'submit', payableId },
       { kind: 'approve', payableId },
-      { kind: 'certify', payableId, grade: 'A' },
+      { kind: 'certify', payableId },
       { kind: 'issue_payable', payableId, toWallet: world.supplierWallet, tokenId: 654_321 },
       { kind: 'settle_maturity', payableId, fundingCode: 'XUSD' },
     ];

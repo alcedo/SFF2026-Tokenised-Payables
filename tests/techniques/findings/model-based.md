@@ -454,6 +454,28 @@ settled movement of nothing. Verified directly: the entry has `legs = 0`,
 
 ---
 
+## 11. The model predicted the pre-`c2c8720` certify precedence
+
+Found while triaging, not by the suite. `c2c8720` added an `ADA35` guard that
+reads the stored grade before `ledger.post()` touches the row, so for `certify`
+it now fires ahead of both the lifecycle trigger and the
+`graded_before_certified` CHECK. `Advance.predict` still ordered the edge check
+first and expected `23514` from the CHECK, so the property failed on its first
+generated sequence at seed `20260915`:
+
+```
+AssertionError: certify(payable=ready0) expected refusal ADA01, got ADA35:
+payable MB-1 has no grade yet
+```
+
+The failure aborted the run, which is why
+`reaches every lifecycle state, every command and every reachable pair` then saw
+only `['draft']`.
+
+**Repair.** `Advance.predict` checks `!p.graded` first for `certify` and
+predicts `ADA35`. `ADA35` joins the asserted verdict set. The `23514` branch is
+gone, because no command can reach the CHECK any more.
+
 ## Two things the model checked and found correct
 
 Recorded because they are the parts most likely to be wrong, and the property

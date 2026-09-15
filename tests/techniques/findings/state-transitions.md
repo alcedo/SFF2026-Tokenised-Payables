@@ -33,7 +33,7 @@ fixes the precedence, and the matrix confirms it cell by cell.
 | Situation | Guard that fires | Cells |
 | --- | --- | --- |
 | Illegal edge, any companion column state | trigger `payable_lifecycle_edge`, `ADA01` | 25 of matrix 1, 16 of matrix 3 |
-| Legal edge `approved -> certified`, `grade IS NULL` | CHECK `graded_before_certified`, `23514` | `certify` with no grade |
+| `certify` with `grade IS NULL`, any state | in-command pre-check, `ADA35` | 3, and see finding 10 |
 | `issue_payable` from any state but `certified` | in-command pre-check, `ADA15` | 5 |
 | `settle_maturity` on a settled payable | in-command pre-check, `ADA16` | 1 |
 | `settle_maturity` before maturity | in-command pre-check, `ADA12` | beats `ADA01`, tested separately |
@@ -262,6 +262,57 @@ No command does this, so it is an asymmetry rather than a live defect, and it
 is recorded so that the contrast with machine 1 is deliberate rather than
 accidental. It is also what makes findings 3's CHECK the only backstop: there
 is no trigger behind it.
+
+## 10. The suite ran dark for four of its five machines
+
+Found while triaging this file, not by the suite. Recorded here because it
+invalidates the cell counts above for every run between `bd17de7` and the
+commit that carries this note.
+
+`c2c8720 fix(certify): grade on the admin path before certification`, merged
+into main at `bd17de7` after this suite was written at `842123c`, added a guard
+to `ledger.post()`:
+
+```sql
+IF v_kind = 'certify' AND v_payable.grade IS NULL THEN
+  RAISE EXCEPTION 'payable % has no grade yet', v_payable.ref USING ERRCODE = 'ADA35';
+END IF;
+```
+
+It reads the **stored** grade, and it runs before the `UPDATE` that would apply
+a grade carried on the intent. So `{kind: 'certify', grade: 'AAA'}` in one
+command is refused, always. `park()` posted exactly that shape, so every
+`beforeAll` that parks a payable past `approved` threw.
+
+Vitest reports a suite whose `beforeAll` throws as **skipped**, not failed. The
+result was 34 of 38 tests never running while the file reported one failure, and
+`npm test` overall reporting `3 failed | 1178 passed | 167 skipped`.
+
+Reproduced directly against a seeded database rather than inferred from the
+test:
+
+```
+NOTICE:  RESULT: certify-with-inline-grade REFUSED sqlstate=ADA35 msg=payable PROBE-1 has no grade yet
+```
+
+`db/post.sql` is correct and `tests/ledger/lifecycle.sql` lines 134 to 165
+already assert the two-step flow, including `PASS  certify without a grade is
+refused by name`. The suite was what had drifted.
+
+**Repair.** `park()` now posts `grade` and then `certify`. Three matrix cells
+moved with it, and all three moved to a better answer:
+
+| cell | before `c2c8720` | now |
+| --- | --- | --- |
+| `draft/certify` | `ADA01 illegal lifecycle transition draft -> certified` | `ADA35 payable ... has no grade yet` |
+| `pending_approval/certify` | `ADA01` | `ADA35` |
+| `approved/certify` | accepted | `ADA35` |
+
+Finding 3's table row `Legal edge approved -> certified, grade IS NULL | CHECK
+graded_before_certified, 23514` is therefore obsolete. The in-command guard now
+fires first and `graded_before_certified` is unreachable from the command
+surface. `it('lets the row CHECK win over the edge trigger when the edge itself
+is legal')` was renamed and rewritten to assert that.
 
 ## What held
 

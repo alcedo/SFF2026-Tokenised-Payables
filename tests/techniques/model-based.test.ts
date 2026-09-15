@@ -549,15 +549,17 @@ class Advance extends Step {
 
   protected predict(model: Model, real: Real): Verdict {
     const p = aimed(model, this.kind, this.index, this.guided)[1];
+    // ledger.post() checks the stored grade before it touches the row, so ADA35
+    // beats both the lifecycle trigger and the graded_before_certified CHECK.
+    if (this.kind === 'certify' && !p.graded) {
+      return refuse('ADA35', `payable ${p.ref} has no grade yet`);
+    }
     // The lifecycle trigger returns early when the status does not change, so
     // re-issuing a transition the payable already made is accepted and does
     // nothing.
     if (p.status === this.target) return legal;
     if (!real.edges.has(`${p.status}->${this.target}`)) {
       return refuse('ADA01', `illegal lifecycle transition ${p.status} -> ${this.target}`);
-    }
-    if (this.target === 'certified' && !p.graded) {
-      return refuse('23514', 'violates check constraint "graded_before_certified"');
     }
     return legal;
   }
@@ -1728,7 +1730,7 @@ describe('model-based coverage of the payable workflow', () => {
     expect([...coverage.verdicts.keys()].sort()).toEqual([
       '23502', '23505', '23514',
       'ADA01', 'ADA11', 'ADA12', 'ADA15', 'ADA16', 'ADA17', 'ADA19', 'ADA20',
-      'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34',
+      'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34', 'ADA35',
       'accepted',
     ]);
   });
