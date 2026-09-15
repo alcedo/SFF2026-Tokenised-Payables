@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Everything, in one command. This is what CI runs and what a contributor runs
-# before pushing. Each stage resets the database, so they cannot contaminate
-# one another and the order does not matter.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+export PATH="/usr/lib/postgresql/16/bin:${PATH}"
 
 FAILED=0
 pass() { printf '\033[32m  ok\033[0m  %s\n' "$1"; }
@@ -40,8 +38,9 @@ sql_stage() {
 }
 
 echo "── unit ─────────────────────────────────────────────"
-stage "pricing, lifecycle, clock (vitest)" npx vitest run
+stage "pricing, lifecycle, clock, fields (vitest)" npx vitest run
 stage "typecheck" npx tsc --noEmit
+stage "mutation: core parsers and formulas" node scripts/mutate.mjs
 
 echo "── schema ───────────────────────────────────────────"
 scripts/db.sh reset >/dev/null 2>&1
@@ -65,7 +64,11 @@ RESET_ARG=reset sql_stage "accounts: onboarding, personas, removal" tests/ledger
 RESET_ARG=reset sql_stage "programme: limits and issuer certification" tests/ledger/programme.sql
 RESET_ARG=bare sql_stage "runbook: issue, list, bid, accept, advance, settle" tests/ledger/runbook.sql
 RESET_ARG=bare sql_stage "invariants: the things PRD 14 says must not happen" tests/ledger/invariants.sql
+RESET_ARG=bare sql_stage "decision table: fields and compliance" tests/ledger/decision-table.sql
+RESET_ARG=bare sql_stage "state machines: listing, bid, certification" tests/ledger/states.sql
 stage "concurrency: two lenders race one listing" tests/ledger/concurrency.sh
+stage "concurrency: two transfers of the same holding" tests/ledger/concurrency-transfer.sh
+stage "fault injection: rollback, kill, replay" tests/ledger/fault.sh
 
 echo
 if [ "$FAILED" -eq 0 ]; then
