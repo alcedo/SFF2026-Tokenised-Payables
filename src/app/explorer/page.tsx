@@ -1,10 +1,6 @@
 import { ExplorerLogPanel } from '@/components/explorer/ExplorerLogPanel';
 import { readEvents, readProgrammeTotals, readWorld, serializeEvent } from '@/db/read';
 
-/**
- * Standalone explorer for the runbook and deep links. The same panel opens as
- * an overlay from the header Explorer control and from a hash click.
- */
 export default async function ExplorerPage() {
   const world = await readWorld();
   const [events, totals] = await Promise.all([readEvents({ limit: 200 }), readProgrammeTotals(world)]);

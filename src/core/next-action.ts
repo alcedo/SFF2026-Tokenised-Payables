@@ -1,10 +1,3 @@
-/**
- * The next verb a persona should take, derived from a snapshot rather than
- * restated on each home screen.
- *
- * Ordered sources. First `yours` wins, else first `waiting`, else `clear`.
- */
-
 import { pendingStep, ROLE_LABELS, type LifecycleStatus, type ReceiptStatus, type Role } from './lifecycle';
 
 export type NextAction =

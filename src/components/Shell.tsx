@@ -12,15 +12,9 @@ import { formatClock } from '@/core/clock';
 import { readBalances, readPersonas, readWorld } from '@/db/read';
 
 /**
- * The frame every screen sits in: the demo-controls bar, the acting persona's
- * navigation, their four wallet balances, and the next step that persona should
- * take.
- *
- * The next step is derived here, not on each home screen, so switching persona
- * without changing route still shows that person's action. Balances live in the
- * header because PRD §10 wants them visible whenever a payment is possible, and
- * a lender deciding whether to bid should not have to leave the marketplace to
- * find out what they can afford.
+ * The next-step strip is derived here so it follows the acting persona, not the
+ * route. Balances stay in the header because PRD §10 wants them visible
+ * whenever a payment is possible.
  */
 export async function Shell({ children }: { children: React.ReactNode }) {
   const [persona, personas, world] = await Promise.all([

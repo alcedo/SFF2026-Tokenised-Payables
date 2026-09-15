@@ -28,10 +28,6 @@ function MockTxLink({ hash, block }: { hash: string; block?: number }) {
   );
 }
 
-/**
- * PRD section 10: "Label every hash, block number, and receipt as simulated."
- * Clicking reopens the receipt in the explorer overlay.
- */
 export function MockTxRef({ hash, block }: { hash: string; block?: number }) {
   return (
     <Suspense fallback={<MockTxLook hash={hash} block={block} />}>

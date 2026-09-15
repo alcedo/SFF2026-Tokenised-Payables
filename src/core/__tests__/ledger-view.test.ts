@@ -3,12 +3,24 @@ import { describe, expect, it } from 'vitest';
 import { applyLedgerView, ledgerHref, parseLedgerSearch, transition } from '../ledger-view';
 
 describe('parseLedgerSearch', () => {
-  it('is closed when neither param is set', () => {
+  it('is closed when neither overlay param is set', () => {
     expect(parseLedgerSearch(new URLSearchParams('grade=AAA'))).toEqual({ mode: 'closed' });
+  });
+
+  it('is closed for a ledger value that applyLedgerView never writes', () => {
+    expect(parseLedgerSearch(new URLSearchParams('ledger=1'))).toEqual({ mode: 'closed' });
+    expect(parseLedgerSearch(new URLSearchParams('ledger=tx'))).toEqual({ mode: 'closed' });
   });
 
   it('opens the log from ledger=log', () => {
     expect(parseLedgerSearch(new URLSearchParams('ledger=log'))).toEqual({ mode: 'log' });
+  });
+
+  it('opens a receipt from tx alone', () => {
+    expect(parseLedgerSearch(new URLSearchParams('tx=0xabc'))).toEqual({
+      mode: 'receipt',
+      txHash: '0xabc',
+    });
   });
 
   it('opens a receipt from tx, even when ledger=log is also set', () => {
@@ -31,7 +43,7 @@ describe('applyLedgerView', () => {
     });
     expect(next.get('grade')).toBe('AAA');
     expect(next.get('tenor')).toBe('30');
-    expect(next.get('ledger')).toBe('tx');
+    expect(next.get('ledger')).toBeNull();
     expect(next.get('tx')).toBe('0xdead');
   });
 

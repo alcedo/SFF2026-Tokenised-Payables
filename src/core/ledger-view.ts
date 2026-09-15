@@ -1,10 +1,3 @@
-/**
- * Overlay mode for the mock explorer. The URL is the only store.
- *
- * `tx` names a simulated receipt. `ledger=log` opens the full log. Both
- * absent is closed. A bag of booleans cannot represent those three states.
- */
-
 export type LedgerView =
   | { readonly mode: 'closed' }
   | { readonly mode: 'log' }
@@ -37,7 +30,7 @@ export function parseLedgerSearch(
   const tx = readParam(params, TX_PARAM);
   if (tx !== null) return { mode: 'receipt', txHash: tx };
   const ledger = readParam(params, LEDGER_PARAM);
-  if (ledger === 'log' || ledger === '1') return { mode: 'log' };
+  if (ledger === 'log') return { mode: 'log' };
   return { mode: 'closed' };
 }
 
@@ -50,10 +43,7 @@ export function applyLedgerView(current: URLSearchParams, view: LedgerView): URL
   next.delete(LEDGER_PARAM);
   next.delete(TX_PARAM);
   if (view.mode === 'log') next.set(LEDGER_PARAM, 'log');
-  if (view.mode === 'receipt') {
-    next.set(LEDGER_PARAM, 'tx');
-    next.set(TX_PARAM, view.txHash);
-  }
+  if (view.mode === 'receipt') next.set(TX_PARAM, view.txHash);
   return next;
 }
 
