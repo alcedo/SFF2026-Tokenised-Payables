@@ -222,8 +222,9 @@ try {
     'handed off to StraitsX',
   );
   check(says(approved, 'Nadia Rahman'), `after approval ${payableRef} does not name the admin`);
+  check(says(approved, 'assign a grade'), `after approval ${payableRef} does not ask for a grade`);
   check(says(approved, 'certify it'), `after approval ${payableRef} does not name the next action`);
-  say('after approval it hands off to StraitsX, naming Nadia Rahman and certification');
+  say('after approval it hands off to StraitsX, naming Nadia Rahman, the grade, and certification');
 } catch (error) {
   failed += 1;
   console.error(`\nthrew at step ${step}: ${error.message}`);

@@ -1,5 +1,8 @@
 import { GradeForm } from './GradeForm';
+import { ActionButton } from '@/components/ActionButton';
 import { Amount, EmptyState, GradeBadge, LedgerScroll, Notice, Panel, StatusChip } from '@/components/primitives';
+import { certifyPayable } from '@/app/actions';
+import { currentPersona } from '@/app/session';
 import { readPayables, readWorld } from '@/db/read';
 
 /**
@@ -13,11 +16,13 @@ import { readPayables, readWorld } from '@/db/read';
  * its Sample qualifier and its rationale.
  */
 export default async function GradingPage() {
-  const world = await readWorld();
+  const [world, persona] = await Promise.all([readWorld(), currentPersona()]);
   const payables = await readPayables(world);
+  const isAdmin = persona.role === 'straitsx_admin';
 
   const ungraded = payables.filter((p) => p.grade === null);
-  const graded = payables.filter((p) => p.grade !== null);
+  const awaitingCertify = payables.filter((p) => p.grade !== null && p.storedStatus === 'approved');
+  const graded = payables.filter((p) => p.grade !== null && p.storedStatus !== 'approved');
 
   return (
     <div className="space-y-3">
@@ -25,7 +30,7 @@ export default async function GradingPage() {
         <h1 className="text-[15px] font-semibold">Grading</h1>
         <p className="text-[11.5px] text-ink-muted">
           Grades are assigned by StraitsX for this demo. They describe the anchor obligation, not
-          the supplier.
+          the supplier. An approved payable is certified here once it has a grade.
         </p>
       </div>
 
@@ -55,6 +60,33 @@ export default async function GradingPage() {
           </div>
         )}
       </Panel>
+
+      {awaitingCertify.length > 0 ? (
+        <Panel title={`Ready to certify (${awaitingCertify.length})`}>
+          <div className="space-y-3">
+            {awaitingCertify.map((p) => (
+              <div key={p.id} className="border-b border-rule pb-3 last:border-b-0 last:pb-0">
+                <div className="chrome-meta mb-1.5">
+                  <span className="text-[13px] font-medium">{p.ref}</span>
+                  {p.grade ? <GradeBadge grade={p.grade} /> : null}
+                  <StatusChip status={p.storedStatus} />
+                  <span className="text-[11.5px] text-ink-muted">
+                    {p.supplierName} · <Amount value={p.faceBase} decimals={2} /> XUSD ·{' '}
+                    {p.maturityDate}
+                  </span>
+                </div>
+                {isAdmin ? (
+                  <ActionButton label="Certify" action={certifyPayable} args={[p.id]} />
+                ) : (
+                  <p className="text-[11.5px] text-ink-muted">
+                    Waiting on the StraitsX admin to certify it under the programme.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
 
       <Panel title="Graded" dense>
         <LedgerScroll label="Graded payables">

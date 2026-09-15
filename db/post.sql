@@ -980,6 +980,9 @@ BEGIN
 
   ELSIF v_kind IN ('submit','approve','certify','grade') THEN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
+    IF v_kind = 'certify' AND v_payable.grade IS NULL THEN
+      RAISE EXCEPTION 'payable % has no grade yet', v_payable.ref USING ERRCODE = 'ADA35';
+    END IF;
     UPDATE app.payable
        SET lifecycle_status = CASE v_kind
              WHEN 'submit'  THEN 'pending_approval'::app.obligation_state

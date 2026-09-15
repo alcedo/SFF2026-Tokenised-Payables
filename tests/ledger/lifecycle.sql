@@ -131,6 +131,22 @@ BEGIN
   IF v_state <> 'approved' THEN RAISE EXCEPTION 'FAIL: approve left it %', v_state; END IF;
   RAISE NOTICE 'PASS  a separate checker approves it';
 
+  BEGIN
+    PERFORM ledger.post(jsonb_build_object(
+      'idempotencyKey','aaaa0000-0000-0000-0000-00000000000f','actorUserId',ADMIN,
+      'intent', jsonb_build_object('kind','certify','payableId',v_id)));
+    RAISE EXCEPTION 'FAIL: certified an ungraded payable';
+  EXCEPTION
+    WHEN sqlstate 'ADA35' THEN
+      RAISE NOTICE 'PASS  certify without a grade is refused by name';
+    WHEN check_violation THEN
+      RAISE EXCEPTION 'FAIL: certify without a grade still dies as a check constraint';
+  END;
+  SELECT lifecycle_status, grade::text INTO v_state, v_grade FROM app.payable WHERE id=v_id;
+  IF v_state <> 'approved' OR v_grade IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL: the refused certify changed the payable';
+  END IF;
+
   -- The case that a type mismatch broke: assigning an enum grade from json text.
   PERFORM ledger.post(jsonb_build_object(
     'idempotencyKey','aaaa0000-0000-0000-0000-000000000005','actorUserId',ADMIN,

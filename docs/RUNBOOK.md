@@ -44,7 +44,7 @@ Switch to **ADATA preparer**.
 > "Maker and checker are different people. The preparer cannot approve their own
 > submission."
 
-4. Switch to **StraitsX admin**. Certify it and assign grade AA with a rationale.
+4. Switch to **StraitsX admin**. Open **Grading**, assign grade AA with a rationale, then certify it.
 5. Issue. The full quantity mints to the supplier's wallet.
 
 **If the audience is a risk or compliance one, spend 30 seconds here.** Open
