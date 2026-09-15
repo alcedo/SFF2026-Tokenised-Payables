@@ -8,7 +8,7 @@ It uses a seeded unissued ERP invoice from section 12, which exists precisely so
 the pitch can issue and list a new position without colliding with the payables
 already on the market at T0.
 
-`scripts/runbook.mjs` drives every step below through the real UI in under a
+`scripts/runbook.mjs` drives every step below through the real UI in about a
 minute of machine time, and fails if any of it stops working. If you are about
 to present, run it first.
 
