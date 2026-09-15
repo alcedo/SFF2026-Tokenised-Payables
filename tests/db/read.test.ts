@@ -240,7 +240,7 @@ describe('programme totals', () => {
     const standaloneLive = payables
       .filter((p) => ['issued', 'matured', 'overdue'].includes(p.status))
       .reduce((acc, p) => acc + p.faceBase, 0n);
-    const seriesFace = 1_800_000_000n; // 180,000.0000 XUSD across 12 members
+    const seriesFace = 1_800_000_000n; // 180,000.0000 XUSD across 5 members
     expect(totals.issuedFaceBase).toBe(standaloneLive + seriesFace);
   });
 
