@@ -772,9 +772,16 @@ BEGIN
     LOOP
       UPDATE app.listing SET status = 'cancelled' WHERE id = v_listing.id;
       UPDATE app.bid SET status = 'superseded' WHERE listing_id = v_listing.id AND status = 'placed';
+      -- Every leg of the listing, not only the settled asset's. The listing is
+      -- cancelled whole, so escrow comes back whole, or
+      -- escrow_matches_open_listings finds the siblings of a series member
+      -- still in wallet_listed against a listing that is no longer open and
+      -- fails the whole redemption at COMMIT. Series members share a maturity
+      -- date by construction, so every listed series lot reached that on its
+      -- first member settled, in any order.
       FOR v_leg IN
         SELECT asset_id, quantity_base FROM app.listing_leg
-         WHERE listing_id = v_listing.id AND asset_id = v_asset ORDER BY asset_id
+         WHERE listing_id = v_listing.id ORDER BY asset_id
       LOOP
         v_legs := v_legs || ARRAY[
           ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_leg.asset_id, -v_leg.quantity_base)::ledger.leg_spec,

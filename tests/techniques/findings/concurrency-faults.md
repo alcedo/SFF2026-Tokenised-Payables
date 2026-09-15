@@ -76,6 +76,10 @@ payable. One direction has to give.
 
 ## 2. Redeeming one member of a listed series strands its siblings' escrow
 
+**FIXED.** The escrow unwind in `settle_maturity` no longer filters the
+listing's legs to the settled asset. The listing is cancelled whole, so its
+escrow comes back whole. The entry below is the state before that change.
+
 **High severity. A matured series lot cannot be redeemed through the product.**
 
 `settle_maturity` expires every open listing that carries the settled asset
@@ -113,8 +117,17 @@ credits the supplier both faces. The data is fine; the escrow unwind is not.
 **Expected.** A matured series member redeems. Series members share a maturity
 date by construction, since `app.payable` carries
 `FOREIGN KEY (series_id, maturity_date) REFERENCES app.series(id, maturity_date)`,
-so every series lot still listed at maturity hits this on the first member
-settled. There is no ordering of `settle_maturity` calls that avoids it.
+so every series lot still listed at maturity hit this on the first member
+settled. There was no ordering of `settle_maturity` calls that avoided it.
+
+**The fix** is one line: the inner loop's `AND asset_id = v_asset` is gone. The
+outer loop already selects listings that carry the settled asset, and the leg
+loop's job is to return what the listing held, which for a series is a leg per
+member. The test that recorded the defect now asserts the repair instead: the
+settled member reaches `settled`, the listing reaches `cancelled`, both members'
+`wallet_listed` balances go to zero, the sibling's quantity is back in
+`wallet_free`, and the sibling redeems next with no listing to cancel by hand
+first. The `it.fails` case that asked for that is deleted.
 
 ---
 

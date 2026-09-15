@@ -1310,7 +1310,7 @@ describe('fault injection', () => {
     expect(await ledgerHealth(s.pool)).toEqual(HEALTHY);
   });
 
-  it('leaves a sibling member escrowed and fails ADA04 at COMMIT of a series redemption', async () => {
+  it('returns every member of a series listing to free when one member redeems', async () => {
     const s = await stage('series_escrow');
     const supplier = s.suppliers[0]!;
     const members = await Promise.all(
@@ -1358,73 +1358,42 @@ describe('fault injection', () => {
       'advance_clock',
     );
 
-    await withClients(s.pool, 1, async ([client]) => {
-      await client!.query('BEGIN');
-      // settle_maturity expires every open listing carrying the settled asset,
-      // but only unwinds that one asset's escrow. A series listing carries the
-      // sibling members too, so their escrow is left held against a listing
-      // that is no longer open.
-      expect(
-        (
-          await post(
-            client!,
-            { kind: 'settle_maturity', payableId: first.id, fundingCode: 'XUSD' },
-            { actorUserId: s.users.adata_preparer },
-          )
-        ).ok,
-      ).toBe(true);
-
-      const failure = await client!
-        .query('COMMIT')
-        .then(() => null)
-        .catch((error: { code?: string; message?: string }) => error);
-      expect(failure?.code).toBe('ADA04');
-      expect(failure?.message).toBe(
-        `escrow for ${supplier.wallet} asset ${second.assetId} does not match open listings (held ${second.faceBase}, listed 0)`,
-      );
-    });
+    // settle_maturity expires every open listing carrying the settled asset and
+    // now unwinds that listing whole. A series listing carries a leg per
+    // member, so the siblings come back to free with it rather than being left
+    // held against a listing that is no longer open.
+    must(
+      await post(
+        s.pool,
+        { kind: 'settle_maturity', payableId: first.id, fundingCode: 'XUSD' },
+        { actorUserId: s.users.adata_preparer },
+      ),
+      'settle_maturity',
+    );
 
     const { rows } = await s.pool.query<{ lifecycle: string; listing: string }>(
       `SELECT p.lifecycle_status::text AS lifecycle, l.status::text AS listing
          FROM app.payable p, app.listing l WHERE p.id = $1 AND l.id = $2`,
       [first.id, listingId],
     );
-    expect(rows[0]).toEqual({ lifecycle: 'issued', listing: 'open' });
-    expect(await tokenBalance(s.pool, supplier.wallet, 'wallet_listed', first.assetId)).toBe(
-      BigInt(first.faceBase),
-    );
-    expect(await tokenBalance(s.pool, supplier.wallet, 'wallet_listed', second.assetId)).toBe(
+    expect(rows[0]).toEqual({ lifecycle: 'settled', listing: 'cancelled' });
+    expect(await tokenBalance(s.pool, supplier.wallet, 'wallet_listed', first.assetId)).toBe(0n);
+    expect(await tokenBalance(s.pool, supplier.wallet, 'wallet_listed', second.assetId)).toBe(0n);
+    expect(await tokenBalance(s.pool, supplier.wallet, 'wallet_free', second.assetId)).toBe(
       BigInt(second.faceBase),
     );
 
-    // The application posts in autocommit, so the same violation reaches a
-    // caller as a refusal of the whole redemption rather than as a commit error.
-    const autocommit = refused(
+    // The sibling redeems next with no listing to cancel by hand first. Members
+    // share a maturity date by construction, so this is the ordinary case
+    // rather than a recovery from a stuck one.
+    must(
       await post(
         s.pool,
-        { kind: 'settle_maturity', payableId: first.id, fundingCode: 'XUSD' },
+        { kind: 'settle_maturity', payableId: second.id, fundingCode: 'XUSD' },
         { actorUserId: s.users.adata_preparer },
       ),
+      'settle_maturity',
     );
-    expect(autocommit.code).toBe('ADA04');
-
-    // Cancelling the listing by hand first lets both members redeem, which
-    // locates the defect in settle_maturity's escrow unwind rather than in the
-    // data.
-    must(
-      await post(s.pool, { kind: 'cancel_listing', listingId }, { actorUserId: s.users.supplier }),
-      'cancel_listing',
-    );
-    for (const member of members) {
-      must(
-        await post(
-          s.pool,
-          { kind: 'settle_maturity', payableId: member.id, fundingCode: 'XUSD' },
-          { actorUserId: s.users.adata_preparer },
-        ),
-        'settle_maturity',
-      );
-    }
     expect(await cashBalance(s.pool, supplier.wallet, 'XUSD')).toBe(
       BigInt(first.faceBase + second.faceBase),
     );
@@ -1598,53 +1567,4 @@ describe('outcomes these races should not have', () => {
     });
   });
 
-  it.fails('redeems a matured member of a listed series', async () => {
-    const s = await stage('series_expected');
-    const supplier = s.suppliers[0]!;
-    const members = await Promise.all(
-      [0, 1].map((i) =>
-        issuePayable(s, {
-          supplier,
-          toWallet: supplier.wallet,
-          ref: `TP-SERIESX-000${i}`,
-          invoiceRef: `INV-SERIESX-000${i}`,
-          faceBase: 400_000_000 + i,
-          tokenId: 9310 + i,
-        }),
-      ),
-    );
-    const [first] = members as [IssuedPayable, IssuedPayable];
-
-    const seriesId = randomUUID();
-    await s.pool.query(
-      `INSERT INTO app.series (id, ref, anchor_id, maturity_date, grade, grade_rationale)
-       VALUES ($1, 'SERIES-CFX-0001', $2, $3::date, 'A', 'Sample grade for a test lot.')`,
-      [seriesId, s.anchor.entityId, first.maturityDate],
-    );
-    await s.pool.query('UPDATE app.payable SET series_id = $1 WHERE id = ANY($2::uuid[])', [
-      seriesId,
-      members.map((m) => m.id),
-    ]);
-
-    must(
-      await post(
-        s.pool,
-        { kind: 'publish_listing', listingId: randomUUID(), seriesId, sellerWallet: supplier.wallet, minPriceBase: PRICE },
-        { actorUserId: s.users.supplier },
-      ),
-      'publish_listing',
-    );
-    must(
-      await post(s.pool, { kind: 'advance_clock', days: TERMS_DAYS }, { actorUserId: s.users.straitsx_admin }),
-      'advance_clock',
-    );
-
-    const redeemed = await post(
-      s.pool,
-      { kind: 'settle_maturity', payableId: first.id, fundingCode: 'XUSD' },
-      { actorUserId: s.users.adata_preparer },
-    );
-    expect(redeemed).toMatchObject({ ok: true });
-    expect(await ledgerHealth(s.pool)).toEqual(HEALTHY);
-  });
 });
