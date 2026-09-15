@@ -102,7 +102,7 @@ try {
   await clickThrough('Assign grade');
   await say('StraitsX assigns a sample grade with its rationale');
 
-  await page.goto(`${BASE}/adata/approvals`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'Certify', exact: true }).first().waitFor();
   await clickThrough('Certify');
   await say('StraitsX certifies it under the programme');
 

@@ -8,6 +8,7 @@ import {
   Panel,
   StatusChip,
 } from '@/components/primitives';
+import { GradeForm } from '@/app/admin/grading/GradeForm';
 import { approvePayable, certifyPayable, issuePayable, submitPayable } from '@/app/actions';
 import { currentPersona } from '@/app/session';
 import { attempt, pendingStep, ROLE_LABELS } from '@/core/lifecycle';
@@ -55,6 +56,10 @@ export default async function ApprovalsPage() {
 
     const yourTurn = step.actors.includes(persona.role);
     const holders = personas.filter((x) => step.actors.includes(x.role)).map((x) => x.name);
+    const ask =
+      p.storedStatus === 'approved' && p.grade === null
+        ? 'assign a grade, then certify it'
+        : step.action;
     return {
       payable: p,
       yourTurn,
@@ -67,10 +72,10 @@ export default async function ApprovalsPage() {
         // that then says "must certify it" with nobody named is a dead end the
         // presenter cannot read their way out of.
         detail: yourTurn
-          ? `You are ${persona.name}, ${ROLE_LABELS[persona.role]}. Next step: ${step.action}.`
+          ? `You are ${persona.name}, ${ROLE_LABELS[persona.role]}. Next step: ${ask}.`
           : holders.length > 0
-            ? `${listOf(holders)} must ${step.action}. Switch persona in the demo controls to act as them.`
-            : `No active account holds that role, so nobody can ${step.action} yet. Add one on the accounts screen.`,
+            ? `${listOf(holders)} must ${ask}. Switch persona in the demo controls to act as them.`
+            : `No active account holds that role, so nobody can ${ask} yet. Add one on the accounts screen.`,
       },
     };
   });
@@ -215,13 +220,21 @@ export default async function ApprovalsPage() {
                     />
                   ) : null}
                   {p.storedStatus === 'approved' ? (
-                    <ActionButton
-                      label="Certify"
-                      disabled={!canCertify}
-                      disabledReason="Only the StraitsX admin may certify a payable under the programme."
-                      action={certifyPayable}
-                      args={[p.id]}
-                    />
+                    persona.role === 'straitsx_admin' && p.grade === null ? (
+                      <GradeForm payableId={p.id} payableRef={p.ref} />
+                    ) : (
+                      <ActionButton
+                        label="Certify"
+                        disabled={!canCertify || p.grade === null}
+                        disabledReason={
+                          p.grade === null
+                            ? 'Assign a grade before certifying.'
+                            : 'Only the StraitsX admin may certify a payable under the programme.'
+                        }
+                        action={certifyPayable}
+                        args={[p.id]}
+                      />
+                    )
                   ) : null}
                   {p.storedStatus === 'certified' ? (
                     <ActionButton

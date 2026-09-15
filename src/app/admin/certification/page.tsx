@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 import { IssuerControls } from './IssuerControls';
 import { Address, Field, Notice, Panel, Stat } from '@/components/primitives';
 import { currentPersona } from '@/app/session';
@@ -39,6 +41,16 @@ export default async function CertificationPage() {
         <h1 className="text-[15px] font-semibold">Issuer certification</h1>
         <p className="text-[11.5px] text-ink-muted">
           StraitsX certifies an anchor buyer before any payable it approves can be issued or listed.
+          {isAdmin ? (
+            <>
+              {' '}
+              To grade and certify a payable, open{' '}
+              <Link href="/admin/grading" className="text-accent hover:underline">
+                Grading
+              </Link>
+              .
+            </>
+          ) : null}
         </p>
       </div>
 

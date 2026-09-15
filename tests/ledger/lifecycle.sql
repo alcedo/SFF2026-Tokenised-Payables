@@ -131,9 +131,6 @@ BEGIN
   IF v_state <> 'approved' THEN RAISE EXCEPTION 'FAIL: approve left it %', v_state; END IF;
   RAISE NOTICE 'PASS  a separate checker approves it';
 
-  -- PRD §7's Approved→Certified step includes assigning a grade. Certify with
-  -- none must be a named refusal, not a CHECK crash that the UI maps to
-  -- "That did not go through."
   BEGIN
     PERFORM ledger.post(jsonb_build_object(
       'idempotencyKey','aaaa0000-0000-0000-0000-00000000000f','actorUserId',ADMIN,

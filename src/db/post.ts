@@ -159,6 +159,7 @@ export type PostErrorCode =
   | 'issuer_not_certified'
   | 'programme_limit_exceeded'
   | 'not_institutional'
+  | 'not_graded'
   | 'unknown';
 
 export interface PostError {
@@ -206,6 +207,7 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA32: 'issuer_not_certified',
   ADA33: 'programme_limit_exceeded',
   ADA34: 'not_institutional',
+  ADA35: 'not_graded',
   ADA20: 'insufficient_funds',
   ADA21: 'insufficient_quantity',
   '23505': 'duplicate_listing',
@@ -325,5 +327,6 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
     'This issuance would take the issuer over its programme limit. Raise the limit, or wait for an outstanding payable to settle.',
   not_institutional:
     'Only institutional lender accounts can bid or buy. Switch to a lender persona in the demo controls.',
+  not_graded: 'This payable has no grade yet. Assign one before certifying it.',
   unknown: 'That did not go through. Nothing was changed.',
 };
