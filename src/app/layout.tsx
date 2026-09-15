@@ -4,9 +4,9 @@ import { Shell } from '@/components/Shell';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'ADATA Tokenised Payables',
+  title: 'Tokenised Payables',
   description:
-    'Clickable demo of the ADATA tokenised payables programme. Project BLOOM, StraitsX with ADATA and BaaS Innovations. Simulated data, no real funds.',
+    'Clickable demo of the tokenised payables programme. Simulated data, no real funds.',
   robots: { index: false, follow: false },
 };
 
