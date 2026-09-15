@@ -151,11 +151,27 @@ async function run() {
     if (SHOTS) await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
   };
 
+  /**
+   * Switch persona by any fragment of the option text, which reads
+   * "{role label} — {name}, {entity}".
+   *
+   * A miss names what was on offer instead of timing out. Without that, a world
+   * this suite did not expect, which is what `npm test` leaves in the shared
+   * database, fails thirty seconds later as a bare locator timeout and reads
+   * like a broken app.
+   */
   async function become(fragment) {
     const select = page.getByLabel('Switch persona');
-    const value = await select.locator('option', { hasText: fragment }).first().getAttribute('value');
-    if (!value) throw new Error(`no persona matching "${fragment}"`);
-    await select.selectOption(value);
+    const option = select.locator('option', { hasText: fragment }).first();
+    if ((await option.count()) === 0) {
+      const offered = await select.locator('option').allInnerTexts();
+      throw new Error(
+        `no persona matching "${fragment}". The switcher offers: ${offered.join(' | ') || '(none)'}. `
+          + 'A world this suite does not recognise is usually npm test leaving its own fixtures in the '
+          + 'shared database; scripts/db.sh reset puts the demo world back.',
+      );
+    }
+    await select.selectOption(await option.getAttribute('value'));
     await page.waitForTimeout(700);
   }
 
@@ -196,7 +212,11 @@ async function run() {
    * '/' and switching again is what re-establishes it.
    */
   async function resetWorld() {
-    await go('/', ADMIN);
+    // By role label, not by name: this runs before the world is known, and the
+    // admin is the one persona guaranteed to be exactly one of, whatever world
+    // the database currently holds. Every later switch can use a name, because
+    // the reset below has made the world the one those names belong to.
+    await go('/', 'StraitsX admin');
     await page.goto(`${BASE}/reset`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('radio', { name: 'Minimal world' }).check();
     await page.getByRole('textbox', { name: 'Type RESET to confirm' }).fill('RESET');
@@ -372,6 +392,31 @@ async function run() {
     payable, holdings, heldBy, listingState, bidStates,
     SUPPLIER, OTHER_SUPPLIER, LENDER, OTHER_LENDER, PREPARER, CHECKER, ADMIN,
   };
+
+  /**
+   * Every pathway begins by rebuilding the world, and only the StraitsX admin
+   * can do that, so a world with no reachable admin cannot be recovered from by
+   * clicking at all. `npm test` leaves exactly such a world in the shared
+   * database: its fixtures give the StraitsX entity no wallet, and the persona
+   * query joins through wallet, so the admin is not in the switcher to select.
+   *
+   * Checked once here rather than discovered inside the first pathway, where it
+   * reads as that pathway failing.
+   */
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+  const offered = await page.getByLabel('Switch persona').locator('option').allInnerTexts();
+  if (!offered.some((o) => o.includes('StraitsX admin'))) {
+    console.error(
+      'No StraitsX admin in the persona switcher, so the world cannot be reset from the UI.\n'
+        + `The switcher offers: ${offered.join(' | ') || '(nothing)'}\n`
+        + 'This is what npm test leaves behind in the shared database. Run scripts/db.sh reset, '
+        + 'restart scripts/serve.sh, and try again.',
+    );
+    await browser.close();
+    await pool.end();
+    process.exitCode = 2;
+    return;
+  }
 
   const results = [];
   for (const pathway of PATHWAYS) {

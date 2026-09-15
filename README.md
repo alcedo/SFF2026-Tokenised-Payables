@@ -69,6 +69,11 @@ meet. It rebuilds the world per pathway through the app's own reset, and reports
 a branch the ledger allows but no screen reaches as `UNREACHABLE` rather than as
 a pass. `verify:controls` is the map it was written from.
 
+`npm test` and the browser drivers share one database, and the SQL stages leave
+their own fixtures in it. That world has no StraitsX admin in the switcher, so
+nothing can reset it from a screen. Run `scripts/db.sh reset` between the two.
+`verify:pathways` checks for this and says so; the others fail as a timeout.
+
 The middle five need the app running (`scripts/serve.sh`). `scripts/fresh.sh`
 builds its own database and serves it on :3101. A new deployment boots from
 `db/fixtures.sql` rather than `db/seed.sql`, so that is the world an audience

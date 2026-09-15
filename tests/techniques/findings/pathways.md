@@ -155,6 +155,29 @@ This is arguably right. The obligation is real whether or not the supplier
 clicked Accept, and refusing would strand it. It is recorded because the state
 is reachable and nothing in the suite asserted it either way before.
 
+## 6. `npm test` leaves a world no browser driver can use
+
+Found by running `npm run verify:pathways` immediately after `npm test`, which
+is what a contributor does.
+
+Both write the same `adata` database. The SQL stages end by loading their own
+fixtures, whose StraitsX entity has no wallet row. `readPersonas()`
+(`src/db/read.ts:61`) joins through `app.wallet`, so the administrator drops out
+of the persona switcher entirely:
+
+```
+ADATA · checker — Lin Hsu | ADATA · preparer — Wei Chen |
+Supplier — Mei Tang | Lender — R. Okafor | Lender — S. Baptiste
+```
+
+No admin means no reset control, and the reset screen is the only way a driver
+can put the world back. The world is unrecoverable by clicking.
+
+This suite now checks for that before its first pathway and exits 2 saying what
+to run. The other drivers do not, and against this world they fail as a bare
+30-second Playwright timeout that reads like a broken feature. `scripts/db.sh
+reset` fixes it; the hazard is that nothing says so.
+
 ## What the suite does not cover
 
 - `top_up` and `reset_world` have no UI path at all. `top_up` has an exported
