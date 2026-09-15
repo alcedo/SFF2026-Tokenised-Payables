@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { closePool, query } from '@/db/client';
 import { post, type Intent } from '@/db/post';
+import { allocateProRata, fromBaseUnits } from '@/core/money';
 
 const DB_NAME = 'adata_test_workflow';
 
@@ -127,7 +128,122 @@ describe('issue → list → bid → accept as one walk', () => {
     const face = held.reduce((acc, row) => acc + row.qty, 0n);
     expect(face).toBe(FACE);
 
+    const trades = await query<{ quantity_base: bigint; price_base: bigint }>(
+      'SELECT quantity_base, price_base FROM ledger.v_trade WHERE payable_id = $1',
+      [payableId],
+    );
+    expect(trades).toHaveLength(1);
+    expect(trades[0]!.quantity_base).toBe(FACE);
+    expect(trades[0]!.price_base).toBe(PRICE);
+
     const drift = await query<{ count: bigint }>('SELECT count(*)::bigint AS count FROM ledger.prove_books_balance()');
     expect(drift[0]!.count).toBe(0n);
+  });
+});
+
+const FACE_A = 10_000_000n;
+const FACE_B = 20_000_000n;
+const LOT_PRICE = 10_000_001n;
+
+async function ensureStraitsXAdmin() {
+  await query(
+    `INSERT INTO app.entity (id, name, entity_type, certification_status)
+     VALUES ('e0000000-0000-0000-0000-0000000000aa', 'StraitsX', 'platform', 'certified')
+     ON CONFLICT (id) DO NOTHING`,
+  );
+  await query(
+    `INSERT INTO app.app_user (id, entity_id, name, role, mock_kyc_verified, institutional_eligible)
+     VALUES ('11111111-0000-0000-0000-000000000008', 'e0000000-0000-0000-0000-0000000000aa',
+             'Admin', 'straitsx_admin', true, false)
+     ON CONFLICT (id) DO NOTHING`,
+  );
+  return '11111111-0000-0000-0000-000000000008';
+}
+
+async function issueAccepted(ref: string, invoiceRef: string, face: bigint, tokenId: number) {
+  const admin = await ensureStraitsXAdmin();
+  await mustPost(PREP, {
+    kind: 'create_payable',
+    ref,
+    supplierId: SUPPLIER_ENTITY,
+    invoiceRef,
+    faceBase: face as never,
+    termsDays: 60,
+  });
+  const payableId = (
+    await query<{ id: string }>('SELECT id FROM app.payable WHERE ref = $1', [ref])
+  )[0]!.id;
+  await mustPost(PREP, { kind: 'submit', payableId });
+  await mustPost(CHECKR, { kind: 'approve', payableId });
+  await mustPost(PREP, {
+    kind: 'grade',
+    payableId,
+    grade: 'AA',
+    gradeRationale: 'Workflow coverage grade. Sample value.',
+  });
+  await mustPost(admin, { kind: 'certify', payableId });
+  await mustPost(PREP, { kind: 'issue_payable', payableId, toWallet: SUPP, tokenId });
+  await mustPost(SUPP_USER, { kind: 'accept_receipt', payableId });
+  return payableId;
+}
+
+describe('series trade cost basis', () => {
+  it('allocates the lot price across members so they sum to the cash paid', async () => {
+    const payableA = await issueAccepted('TP-WF-S1', 'INV-WF-S1', FACE_A, 8802);
+    const payableB = await issueAccepted('TP-WF-S2', 'INV-WF-S2', FACE_B, 8803);
+
+    const bundled = await query<{ id: string; maturity_date: Date; anchor_id: string }>(
+      'SELECT id, maturity_date, anchor_id FROM app.payable WHERE id = $1',
+      [payableA],
+    );
+    const seriesId = '5e000000-0000-0000-0000-00000000aa01';
+    await query(
+      `INSERT INTO app.series (id, ref, anchor_id, maturity_date, grade)
+       VALUES ($1, 'SERIES-WF-1', $2, $3, 'AA')`,
+      [seriesId, bundled[0]!.anchor_id, bundled[0]!.maturity_date],
+    );
+    await query('UPDATE app.payable SET series_id = $1 WHERE id = ANY($2::uuid[])', [
+      seriesId,
+      [payableA, payableB],
+    ]);
+
+    const listingId = '7a000000-0000-0000-0000-00000000aa02';
+    await mustPost(SUPP_USER, {
+      kind: 'publish_listing',
+      listingId,
+      seriesId,
+      sellerWallet: SUPP,
+      minPriceBase: LOT_PRICE as never,
+    } as unknown as Intent);
+
+    await mustPost(BANK_USER, {
+      kind: 'place_bid',
+      bidId: 'b0000000-0000-0000-0000-00000000aa02',
+      listingId,
+      bidderWallet: BANK,
+      priceBase: LOT_PRICE as never,
+      fundingCode: 'USDC',
+    });
+    await mustPost(SUPP_USER, {
+      kind: 'accept_bid',
+      listingId,
+      bidId: 'b0000000-0000-0000-0000-00000000aa02',
+    });
+
+    const trades = await query<{ payable_id: string; quantity_base: bigint; price_base: bigint }>(
+      `SELECT payable_id, quantity_base, price_base
+         FROM ledger.v_trade
+        WHERE listing_id = $1
+        ORDER BY payable_id`,
+      [listingId],
+    );
+    expect(trades).toHaveLength(2);
+    const expected = allocateProRata(
+      fromBaseUnits(LOT_PRICE),
+      trades.map((t) => fromBaseUnits(t.quantity_base)),
+    );
+    expect(trades.map((t) => t.price_base)).toEqual(expected);
+    expect(trades.reduce((acc, t) => acc + t.price_base, 0n)).toBe(LOT_PRICE);
+    expect(trades.every((t) => t.price_base !== LOT_PRICE)).toBe(true);
   });
 });

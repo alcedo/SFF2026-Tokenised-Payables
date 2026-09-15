@@ -15,7 +15,7 @@ import {
 import { currentPersona } from '@/app/session';
 import { type BaseUnits, formatUnits } from '@/core/money';
 import { quote } from '@/core/pricing';
-import { readBalances, readHoldings, readPayables, readWorld } from '@/db/read';
+import { readBalances, readHoldings, readSettledPurchases, readWorld } from '@/db/read';
 
 /**
  * PRD §8 screen 12. Portfolio.
@@ -30,10 +30,10 @@ import { readBalances, readHoldings, readPayables, readWorld } from '@/db/read';
  */
 export default async function PortfolioPage() {
   const [persona, world] = await Promise.all([currentPersona(), readWorld()]);
-  const [holdings, balances, allPayables] = await Promise.all([
+  const [holdings, balances, settled] = await Promise.all([
     readHoldings(persona.wallet, world),
     readBalances(persona.wallet),
-    readPayables(world),
+    readSettledPurchases(persona.wallet, world),
   ]);
 
   const priced = holdings.map((h) => ({
@@ -57,8 +57,6 @@ export default async function PortfolioPage() {
         )
       : null;
 
-  // Realised: settled payables this wallet bought and was paid face on.
-  const settled = allPayables.filter((p) => p.status === 'settled');
   const overdue = priced.filter((h) => h.payable.status === 'overdue');
 
   return (

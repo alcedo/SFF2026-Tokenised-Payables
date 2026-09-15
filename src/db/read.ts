@@ -448,6 +448,31 @@ export async function readHoldings(wallet: string, world: World): Promise<Holdin
   }));
 }
 
+/**
+ * Settled payables this wallet was paid face on. Portfolio realised returns
+ * (PRD §8 screen 12) are a per-wallet question: the redemption credit, not
+ * every payable whose stored status is settled.
+ */
+export async function readSettledPurchases(wallet: string, world: World): Promise<PayableRow[]> {
+  const rows = await query<RawPayable>(
+    `${PAYABLE_SELECT}
+      WHERE p.lifecycle_status = 'settled'
+        AND EXISTS (
+          SELECT 1
+            FROM ledger.journal_entry e
+            JOIN ledger.journal_leg cash ON cash.entry_id = e.id AND cash.amount > 0
+            JOIN ledger.asset xusd ON xusd.id = cash.asset_id AND xusd.cash_code = 'XUSD'
+            JOIN ledger.account holder ON holder.id = cash.account_id
+             AND holder.class = 'wallet'
+             AND holder.wallet_address = $1
+           WHERE e.payable_id = p.id AND e.kind = 'redemption'
+        )
+      ORDER BY p.ref`,
+    [wallet],
+  );
+  return rows.map((r) => toPayable(r, world));
+}
+
 // --- the marketplace --------------------------------------------------------
 
 export interface Listing {

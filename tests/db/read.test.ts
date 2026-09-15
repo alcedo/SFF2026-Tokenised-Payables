@@ -25,6 +25,7 @@ import {
   readPayables,
   readPersonas,
   readProgrammeTotals,
+  readSettledPurchases,
   readSimulatedReceipt,
   readWorld,
   type World,
@@ -193,6 +194,18 @@ describe('holdings and holders', () => {
     // The bank bought TP-2026-0128 in June, which then settled, so it holds no
     // tokens now. The cost basis lives in the trade history, not the holding.
     expect(Array.isArray(holdings)).toBe(true);
+  });
+});
+
+describe('realised purchases', () => {
+  it('attributes a settled invoice only to the wallet that was paid face', async () => {
+    const personas = await readPersonas();
+    const bank = personas.find((p) => p.entityName === 'Meridian Trade Bank')!;
+    const fund = personas.find((p) => p.entityName === 'Kestrel Credit Fund')!;
+    const bankRealised = await readSettledPurchases(bank.wallet, world);
+    const fundRealised = await readSettledPurchases(fund.wallet, world);
+    expect(bankRealised.map((p) => p.ref)).toContain('TP-2026-0128');
+    expect(fundRealised.map((p) => p.ref)).not.toContain('TP-2026-0128');
   });
 });
 
