@@ -7,3 +7,7 @@ ts	phase	decision	why	evidence	result
 2026-09-15T01:15:02Z	tests	dropped oracle-only certification, bid, listing, and marketplace rows	they would still pass if every imported function returned undefined	src/core/__tests__/decision-table.test.ts src/core/__tests__/state-machine.test.ts	SQL states.sql and decision-table.sql remain the production walks
 2026-09-15T01:15:02Z	loop	do not subscribe a cloud timer	the exit condition already holds this turn	scripts/test.sh	predicate met; loop stopped
 2026-09-15T01:15:46Z	verify	browser BVA on /adata/create?mode=manual	zero, half-unit, 0-day, and 366-day stay unsubmittable; 0.0001 with 1 and 365 days arms Create payable	scripts/fields.mjs against http://127.0.0.1:3100	PASS field boundaries in the browser
+2026-09-15T01:18:12Z	trail	PATH in test.sh is new, not kept from main	this environment needs /usr/lib/postgresql/16/bin; origin/main does not export it	scripts/test.sh commit ebc2912	corrected
+2026-09-15T01:18:12Z	trail	workflow.test.ts walks create through accept on ledger.post	the TSV missed that file	tests/ledger/workflow.test.ts	logged
+2026-09-15T01:18:12Z	trail	mutate.mjs reruns only src/core/__tests__	SQL and bash stages are outside the mutant loop on purpose	scripts/mutate.mjs	core-unit mutation score, not whole-suite
+2026-09-15T01:18:12Z	trail	browser BVA is npm run verify:fields, after npm test	the loop-stop row used the npm test predicate; fields.mjs is extra proof, not part of scripts/test.sh	scripts/fields.mjs	PASS against http://127.0.0.1:3100
