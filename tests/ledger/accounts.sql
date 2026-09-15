@@ -180,20 +180,33 @@ BEGIN
   RAISE NOTICE 'PASS  no holding is stranded in an unreachable wallet';
 
   --------------------------------- 8b. a supplier who cannot take delivery --
+  -- The fixture is built here rather than found in the seed. db/seed.sql used
+  -- to leave twelve supplier records with no account behind them, and this case
+  -- picked one of those; it no longer does, and a test that quietly stops
+  -- testing its rule when the seed changes shape is worse than no test. The
+  -- state is still reachable in the product, because onboarding creates the
+  -- organisation and the account in one act but nothing stops a database from
+  -- carrying an originator record that predates either.
+  INSERT INTO app.entity (id, name, entity_type, certification_status)
+  VALUES ('e0000000-0000-0000-0000-00000000dead', 'Wu Ting Castings', 'supplier', 'certified');
+  INSERT INTO app.wallet (address, entity_id)
+  VALUES ('0xdead00000000000000000000000000000000dead', 'e0000000-0000-0000-0000-00000000dead');
+
   BEGIN
     PERFORM ledger.post(jsonb_build_object(
       'idempotencyKey','cccc0000-0000-0000-0000-00000000000a','actorUserId',ADMIN,
       'intent', jsonb_build_object('kind','create_payable','ref','TP-2026-9901',
-        'supplierId', (SELECT e.id FROM app.entity e
-                        WHERE e.entity_type = 'supplier'
-                          AND NOT EXISTS (SELECT 1 FROM app.app_user u
-                                           WHERE u.entity_id = e.id AND u.deactivated_at IS NULL)
-                        LIMIT 1),
+        'supplierId','e0000000-0000-0000-0000-00000000dead',
         'invoiceRef','INV-TW-NOACCOUNT','faceBase', 5000000, 'termsDays', 30)));
     RAISE EXCEPTION 'FAIL: created a payable for a supplier who cannot accept it';
   EXCEPTION WHEN sqlstate 'ADA31' THEN
     RAISE NOTICE 'PASS  a payable cannot be raised against a supplier with no account';
   END;
+
+  -- Put the world back, so case 9's reconciliation and anything after it see
+  -- the seeded shape rather than this fixture.
+  DELETE FROM app.wallet WHERE entity_id = 'e0000000-0000-0000-0000-00000000dead';
+  DELETE FROM app.entity WHERE id = 'e0000000-0000-0000-0000-00000000dead';
 
   ------------------------------------------------------------ 9. the books --
   SELECT count(*) INTO v_n FROM ledger.prove_books_balance();

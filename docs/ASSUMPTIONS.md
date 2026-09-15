@@ -328,3 +328,51 @@ member of the sequence, so it does not count toward the maximum.
 
 **If wrong:** `suggestInvoiceRef` in `src/core/references.ts`, with its cases in
 `src/core/__tests__/references.test.ts`.
+
+## How many suppliers the series lot draws on
+
+Section 12 writes the bundled lot as "SERIES-2026-Q4-30D | 12 fictional
+suppliers; one current holder", and asks separately to "include fictional
+supplier entity records and wallets for all remaining invoice originators".
+Taken literally that means twelve supplier organisations that exist only as a
+name and a wallet, with nobody able to sign in as any of them.
+
+That state is reachable and the product handles it, but as seed data it is a
+liability. A supplier with no account can never accept delivery of what it is
+issued, so those twelve appear in counts, in the explorer and on the programme
+oversight screen as organisations a viewer cannot switch to or act as. They also
+cost the demo twenty-four ledger entries, which is more than the entire rest of
+the live world.
+
+**Built:** the lot carries five members, one invoice from each of the five
+interactive suppliers, still 180,000 XUSD in total and still wholly held by one
+seller. Every organisation in the seeded world now has a live account behind it,
+which `tests/ledger/seed.sql` asserts. What the lot demonstrates is unchanged:
+several suppliers' invoices against one anchor, one maturity, one price, sold as
+a unit no single invoice would be worth.
+
+**If wrong:** the member count is one loop bound and one array in `db/seed.sql`,
+with the expected counts named in `tests/ledger/seed.sql` and
+`tests/db/read.test.ts`. Restoring twelve originators means restoring twelve
+account-less entity rows with it.
+
+## How much history the seed writes
+
+Section 12 names six payables and asks for portfolio history, competing bids and
+a pre-funded pair of lenders. It says nothing about volume, and an earlier build
+read that as licence to add depth: twenty-nine payables, twenty organisations,
+nine listings, 116 ledger entries.
+
+The explorer is an append-only audit trail, and the thing a viewer is being
+shown at a demo is the handful of entries the presenter creates in front of
+them. Seeded history is the backdrop, not the subject, and 116 rows of it buries
+the five that matter.
+
+**Built:** the smallest world in which every screen still has something real on
+it. Two historical payables (the settled row and the overdue one), five live
+ones, a five-member series, two lenders, five suppliers. Fifty ledger entries.
+`tests/ledger/seed.sql` holds a budget of sixty and fails if it creeps back up,
+because this is the kind of thing that grows one convenient row at a time.
+
+**If wrong:** raise the budget in `tests/ledger/seed.sql` and add rows to
+`seed_history` or `seed_live` in `db/seed.sql`. Both are plain tables.

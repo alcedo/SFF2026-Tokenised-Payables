@@ -148,10 +148,10 @@ describe('the marketplace', () => {
     expect(formatPercent(tp141.quote.annualisedDiscountCostPercent, 1)).toBe('8.7%');
   });
 
-  it('counts the series as one lot of twelve members', async () => {
+  it('counts the series as one lot of five members', async () => {
     const listings = await readMarketplace(world);
     const series = listings.find((l) => l.targetKind === 'series')!;
-    expect(series.memberCount).toBe(12);
+    expect(series.memberCount).toBe(5);
     expect(formatUnits(series.listedFaceBase, 2)).toBe('180,000.00');
   });
 

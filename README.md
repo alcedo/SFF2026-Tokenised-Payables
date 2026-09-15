@@ -38,11 +38,17 @@ lender, and the StraitsX admin — covering every screen PRD §8 lists:
 | **Admin** | issuer certification · grading · accounts · programme oversight · overdue and recovery |
 | **Anyone** | onboarding with a custodial wallet · transfer · mock chain explorer · reset |
 
-The demo world seeds itself with 26 organisations, 19 accounts, 29 payables
-across all three grades and 30 to 180 day tenors, nine open listings with live
-bids, a 12-invoice series lot, a settled position, an overdue one, and a
-24-invoice ERP register. T0 is the day the world was seeded, so the tenors stay
-realistic however long the URL stays up.
+The demo world seeds itself with 9 organisations, 11 accounts, 12 payables
+across all three grades and 30 to 100 day tenors, five open listings with a live
+bid book, a five-invoice series lot, a settled position, an overdue one, and a
+24-invoice ERP register. Every organisation has a live account behind it, so
+there is nobody on screen a viewer cannot switch to and act as.
+
+The whole of that costs 50 ledger entries. The explorer is an audit trail and
+the entries a presenter creates in front of a room are the point, so the seed is
+kept small enough not to bury them; `tests/ledger/seed.sql` holds the budget.
+T0 is the day the world was seeded, so the tenors stay realistic however long
+the URL stays up.
 
 ## Verify it
 
