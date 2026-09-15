@@ -7,20 +7,20 @@
  * obligation that has not matured. A suite that only ever drives the happy path
  * never sees any of it.
  *
- * So this suite carries a second implementation of the workflow: a few dozen
- * lines of in-memory reducer that predicts, for any command in any state,
- * whether the ledger will accept it, which SQLSTATE it will refuse with, and
- * what the observable world looks like afterwards. fast-check generates command
- * sequences without regard for legality, every command runs against both, and
- * the two are compared after every single step.
+ * So this suite carries a second, much smaller implementation of the workflow:
+ * an in-memory reducer over six maps, plus one `predict` per command saying
+ * whether the ledger will accept it and which SQLSTATE it will refuse with.
+ * fast-check generates command sequences without regard for legality, every
+ * command runs against both, and the two are compared after every single step.
  *
- * The model is deliberately not a port of ledger.post(). It predicts statuses
- * and balances, and nothing else. It does not know about journal legs, receipts
- * or lock ordering, and funding is restricted to XUSD throughout so that no FX
- * rounding enters the model's arithmetic.
+ * The model is deliberately not a port of ledger.post(). Its whole state is
+ * statuses and balances: it knows nothing of journal legs, receipts or lock
+ * ordering, and funding is restricted to XUSD throughout so that no FX rounding
+ * enters its arithmetic. Anything it cannot predict from those, it does not
+ * compare.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fc from 'fast-check';
 import {
   freshDatabase,
@@ -1711,5 +1711,160 @@ describe('model-based coverage of the payable workflow', () => {
       'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34',
       'accepted',
     ]);
+  });
+});
+
+// --- what the model had to bend to fit --------------------------------------
+
+/**
+ * Eight behaviours the model predicts because the ledger does them, not because
+ * they look right.
+ *
+ * The property above is green only because the model reproduces each of these,
+ * so without this block they would be invisible: a model that agrees with a
+ * defect reports no defect. Each case states what a caller would reasonably
+ * expect, and each is marked `it.fails`, so the day one of them is fixed this
+ * suite says so instead of quietly continuing to encode the old behaviour.
+ * They are written up in tests/techniques/findings/model-based.md.
+ */
+describe('behaviours the model reproduces but would not choose', () => {
+  let db: Database;
+  let draftPayable: string;
+  let listedPayable: string;
+  let sellerWallet: string;
+  let lenderWallet: string;
+
+  const LISTING = '00000000-0000-4000-f000-000000000001';
+  const NOWHERE = '00000000-0000-4000-f000-0000000000ee';
+
+  beforeAll(async () => {
+    db = await freshDatabase('model_based_defects', 'fixtures');
+    const real = await bootReal(db);
+    sellerWallet = real.wallets.find((w) => w.label === real.suppliers[0]!.name)!.address;
+    lenderWallet = real.wallets.find((w) => w.institutional)!.address;
+
+    const idOf = async (ref: string) =>
+      (await db.pool.query<{ id: string }>('SELECT id::text FROM app.payable WHERE ref = $1', [ref]))
+        .rows[0]!.id;
+    const create = (ref: string, invoice: string) =>
+      post(db.pool, {
+        kind: 'create_payable',
+        ref,
+        supplierId: real.suppliers[0]!.id,
+        invoiceRef: invoice,
+        faceBase: '1000000',
+        termsDays: 90,
+      });
+
+    await create('DEF-DRAFT', 'DEF-INV-1');
+    draftPayable = await idOf('DEF-DRAFT');
+
+    await create('DEF-LIVE', 'DEF-INV-2');
+    listedPayable = await idOf('DEF-LIVE');
+    for (const intent of [
+      { kind: 'submit', payableId: listedPayable },
+      { kind: 'approve', payableId: listedPayable },
+      { kind: 'grade', payableId: listedPayable, grade: 'AA' },
+      { kind: 'certify', payableId: listedPayable },
+      { kind: 'issue_payable', payableId: listedPayable, toWallet: sellerWallet, tokenId: 7 },
+      { kind: 'accept_receipt', payableId: listedPayable },
+      {
+        kind: 'publish_listing',
+        listingId: LISTING,
+        payableId: listedPayable,
+        sellerWallet,
+        quantityBase: '400000',
+        minPriceBase: '100',
+        buyNowPriceBase: '200',
+      },
+    ]) {
+      expect(await post(db.pool, intent), `setup: ${intent.kind}`).toMatchObject({ ok: true });
+    }
+  }, 60_000);
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it.fails('names the payable when a receipt is accepted before issuance', async () => {
+    const result = await post(db.pool, { kind: 'accept_receipt', payableId: draftPayable });
+    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
+  });
+
+  it.fails('names the payable when a receipt is rejected before issuance', async () => {
+    const result = await post(db.pool, {
+      kind: 'reject_receipt',
+      payableId: draftPayable,
+      holderWallet: sellerWallet,
+    });
+    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
+  });
+
+  it.fails('refuses a transfer of a payable that was never issued', async () => {
+    const result = await post(db.pool, {
+      kind: 'transfer',
+      payableId: draftPayable,
+      fromWallet: sellerWallet,
+      toWallet: lenderWallet,
+      quantityBase: '1',
+    });
+    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
+  });
+
+  it.fails('refuses a cancellation of a listing that does not exist', async () => {
+    const result = await post(db.pool, { kind: 'cancel_listing', listingId: NOWHERE });
+    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
+  });
+
+  it.fails('refuses a bid on a listing that does not exist', async () => {
+    const result = await post(db.pool, {
+      kind: 'place_bid',
+      bidId: '00000000-0000-4000-f000-000000000002',
+      listingId: NOWHERE,
+      bidderWallet: lenderWallet,
+      priceBase: '100',
+      fundingCode: 'XUSD',
+    });
+    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
+  });
+
+  it.fails('says which bid is missing rather than blaming the bidder', async () => {
+    const result = await post(db.pool, {
+      kind: 'accept_bid',
+      listingId: LISTING,
+      bidId: '00000000-0000-4000-f000-0000000000dd',
+    });
+    expect(result.ok ? '' : result.message).toContain('bid');
+  });
+
+  it.fails('refuses a second open listing with a named code rather than a raw index error', async () => {
+    const result = await post(db.pool, {
+      kind: 'publish_listing',
+      listingId: '00000000-0000-4000-f000-000000000003',
+      payableId: listedPayable,
+      sellerWallet,
+      quantityBase: '100000',
+      minPriceBase: '100',
+      buyNowPriceBase: '200',
+    });
+    expect(result.ok ? '' : result.code ?? '').toMatch(/^ADA/);
+  });
+
+  it.fails('refuses a bid below the minimum price the seller published', async () => {
+    // PRD section 8 screen 7 has the seller "enter a minimum XUSD price". The
+    // column is stored and shown, and neither place_bid nor accept_bid reads it.
+    const result = await post(db.pool, {
+      kind: 'place_bid',
+      bidId: '00000000-0000-4000-f000-000000000004',
+      listingId: LISTING,
+      bidderWallet: lenderWallet,
+      priceBase: '1',
+      fundingCode: 'XUSD',
+    });
+    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
+  });
+
+  it('leaves the books balanced after every one of those refusals', async () => {
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 });

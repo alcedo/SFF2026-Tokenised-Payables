@@ -4,10 +4,11 @@
  * tests/ledger/concurrency.sh already drives one race, two lenders accepting
  * the same listing, on a fixed sleep. Everything here is a race it does not
  * cover, and nothing here is timed. Where an ordering is the point, one client
- * takes the lock and a second is observed blocking on it through
- * pg_stat_activity, so the interleaving is a fact rather than a hope. Where a
- * genuine race is the point, N clients go through Promise.all and the
- * assertion is the invariant, not the winner.
+ * takes the lock and the second is observed parked on it through
+ * pg_stat_activity and pg_blocking_pids before the first is released, so the
+ * interleaving is a fact rather than a hope. Where a genuine race is the point,
+ * N clients go through Promise.all and the assertion is the invariant, not the
+ * winner.
  *
  * The oracle is the same in every case: whatever happened, a refusal, a
  * deadlock, a cancelled statement or a killed backend, ledgerHealth() must come
@@ -367,8 +368,8 @@ describe('lock-order inversion between settle_maturity and accept_bid', () => {
       // settle_maturity takes app.payable then app.listing; accept_bid takes
       // app.listing then app.payable. Each session is given the first lock of
       // its own path by hand, so the cycle is closed by construction rather
-      // than by timing. The victim is chosen by deadlock_timeout: the backend
-      // whose timer expires first is the one that runs the detector and aborts.
+      // than by timing. deadlock_timeout chooses the victim, because the
+      // backend whose timer expires first runs the detector and aborts itself.
       await settler!.query('BEGIN');
       await settler!.query("SET LOCAL deadlock_timeout = '5s'");
       await settler!.query('SELECT 1 FROM app.payable WHERE id = $1 FOR NO KEY UPDATE', [payable.id]);
@@ -1407,9 +1408,9 @@ describe('fault injection', () => {
     );
     expect(autocommit.code).toBe('ADA04');
 
-    // The lot is recoverable, which locates the defect in settle_maturity's
-    // escrow unwind rather than in the data: cancel the listing by hand first
-    // and both members redeem.
+    // Cancelling the listing by hand first lets both members redeem, which
+    // locates the defect in settle_maturity's escrow unwind rather than in the
+    // data.
     must(
       await post(s.pool, { kind: 'cancel_listing', listingId }, { actorUserId: s.users.supplier }),
       'cancel_listing',
