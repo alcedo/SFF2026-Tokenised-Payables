@@ -5,7 +5,8 @@ import { useMemo, useState } from 'react';
 import { ActionButton } from '@/components/ActionButton';
 import { Address, Notice } from '@/components/primitives';
 import { transferQuantity } from '@/app/actions';
-import { type BaseUnits, formatUnits, parseUnits } from '@/core/money';
+import { parseAmount } from '@/core/input';
+import { type BaseUnits, formatUnits } from '@/core/money';
 
 interface Holding {
   payableId: string;
@@ -33,23 +34,18 @@ export function TransferForm({
   const holding = holdings.find((h) => h.payableId === payableId)!;
   const free = BigInt(holding.freeBase) as BaseUnits;
 
-  // PRD §8: the quantity defaults to the full holding.
   const [quantity, setQuantity] = useState(formatUnits(free, 4).replace(/,/g, ''));
   const [recipient, setRecipient] = useState(recipients[0]?.wallet ?? '');
 
   const parsed = useMemo(() => {
-    try {
-      const q = parseUnits(quantity);
-      if (q <= 0n) return { error: 'Enter a quantity greater than zero.' };
-      if (q > free) {
-        return {
-          error: `That is more than you hold unlisted. You can send up to ${formatUnits(free, 4)}.`,
-        };
-      }
-      return { quantity: q };
-    } catch (e) {
-      return { error: (e as Error).message };
+    const q = parseAmount(quantity);
+    if (!q.ok) return { error: q.reason };
+    if (q.value > free) {
+      return {
+        error: `That is more than you hold unlisted. You can send up to ${formatUnits(free, 4)}.`,
+      };
     }
+    return { quantity: q.value };
   }, [quantity, free]);
 
   const resolved = recipients.find((r) => r.wallet === recipient);
@@ -117,7 +113,6 @@ export function TransferForm({
         </label>
       </div>
 
-      {/* PRD §8 screen 13: "show the resolved recipient". */}
       <div className="rounded-[4px] border border-rule bg-surface-sunken p-3">
         <div className="text-[10.5px] tracking-wide text-ink-muted uppercase">Resolved recipient</div>
         {resolved ? (

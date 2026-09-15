@@ -1,34 +1,13 @@
 'use client';
 
-/**
- * PRD §8 screen 2's other path: "manual entry or Import from ERP."
- *
- * Manual entry exists for the invoice the ERP picker does not have, so it asks
- * for the four facts the ERP row would have supplied (supplier, invoice
- * reference, face, terms) and derives everything else. The derived values are
- * shown as they are typed, because a preparer entering 90-day terms should see
- * the maturity date before they commit, not after.
- *
- * The invoice reference arrives filled in. It is the one field of the four with
- * no natural default and a uniqueness rule behind it, so an empty box asks the
- * preparer to invent a number that will not collide with the several hundred
- * already on the books. The suggestion continues the series instead, and is
- * ordinary editable text: the invoice being copied in has a real number, and
- * that number should win whenever the preparer has it.
- *
- * Nothing is validated twice. The form stops obvious nonsense from being
- * submittable, and `ledger.post()` refuses the rest with a message the button
- * renders inline: a blank reference, a non-positive face, zero-day terms, an
- * unknown supplier, or an invoice already financed for that supplier.
- */
-
 import { useState } from 'react';
 
 import { ActionButton } from '@/components/ActionButton';
 import { Notice } from '@/components/primitives';
 import { createPayableManually } from '@/app/actions';
 import { addDays, parseIsoDate } from '@/core/clock';
-import { BASE_UNITS_PER_UNIT, formatUnits, type BaseUnits } from '@/core/money';
+import { parseAmount, parseTermsDays } from '@/core/input';
+import { formatUnits, type BaseUnits } from '@/core/money';
 
 export interface SupplierOption {
   id: string;
@@ -48,11 +27,6 @@ export function ManualEntry({
   suggestedInvoiceRef: string;
 }) {
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? '');
-  // What the preparer typed, or null while they are happy with the suggestion.
-  // Storing the override rather than a copy of the suggestion means a newly
-  // created payable moves the suggestion on without discarding the supplier,
-  // face and terms already entered, and "have they touched this?" is a null
-  // check rather than a string comparison.
   const [override, setOverride] = useState<string | null>(null);
   const invoiceRef = override ?? suggestedInvoiceRef;
   const [amount, setAmount] = useState('');
@@ -60,16 +34,11 @@ export function ManualEntry({
 
   const supplier = suppliers.find((s) => s.id === supplierId) ?? null;
 
-  // Display units in, base units out, at the edge. Nothing downstream sees a
-  // float: `faceBase` is either a whole number of base units or null.
-  const wholeUnits = Number(amount.replace(/,/g, ''));
-  const faceBase =
-    amount.trim() !== '' && Number.isFinite(wholeUnits) && wholeUnits > 0
-      ? BigInt(Math.round(wholeUnits * Number(BASE_UNITS_PER_UNIT)))
-      : null;
-
-  const termsDays = Number(terms);
-  const termsOk = Number.isInteger(termsDays) && termsDays >= 1 && termsDays <= 365;
+  const parsedFace = parseAmount(amount);
+  const faceBase = parsedFace.ok ? parsedFace.value : null;
+  const parsedTerms = parseTermsDays(terms);
+  const termsOk = parsedTerms.ok;
+  const termsDays = parsedTerms.ok ? parsedTerms.value : 0;
   const maturity = termsOk ? addDays(parseIsoDate(worldDate), termsDays) : null;
 
   const ready = supplier !== null && invoiceRef.trim() !== '' && faceBase !== null && termsOk;

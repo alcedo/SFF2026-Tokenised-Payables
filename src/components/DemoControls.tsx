@@ -1,18 +1,10 @@
 'use client';
 
-/**
- * The persistent demo-controls bar. PRD §11.
- *
- * Everything here changes the shared world, so each control says what it
- * affects before it does it. "Reset world" in particular asks first, because
- * the PRD notes the world is shared and a reset lands on every connected
- * session, including a second screen someone else is presenting from.
- */
-
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { advanceClock, jumpToNextMaturity, switchPersona, topUp } from '@/app/actions';
+import { parseAmount } from '@/core/input';
 import { ASSETS } from '@/core/money';
 
 export interface PersonaOption {
@@ -63,7 +55,6 @@ export function DemoControls({
           Demo controls
         </span>
 
-        {/* Persona switcher. PRD §11 includes preparer/checker within ADATA. */}
         <label className="control-fit flex items-center gap-1.5">
           <span className="shrink-0 text-[11px] text-ink-muted">Acting as</span>
           <select
@@ -88,7 +79,6 @@ export function DemoControls({
 
         <span className="h-4 w-px bg-rule-strong" />
 
-        {/* Fast-forward. Advancing time never funds an obligation (PRD §11). */}
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="num text-[12px] font-medium" title="The demo clock">
             {worldDate}
@@ -133,11 +123,6 @@ export function DemoControls({
           Simulate top-up
         </button>
 
-        {/*
-          PRD §5 asks a visitor to be able to create an account, be assigned a
-          persona, and then find themselves in this switcher. The way in has to
-          sit next to the switcher for that to read as one flow.
-        */}
         <a
           href="/onboarding"
           className="rounded-[3px] border border-rule-strong bg-surface px-1.5 py-0.5 text-[11px] hover:bg-surface-sunken"
@@ -145,13 +130,6 @@ export function DemoControls({
           New account
         </a>
 
-        {/*
-          PRD §11 "Trigger overdue": open or activate the designated overdue
-          example without requiring a live default workflow. The seeded case is
-          already past due at T0, so triggering it means opening it rather than
-          manufacturing a default, which is exactly what §7 asks for when it
-          calls recovery "a read-only scenario, not an operational workflow".
-        */}
         <a
           href="/overdue"
           className="rounded-[3px] border border-caution/30 bg-caution-soft px-1.5 py-0.5 text-[11px] text-caution hover:bg-caution/10"
@@ -159,13 +137,6 @@ export function DemoControls({
           Trigger overdue
         </a>
 
-        {/*
-          Reset is the administrator's, not the room's. The URL is public and a
-          reset lands on every connected session, so a participant should not
-          find the control sitting next to the ones that only affect their own
-          screen. /reset refuses the action too; hiding it here only keeps it
-          out of reach of an accidental click.
-        */}
         {current.role === 'straitsx_admin' ? (
           <a
             href="/reset"
@@ -254,14 +225,12 @@ function TopUpPanel({
           className="rounded-[3px] bg-accent px-2.5 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover disabled:opacity-50"
           onClick={() =>
             startTransition(async () => {
-              // Base units: the input is in display units, so scale by 10,000.
-              const whole = Number(amount.replace(/,/g, ''));
-              if (!Number.isFinite(whole) || whole <= 0) {
-                onDone('Enter an amount greater than zero.');
+              const parsed = parseAmount(amount);
+              if (!parsed.ok) {
+                onDone(parsed.reason);
                 return;
               }
-              const base = BigInt(Math.round(whole * 10_000)).toString();
-              const result = await topUp(wallet, asset, base);
+              const result = await topUp(wallet, asset, parsed.value.toString());
               onDone(result.message);
             })
           }

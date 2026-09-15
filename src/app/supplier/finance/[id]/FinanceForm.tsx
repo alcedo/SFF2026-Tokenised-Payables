@@ -5,10 +5,10 @@ import { useMemo, useState } from 'react';
 import { ActionButton } from '@/components/ActionButton';
 import { Notice } from '@/components/primitives';
 import { publishListing } from '@/app/actions';
-import { type BaseUnits, formatUnits, parseUnits } from '@/core/money';
+import { parseAmount, parseOptionalBuyNow, parsePricePercent } from '@/core/input';
+import { type BaseUnits, formatUnits } from '@/core/money';
 import { formatPercent, priceFromPercent, quote } from '@/core/pricing';
 
-/** PRD §12 keeps this labelled as a scenario assumption. */
 const BANK_BENCHMARK_PERCENT = 18;
 const INDICATIVE_BPS = 9785;
 
@@ -28,31 +28,22 @@ export function FinanceForm({
   const free = BigInt(freeBase) as BaseUnits;
   const invoiceFace = BigInt(faceBase) as BaseUnits;
 
-  // PRD §7: the listed quantity defaults to the full holding.
   const [quantity, setQuantity] = useState(formatUnits(free, 4).replace(/,/g, ''));
   const [percent, setPercent] = useState((INDICATIVE_BPS / 100).toFixed(2));
   const [buyNow, setBuyNow] = useState('');
 
   const parsed = useMemo(() => {
-    try {
-      const q = parseUnits(quantity);
-      const pct = Number(percent);
-      if (q <= 0n) return { error: 'Enter a quantity greater than zero.' as const };
-      if (q > free) {
-        return { error: `You hold ${formatUnits(free, 4)} unlisted. Enter that or less.` as const };
-      }
-      if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
-        return { error: 'Enter a price between 0 and 100 percent of face.' as const };
-      }
-      const price = priceFromPercent(q, Math.round(pct * 100));
-      const buy = buyNow.trim() === '' ? null : parseUnits(buyNow);
-      if (buy !== null && buy < price) {
-        return { error: 'A buy-now price cannot be below the minimum price.' as const };
-      }
-      return { quantity: q, price, buy, quoted: quote(q, price, daysRemaining) };
-    } catch (e) {
-      return { error: (e as Error).message };
+    const q = parseAmount(quantity);
+    if (!q.ok) return { error: q.reason };
+    if (q.value > free) {
+      return { error: `You hold ${formatUnits(free, 4)} unlisted. Enter that or less.` };
     }
+    const pct = parsePricePercent(percent);
+    if (!pct.ok) return { error: pct.reason };
+    const price = priceFromPercent(q.value, pct.value);
+    const buy = parseOptionalBuyNow(buyNow, price);
+    if (!buy.ok) return { error: buy.reason };
+    return { quantity: q.value, price, buy: buy.value, quoted: quote(q.value, price, daysRemaining) };
   }, [quantity, percent, buyNow, free, daysRemaining]);
 
   const partial = 'quantity' in parsed && parsed.quantity !== invoiceFace;
