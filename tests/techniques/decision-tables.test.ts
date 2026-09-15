@@ -1940,4 +1940,64 @@ describe('rules the write path does not enforce', () => {
     expect(result).toMatchObject({ ok: false });
     expect(await lifecycleOf(db.pool, payable.id)).toBe('pending_approval');
   });
+
+  it.fails('refuses a bid below the minimum price the seller published', async () => {
+    const supplier = world.suppliers[0];
+    const lender = world.lenders[0];
+    const payable = await buildPayable(db.pool, {
+      supplierId: supplier.id,
+      faceBase: FACE,
+      termsDays: 90,
+      upTo: 'issued',
+      toWallet: supplier.wallet,
+    });
+    await must(db.pool, { kind: 'accept_receipt', payableId: payable.id });
+
+    const listingId = randomUUID();
+    const bidId = randomUUID();
+    await must(db.pool, {
+      kind: 'publish_listing',
+      listingId,
+      payableId: payable.id,
+      sellerWallet: supplier.wallet,
+      quantityBase: FACE,
+      minPriceBase: 900_000,
+    });
+    await must(db.pool, {
+      kind: 'place_bid',
+      bidId,
+      listingId,
+      bidderWallet: lender.wallet,
+      priceBase: 1,
+      fundingCode: 'XUSD',
+    });
+
+    const accepted = await post(db.pool, { kind: 'accept_bid', listingId, bidId });
+    expect(accepted).toMatchObject({ ok: false });
+  });
+
+  it.fails('refuses to settle a payable whose supplier rejected the receipt', async () => {
+    const supplier = world.suppliers[0];
+    const payable = await buildPayable(db.pool, {
+      supplierId: supplier.id,
+      faceBase: FACE,
+      termsDays: 30,
+      upTo: 'issued',
+      toWallet: supplier.wallet,
+    });
+    await must(db.pool, {
+      kind: 'reject_receipt',
+      payableId: payable.id,
+      holderWallet: supplier.wallet,
+    });
+    await must(db.pool, { kind: 'advance_clock', days: 30 });
+
+    const settled = await post(db.pool, {
+      kind: 'settle_maturity',
+      payableId: payable.id,
+      fundingCode: 'XUSD',
+    });
+    expect(settled).toMatchObject({ ok: false });
+    expect(await lifecycleOf(db.pool, payable.id)).toBe('issued');
+  });
 });

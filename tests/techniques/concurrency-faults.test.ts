@@ -1510,3 +1510,141 @@ async function marketplace(
   );
   return { listingId, bidId, supplier, payable };
 }
+
+/**
+ * The two defects above, stated as the behaviour a reader expects.
+ *
+ * Everything else in this file pins what the system does, which is the right
+ * record for a concurrency suite: `40P01` and `ADA04` are what actually
+ * happens, and a test asserting otherwise would just fail for the whole life of
+ * the defect. The cost is that both findings are green, so a reader running
+ * `npm test` sees a clean sheet over a deadlock on the settlement path and a
+ * series lot that cannot be redeemed.
+ *
+ * These two cases carry the expectation instead. Each is `it.fails`, so the day
+ * either is fixed this file turns red and someone deletes the case on purpose.
+ * Both are written up in tests/techniques/findings/concurrency-faults.md.
+ */
+describe('outcomes these races should not have', () => {
+  it.fails('settles and accepts on one payable without either side deadlocking', async () => {
+    const s = await stage('abba_expected');
+    const supplier = s.suppliers[0]!;
+    const lender = s.lenders[0]!;
+    const payable = await issuePayable(s, {
+      supplier,
+      toWallet: supplier.wallet,
+      ref: 'TP-ABBAX-0001',
+      invoiceRef: 'INV-ABBAX-0001',
+      tokenId: 9301,
+    });
+
+    const listingId = randomUUID();
+    const bidId = randomUUID();
+    must(
+      await post(
+        s.pool,
+        {
+          kind: 'publish_listing',
+          listingId,
+          payableId: payable.id,
+          sellerWallet: supplier.wallet,
+          quantityBase: FACE,
+          minPriceBase: PRICE,
+        },
+        { actorUserId: s.users.supplier },
+      ),
+      'publish_listing',
+    );
+    must(
+      await post(
+        s.pool,
+        { kind: 'place_bid', bidId, listingId, bidderWallet: lender.wallet, priceBase: PRICE, fundingCode: 'XUSD' },
+        { actorUserId: s.users.lender },
+      ),
+      'place_bid',
+    );
+    must(
+      await post(s.pool, { kind: 'advance_clock', days: TERMS_DAYS }, { actorUserId: s.users.straitsx_admin }),
+      'advance_clock',
+    );
+
+    // The same cycle the test above constructs, so this case fails for the
+    // lock ordering and not for a race that happened not to occur.
+    await withClients(s.pool, 2, async ([settler, accepter]) => {
+      await settler!.query('BEGIN');
+      await settler!.query("SET LOCAL deadlock_timeout = '5s'");
+      await settler!.query('SELECT 1 FROM app.payable WHERE id = $1 FOR NO KEY UPDATE', [payable.id]);
+
+      await accepter!.query('BEGIN');
+      await accepter!.query("SET LOCAL deadlock_timeout = '40ms'");
+      await accepter!.query('SELECT 1 FROM app.listing WHERE id = $1 FOR UPDATE', [listingId]);
+
+      const [settled, accepted] = await Promise.all([
+        post(
+          settler!,
+          { kind: 'settle_maturity', payableId: payable.id, fundingCode: 'XUSD' },
+          { actorUserId: s.users.adata_preparer },
+        ),
+        post(accepter!, { kind: 'accept_bid', listingId, bidId }, { actorUserId: s.users.supplier }),
+      ]);
+
+      const codes = [settled, accepted]
+        .filter((r): r is PostErr => !r.ok)
+        .map((r) => r.code);
+      await settler!.query('ROLLBACK');
+      await accepter!.query('ROLLBACK');
+
+      expect(codes).not.toContain('40P01');
+    });
+  });
+
+  it.fails('redeems a matured member of a listed series', async () => {
+    const s = await stage('series_expected');
+    const supplier = s.suppliers[0]!;
+    const members = await Promise.all(
+      [0, 1].map((i) =>
+        issuePayable(s, {
+          supplier,
+          toWallet: supplier.wallet,
+          ref: `TP-SERIESX-000${i}`,
+          invoiceRef: `INV-SERIESX-000${i}`,
+          faceBase: 400_000_000 + i,
+          tokenId: 9310 + i,
+        }),
+      ),
+    );
+    const [first] = members as [IssuedPayable, IssuedPayable];
+
+    const seriesId = randomUUID();
+    await s.pool.query(
+      `INSERT INTO app.series (id, ref, anchor_id, maturity_date, grade, grade_rationale)
+       VALUES ($1, 'SERIES-CFX-0001', $2, $3::date, 'A', 'Sample grade for a test lot.')`,
+      [seriesId, s.anchor.entityId, first.maturityDate],
+    );
+    await s.pool.query('UPDATE app.payable SET series_id = $1 WHERE id = ANY($2::uuid[])', [
+      seriesId,
+      members.map((m) => m.id),
+    ]);
+
+    must(
+      await post(
+        s.pool,
+        { kind: 'publish_listing', listingId: randomUUID(), seriesId, sellerWallet: supplier.wallet, minPriceBase: PRICE },
+        { actorUserId: s.users.supplier },
+      ),
+      'publish_listing',
+    );
+    must(
+      await post(s.pool, { kind: 'advance_clock', days: TERMS_DAYS }, { actorUserId: s.users.straitsx_admin }),
+      'advance_clock',
+    );
+
+    const redeemed = await post(
+      s.pool,
+      { kind: 'settle_maturity', payableId: first.id, fundingCode: 'XUSD' },
+      { actorUserId: s.users.adata_preparer },
+    );
+    expect(redeemed).toMatchObject({ ok: true });
+    expect(await ledgerHealth(s.pool)).toEqual(HEALTHY);
+  });
+});

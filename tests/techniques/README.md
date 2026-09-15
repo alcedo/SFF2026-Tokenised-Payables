@@ -40,22 +40,27 @@ Every defect, pinned or marked, is written up under `findings/` with a file, a
 line, a reproduction, and observed against expected. **`findings/` is the
 document, not the pass rate.**
 
-## Where the convention is not yet uniform
+## The convention, and where a defect lives
 
-`concurrency-faults.test.ts` carries two high-severity findings and has no
-`it.fails` case for either. Its ABBA deadlock test pins `40P01` as the expected
-outcome, and its series test pins `ADA04`. Both are correct records of current
-behaviour and both are defects. They are written up in
-`findings/concurrency-faults.md`.
+Every suite that pins a defect green also carries the expectation as an
+`it.fails` case, so each finding appears twice on purpose: once as what happens,
+once as what should. Fixing the defect turns the `it.fails` red, which is the
+whole point of it.
 
-Two suites disagree about one behaviour, and the disagreement is real rather
-than a mistake. `decision-tables.test.ts` pins `bid_below_min_price: TRADED` as
-a passing row, while `model-based.test.ts` carries
-`it.fails('refuses a bid below the minimum price the seller published')`. Each
-is right in its own frame: the table records what happens, the model asserts
-what should. Fixing the defect turns one red and the other green. Whoever fixes
-it should settle on one convention across all seven suites rather than reading
-this as one suite being wrong.
+| suite | expectations carried |
+|---|---|
+| `decision-tables.test.ts` | `describe('rules the write path does not enforce')` |
+| `concurrency-faults.test.ts` | `describe('outcomes these races should not have')` |
+| `model-based.test.ts` | `describe('behaviours the model reproduces but would not choose')` |
+| `equivalence-boundary.test.ts` | `defect` rows in the case tables |
+| `state-transitions.test.ts` | inline `it.fails` beside the matrix each belongs to |
+| `properties.test.ts` | inline `it.fails` beside the property each breaks |
+
+Two findings are deliberately stated in more than one suite, because more than
+one technique reached them. A bid below the seller's minimum is pinned as a
+passing decision-table row and asserted as `it.fails` in both
+`decision-tables.test.ts` and `model-based.test.ts`. Fixing it turns both red
+at once, which is the signal working rather than two suites disagreeing.
 
 ## The mutation gate is narrower than it looks
 
