@@ -164,6 +164,18 @@ is reachable and nothing in the suite asserted it either way before.
 - `create_user` and `set_certification` have controls this suite only partly
   drives. `set_certification` is exercised by `issue-suspended-issuer`;
   `create_user` is account administration, not an issuance branch.
+- Series lots. `app.listing.target_kind` has a `series` member and every pathway
+  here lists a single payable. A series is a bundle of several suppliers'
+  invoices under one holder, so trading one is a real branch nobody drives.
+- `app.bid_status = 'superseded'`, which needs two competing bids on one
+  listing. Every pathway here places at most one bid.
+- A lender relisting what they bought. `/lender/portfolio` offers "Relist", and
+  `list()` already takes the seller and the screen as arguments, so this is a
+  row nobody has written rather than a thing the harness cannot do.
+- A bid below the seller's minimum price, which should be refused.
+- `app.listing_status = 'closed_by_transfer'` is not a gap: it is declared at
+  `db/schema.sql:368` and written nowhere, a dead enum member the
+  state-transitions suite already found.
 - Concurrency. Every pathway is one browser acting alone. Races are covered at
   the SQL layer by `tests/ledger/concurrency*.sh` and
   `tests/techniques/concurrency-faults.test.ts`.
