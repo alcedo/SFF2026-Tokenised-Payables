@@ -18,6 +18,10 @@ invariant rather than the winner.
 
 ## 1. ABBA deadlock between `settle_maturity` and `accept_bid`
 
+**FIXED.** `accept_bid` takes the instrument before the listing, which is the
+order the file's own header states. What replaced it is at the end of this
+entry.
+
 **High severity. A real deadlock on the settlement path.**
 
 `db/post.sql` states its own contract at lines 7 to 13: "The order of business
@@ -65,16 +69,59 @@ redeeming a matured payable while a seller accepts a bid on the same payable.
 balanced, which is the thing that matters most, but one of the two operators
 sees a failure the UI has no wording for.
 
-**Fix shape, not applied.** Either lock the instrument before the listing in
-`accept_bid`, resolving `target_payable_id` from an unlocked read first, then
-locking `app.payable`, then `app.listing` by primary key and re-reading its
-status under that lock, which keeps the EvalPlanQual discipline the header warns
-about at lines 21 to 27; or make `settle_maturity` take its listings before the
-payable. One direction has to give.
+**What was done.** The first shape, unchanged from the sketch above.
+`accept_bid` reads the listing's target without a lock, locks `app.payable` or
+`app.series`, then locks `app.listing` by primary key and reads its status off
+the locked row. The unlocked read decides nothing: a listing's target is set at
+INSERT and no command changes it, so it is only used to learn which instrument
+to lock, and the EvalPlanQual discipline the header warns about at lines 21 to
+27 is untouched. The maturity check further down uses the row already locked
+rather than locking it a second time.
+
+**Evidence.** Three sessions. One holds the `app.payable` row and nothing else.
+Both commands park on it:
+
+```
+settler blocked by   : [8989]
+accepter blocked by  : [8989]
+both parked on the holder: true
+settle_maturity      : accepted
+accept_bid           : ADA12 payable TP-2026-0142 has reached maturity
+DEADLOCK 40P01 SEEN  : false
+```
+
+That the acceptance queues behind a payable-only holder is the whole proof. A
+branch still reaching for the listing first would have been running rather than
+queued, and the two would have ended up holding each other's next lock.
+
+**The two tests that recorded the deadlock are replaced by one that records the
+order.** They closed the cycle by hand, giving each session the first lock of
+its own path, so they would deadlock whatever `ledger.post()` does and could
+never have shown the fix. The new test holds one row and asserts both commands
+queue on it, which is a claim about the product rather than about Postgres.
+
+**The replacement hung on its first outing, and the hang was its own.** It waited
+on both commands together while both sessions were still open. Whichever of the
+two wins the payable row holds it until its transaction ends, so the loser could
+never answer and the test ran to its 30s timeout. The winner is now closed as
+soon as it answers, and the loser then gets its turn. Which one wins is not
+asserted, because either order is legal.
+
+Either order refuses the acceptance, but not with the same code, and the first
+version of the test was wrong about that too. Settling first cancels the
+listing, so the acceptance is turned away at the listing with `ADA11`, `listing
+is cancelled`. Accepting first reaches a payable already past its date, which is
+`ADA12`. Both are business refusals with wording behind them, which is the claim
+that matters: the caller is told why, rather than handed a `40P01` the UI has no
+sentence for.
 
 ---
 
 ## 2. Redeeming one member of a listed series strands its siblings' escrow
+
+**FIXED.** The escrow unwind in `settle_maturity` no longer filters the
+listing's legs to the settled asset. The listing is cancelled whole, so its
+escrow comes back whole. The entry below is the state before that change.
 
 **High severity. A matured series lot cannot be redeemed through the product.**
 
@@ -113,8 +160,17 @@ credits the supplier both faces. The data is fine; the escrow unwind is not.
 **Expected.** A matured series member redeems. Series members share a maturity
 date by construction, since `app.payable` carries
 `FOREIGN KEY (series_id, maturity_date) REFERENCES app.series(id, maturity_date)`,
-so every series lot still listed at maturity hits this on the first member
-settled. There is no ordering of `settle_maturity` calls that avoids it.
+so every series lot still listed at maturity hit this on the first member
+settled. There was no ordering of `settle_maturity` calls that avoided it.
+
+**The fix** is one line: the inner loop's `AND asset_id = v_asset` is gone. The
+outer loop already selects listings that carry the settled asset, and the leg
+loop's job is to return what the listing held, which for a series is a leg per
+member. The test that recorded the defect now asserts the repair instead: the
+settled member reaches `settled`, the listing reaches `cancelled`, both members'
+`wallet_listed` balances go to zero, the sibling's quantity is back in
+`wallet_free`, and the sibling redeems next with no listing to cancel by hand
+first. The `it.fails` case that asked for that is deleted.
 
 ---
 

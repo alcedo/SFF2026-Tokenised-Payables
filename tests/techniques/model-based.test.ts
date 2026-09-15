@@ -26,8 +26,10 @@ import {
   freshDatabase,
   ledgerHealth,
   post,
+  actors,
   HEALTHY,
   type Database,
+  type Role,
 } from '../support/database';
 
 // --- the world the model knows about ---------------------------------------
@@ -38,7 +40,8 @@ type LifecycleState =
   | 'approved'
   | 'certified'
   | 'issued'
-  | 'settled';
+  | 'settled'
+  | 'cancelled';
 
 type ReceiptState = 'pending' | 'accepted' | 'rejected';
 type ListingState = 'open' | 'filled' | 'cancelled' | 'closed_by_transfer';
@@ -48,7 +51,7 @@ const COMMAND_KINDS = [
   'create_payable', 'submit', 'approve', 'grade', 'certify', 'issue_payable',
   'accept_receipt', 'reject_receipt', 'top_up', 'transfer', 'publish_listing',
   'place_bid', 'withdraw_bid', 'accept_bid', 'buy_now', 'cancel_listing',
-  'advance_clock', 'settle_maturity',
+  'advance_clock', 'settle_maturity', 'cancel_payable',
 ] as const;
 type CommandKind = (typeof COMMAND_KINDS)[number];
 
@@ -69,6 +72,7 @@ interface Real {
   readonly suppliers: readonly { id: string; name: string }[];
   readonly edges: ReadonlySet<string>;
   readonly programmeLimit: bigint;
+  readonly actorsByRole: Readonly<Record<Role, string>>;
 }
 
 interface MPayable {
@@ -217,6 +221,7 @@ function note(kind: CommandKind, state: string, verdict: Verdict): void {
 function unreachablePairs(): string[] {
   const lifecycle: LifecycleState[] = [
     'draft', 'pending_approval', 'approved', 'certified', 'issued', 'settled',
+    'cancelled',
   ];
   const out: string[] = [];
   // These name no payable, so they can only ever be counted against `none`.
@@ -227,6 +232,7 @@ function unreachablePairs(): string[] {
   for (const kind of [
     'submit', 'approve', 'grade', 'certify', 'issue_payable', 'accept_receipt',
     'reject_receipt', 'transfer', 'publish_listing', 'settle_maturity',
+    'cancel_payable',
   ] as const) {
     out.push(`${NO_PAYABLE}:${kind}`);
   }
@@ -238,6 +244,9 @@ function unreachablePairs(): string[] {
     for (const state of ['draft', 'pending_approval', 'approved', 'certified'] as const) {
       out.push(`${state}:${kind}`);
     }
+    // A listing needs an accepted receipt, and a cancelled payable was rejected,
+    // so no listing or bid can ever name one either.
+    out.push(`cancelled:${kind}`);
   }
   // These three refuse to be generated at all until their referent exists, so
   // unlike cancel_listing and withdraw_bid they have no "names nothing" form.
@@ -245,6 +254,44 @@ function unreachablePairs(): string[] {
     out.push(`${NO_PAYABLE}:${kind}`);
   }
   return out;
+}
+
+// --- maker-checker roles -----------------------------------------------------
+
+/**
+ * The role app.lifecycle_edge names for each edge, read here as a fixed table
+ * rather than from the database, because the whole point of this suite is a
+ * second implementation that predicts the first rather than a copy of it.
+ */
+const EDGE_ROLE: Record<
+  'submit' | 'approve' | 'certify' | 'issue_payable' | 'settle_maturity' | 'cancel_payable',
+  Role
+> = {
+  submit: 'adata_preparer',
+  approve: 'adata_checker',
+  certify: 'straitsx_admin',
+  issue_payable: 'straitsx_admin',
+  settle_maturity: 'adata_preparer',
+  cancel_payable: 'adata_checker',
+};
+
+const ROLE_ORDER: readonly Role[] = [
+  'adata_preparer', 'adata_checker', 'straitsx_admin', 'supplier', 'lender',
+];
+
+/** Some role other than the one named, chosen the same way every time. */
+function wrongRoleFor(required: Role): Role {
+  return ROLE_ORDER.find((role) => role !== required)!;
+}
+
+/**
+ * The actor a hand-written setup sequence needs for one intent, so that a
+ * fixture built out of raw `post()` calls still walks the lifecycle rather
+ * than tripping ADA36 on its own scaffolding.
+ */
+function correctActor(real: Real, kind: string): string | undefined {
+  const role = (EDGE_ROLE as Partial<Record<string, Role>>)[kind];
+  return role ? real.actorsByRole[role] : undefined;
 }
 
 // --- commands ---------------------------------------------------------------
@@ -267,11 +314,18 @@ abstract class Step implements fc.AsyncCommand<Model, Real> {
   /** Applied to the model only when the ledger accepted the command. */
   protected abstract apply(model: Model, real: Real): Promise<void> | void;
 
+  /** Who posts this command. Only the five role-gated edges override this. */
+  protected actorFor(_model: Model, _real: Real): string | undefined {
+    return undefined;
+  }
+
   async run(model: Model, real: Real): Promise<void> {
     const verdict = this.predict(model, real);
     note(this.kind, this.subject(model), verdict);
 
-    const result = await post(real.db.pool, this.intent(model, real));
+    const result = await post(real.db.pool, this.intent(model, real), {
+      actorUserId: this.actorFor(model, real),
+    });
     const seen = result.ok
       ? { accepted: true, code: null as string | null }
       : { accepted: false, code: result.code ?? null };
@@ -326,6 +380,7 @@ const AIMS: Partial<Record<CommandKind, Aim>> = {
   transfer: (p, m) => p.status === 'issued' && p.receipt !== 'pending' && m.day < p.maturity,
   publish_listing: (p, m) => p.status === 'issued' && p.receipt !== 'pending' && m.day < p.maturity,
   settle_maturity: (p, m) => p.status === 'issued' && m.day >= p.maturity,
+  cancel_payable: (p) => p.status === 'issued' && p.receipt === 'rejected',
 };
 
 function payableAt(model: Model, index: number, aim: Aim | null = null): [string, MPayable] {
@@ -535,6 +590,7 @@ class Advance extends Step {
     private readonly target: LifecycleState,
     private readonly index: number,
     private readonly guided: boolean,
+    private readonly rightRole: boolean,
   ) {
     super();
   }
@@ -543,12 +599,22 @@ class Advance extends Step {
     return model.payables.size > 0;
   }
 
+  private role(): Role {
+    const required = EDGE_ROLE[this.kind];
+    return this.rightRole ? required : wrongRoleFor(required);
+  }
+
   protected subject(model: Model): string {
     return stateOfPayable(model, this.kind, this.index, this.guided);
   }
 
   protected predict(model: Model, real: Real): Verdict {
     const p = aimed(model, this.kind, this.index, this.guided)[1];
+    // ledger.post() checks the stored grade before it touches the row, so ADA35
+    // beats both the lifecycle trigger and the graded_before_certified CHECK.
+    if (this.kind === 'certify' && !p.graded) {
+      return refuse('ADA35', `payable ${p.ref} has no grade yet`);
+    }
     // The lifecycle trigger returns early when the status does not change, so
     // re-issuing a transition the payable already made is accepted and does
     // nothing.
@@ -556,10 +622,20 @@ class Advance extends Step {
     if (!real.edges.has(`${p.status}->${this.target}`)) {
       return refuse('ADA01', `illegal lifecycle transition ${p.status} -> ${this.target}`);
     }
-    if (this.target === 'certified' && !p.graded) {
-      return refuse('23514', 'violates check constraint "graded_before_certified"');
+    // Only reached once the edge is confirmed real, which is exactly when
+    // app.assert_edge_actor finds a row and can have anything to check.
+    const required = EDGE_ROLE[this.kind];
+    if (this.role() !== required) {
+      return refuse(
+        'ADA36',
+        `payable ${p.ref} moves from ${p.status} to ${this.target} on the ${required}, not the ${this.role()}`,
+      );
     }
     return legal;
+  }
+
+  protected actorFor(_model: Model, real: Real): string {
+    return real.actorsByRole[this.role()];
   }
 
   protected intent(model: Model): Record<string, unknown> {
@@ -571,7 +647,7 @@ class Advance extends Step {
   }
 
   toString(): string {
-    return `${this.kind}(payable=${this.guided ? 'ready' : ''}${this.index})`;
+    return `${this.kind}(payable=${this.guided ? 'ready' : ''}${this.index}, actor=${this.rightRole ? 'right' : 'wrong'})`;
   }
 }
 
@@ -627,6 +703,7 @@ class Issue extends Step {
     private readonly index: number,
     private readonly walletIndex: number,
     private readonly guided: boolean,
+    private readonly rightRole: boolean,
   ) {
     super();
   }
@@ -639,6 +716,10 @@ class Issue extends Step {
     return nth([...real.wallets], this.walletIndex);
   }
 
+  private role(): Role {
+    return this.rightRole ? EDGE_ROLE.issue_payable : wrongRoleFor(EDGE_ROLE.issue_payable);
+  }
+
   protected subject(model: Model): string {
     return stateOfPayable(model, this.kind, this.index, this.guided);
   }
@@ -647,6 +728,14 @@ class Issue extends Step {
     const p = aimed(model, this.kind, this.index, this.guided)[1];
     if (p.status !== 'certified') {
       return refuse('ADA15', `payable ${p.ref} is ${p.status} and must be certified before issuance`);
+    }
+    // Reached only once the payable is certified, which is the only from_state
+    // this intent's edge names, so app.assert_edge_actor always finds a row here.
+    if (this.role() !== EDGE_ROLE.issue_payable) {
+      return refuse(
+        'ADA36',
+        `payable ${p.ref} moves from certified to issued on the ${EDGE_ROLE.issue_payable}, not the ${this.role()}`,
+      );
     }
     // app.payable's maturity_after_issue CHECK, reached whenever the clock has
     // already passed the date the draft was written against.
@@ -661,6 +750,10 @@ class Issue extends Step {
       return refuse('ADA33', 'over its');
     }
     return legal;
+  }
+
+  protected actorFor(_model: Model, real: Real): string {
+    return real.actorsByRole[this.role()];
   }
 
   protected intent(model: Model, real: Real): Record<string, unknown> {
@@ -681,7 +774,7 @@ class Issue extends Step {
   }
 
   toString(): string {
-    return `issue_payable(payable=${this.guided ? 'ready' : ''}${this.index}, to=${this.walletIndex})`;
+    return `issue_payable(payable=${this.guided ? 'ready' : ''}${this.index}, to=${this.walletIndex}, actor=${this.rightRole ? 'right' : 'wrong'})`;
   }
 }
 
@@ -708,10 +801,12 @@ class Receipt extends Step {
     const p = aimed(model, this.kind, this.index, this.guided)[1];
     if (p.receipt === 'pending') return legal;
     // A payable that was never issued has no receipt state at all, and the
-    // guard in post.sql compares against NULL, which is never true. The write
-    // then falls through to the receipt_only_once_issued CHECK.
+    // guard now checks for that missing state before it checks for pending.
     if (p.receipt === null) {
-      return refuse('23514', 'violates check constraint "receipt_only_once_issued"');
+      return refuse(
+        'ADA15',
+        `payable ${p.ref} has not been issued yet, so there is nothing to take delivery of`,
+      );
     }
     return refuse('ADA15', `payable ${p.ref} was already ${p.receipt}`);
   }
@@ -823,23 +918,34 @@ class Transfer extends Step {
 
   protected predict(model: Model, real: Real): Verdict {
     const [id, p] = this.subjectOf(model);
+    // The guard resolves the asset before anything else, so a never-issued
+    // payable refuses here, whatever quantity was asked for.
+    // `settled` and `cancelled` are past issuance, so the asset resolves and the
+    // guard falls through to the ones below rather than answering here.
+    if (p.status !== 'issued' && p.status !== 'settled' && p.status !== 'cancelled') {
+      return refuse('ADA15', `payable ${p.ref} has not been issued yet`);
+    }
     const quantity = this.quantityOf(model, real);
     if (quantity <= 0n) return refuse('ADA19', 'a transfer must be positive');
+    // Checked straight after the quantity, before maturity and the receipt.
+    if (this.from(model, real) === this.to(real)) {
+      return refuse('ADA39', 'a transfer needs a different wallet to go to');
+    }
     if (model.day >= p.maturity) {
       return refuse('ADA12', `payable ${p.ref} has reached maturity`);
     }
-    if (p.receipt === 'pending') {
-      return refuse('ADA15', `payable ${p.ref} has not been accepted by its supplier yet`);
-    }
-    // No token asset exists before issuance, so the legs carry a null asset and
-    // the balance row they pre-create is refused by NOT NULL.
-    if (p.status !== 'issued' && p.status !== 'settled') {
-      return refuse('23502', 'null value in column "asset_id" of relation "account_balance"');
+    // Only an accepted payable moves. A rejected one is refused by name, so
+    // the quantity sitting in the anchor's wallet stays where cancel_payable
+    // can still burn it.
+    if (p.receipt !== 'accepted') {
+      return refuse(
+        'ADA15',
+        p.receipt === 'rejected'
+          ? `payable ${p.ref} was rejected by its supplier and cannot be traded`
+          : `payable ${p.ref} has not been accepted by its supplier yet`,
+      );
     }
     const from = this.from(model, real);
-    // Both legs land on the same account and sum to zero, so nothing is posted
-    // and nothing can be short.
-    if (from === this.to(real)) return legal;
     const have = held(model, from, 'wallet_free', id);
     if (have < quantity) {
       return refuse('ADA21', `wallet ${from} holds ${have} unlisted, needs ${quantity}`);
@@ -915,16 +1021,28 @@ class PublishListing extends Step {
 
   protected predict(model: Model, real: Real): Verdict {
     const [id, p] = this.subjectOf(model);
+    // The guard resolves the asset before anything else, so a never-issued
+    // payable refuses here, whatever quantity was asked for.
+    // `settled` and `cancelled` are past issuance, so the asset resolves and the
+    // guard falls through to the ones below rather than answering here.
+    if (p.status !== 'issued' && p.status !== 'settled' && p.status !== 'cancelled') {
+      return refuse('ADA15', `payable ${p.ref} has not been issued yet`);
+    }
     const quantity = this.quantityOf(model, real);
     if (quantity <= 0n) return refuse('ADA19', 'a listing must be positive');
     if (model.day >= p.maturity) {
       return refuse('ADA12', `payable ${p.ref} has reached maturity`);
     }
-    if (p.receipt === 'pending') {
-      return refuse('ADA15', `payable ${p.ref} has not been accepted by its supplier yet`);
-    }
-    if (p.status !== 'issued' && p.status !== 'settled') {
-      return refuse('23502', 'null value in column "asset_id" of relation "listing_leg"');
+    // Only an accepted payable moves. A rejected one is refused by name, so
+    // the quantity sitting in the anchor's wallet stays where cancel_payable
+    // can still burn it.
+    if (p.receipt !== 'accepted') {
+      return refuse(
+        'ADA15',
+        p.receipt === 'rejected'
+          ? `payable ${p.ref} was rejected by its supplier and cannot be traded`
+          : `payable ${p.ref} has not been accepted by its supplier yet`,
+      );
     }
     const seller = this.seller(model, real);
     for (const listing of model.listings.values()) {
@@ -1009,6 +1127,13 @@ class PlaceBid extends Step {
     if (!this.bidder(real).institutional) {
       return refuse('ADA34', 'only institutional lender accounts can bid');
     }
+    // min_price_base is a floor, checked after the bidder's eligibility.
+    if (this.price < listing.minPrice) {
+      return refuse(
+        'ADA38',
+        `a bid must be at least ${listing.minPrice}, the minimum this listing asks`,
+      );
+    }
     return legal;
   }
 
@@ -1071,8 +1196,10 @@ class WithdrawBid extends Step {
     return (listing && model.payables.get(listing.payableId)?.status) ?? NO_PAYABLE;
   }
 
-  /** PRD has no "no such bid"; the UPDATE simply matches nothing. */
-  protected predict(): Verdict {
+  protected predict(model: Model): Verdict {
+    const bid = this.target(model);
+    if (!bid) return refuse('ADA11', 'no such bid');
+    if (bid.status !== 'placed') return refuse('ADA11', `bid is ${bid.status}`);
     return legal;
   }
 
@@ -1081,8 +1208,7 @@ class WithdrawBid extends Step {
   }
 
   protected apply(model: Model): void {
-    const bid = this.target(model);
-    if (bid && bid.status === 'placed') bid.status = 'withdrawn';
+    this.target(model)!.status = 'withdrawn';
   }
 
   toString(): string {
@@ -1283,9 +1409,7 @@ class CancelListing extends Step {
 
   protected predict(model: Model): Verdict {
     const found = this.target(model);
-    // A listing id that matches nothing leaves status NULL, and `NULL <> 'open'`
-    // is not true, so the command falls through to an UPDATE of no rows.
-    if (!found) return legal;
+    if (!found) return refuse('ADA11', 'no such listing');
     if (found[1].status !== 'open') return refuse('ADA11', `listing is ${found[1].status}`);
     return legal;
   }
@@ -1351,6 +1475,7 @@ class SettleMaturity extends Step {
     private readonly index: number,
     private readonly funded: boolean,
     private readonly guided: boolean,
+    private readonly rightRole: boolean,
   ) {
     super();
   }
@@ -1361,6 +1486,10 @@ class SettleMaturity extends Step {
 
   private subjectOf(model: Model): [string, MPayable] {
     return aimed(model, this.kind, this.index, this.guided);
+  }
+
+  private role(): Role {
+    return this.rightRole ? EDGE_ROLE.settle_maturity : wrongRoleFor(EDGE_ROLE.settle_maturity);
   }
 
   protected subject(model: Model): string {
@@ -1374,6 +1503,25 @@ class SettleMaturity extends Step {
     }
     if (p.status === 'settled') return refuse('ADA16', `payable ${p.ref} is already settled`);
     if (model.day < p.maturity) return refuse('ADA12', `payable ${p.ref} has not matured`);
+    // app.assert_edge_actor finds a row only where the pair is a real edge, so
+    // the role check applies to an issued payable and to nothing else.
+    if (real.edges.has(`${p.status}->settled`) && this.role() !== EDGE_ROLE.settle_maturity) {
+      return refuse(
+        'ADA36',
+        `payable ${p.ref} moves from ${p.status} to settled on the ${EDGE_ROLE.settle_maturity}, not the ${this.role()}`,
+      );
+    }
+    // Rejection returned the whole quantity to the anchor, so there is no
+    // holder left to credit. Checked after the role and before the lifecycle
+    // write, which is why a cancelled payable answers here too: cancellation
+    // only ever follows a rejection, so this guard is reached before the
+    // trigger has anything to say.
+    if (p.receipt === 'rejected') {
+      return refuse(
+        'ADA37',
+        `payable ${p.ref} was rejected by its supplier and has nobody to redeem to`,
+      );
+    }
     // The redemption legs are built before the lifecycle write, but the write
     // happens before any leg is posted, so an unissued payable is stopped by
     // the lifecycle trigger rather than by a missing token.
@@ -1391,6 +1539,10 @@ class SettleMaturity extends Step {
       );
     }
     return legal;
+  }
+
+  protected actorFor(_model: Model, real: Real): string {
+    return real.actorsByRole[this.role()];
   }
 
   protected intent(model: Model): Record<string, unknown> {
@@ -1425,7 +1577,7 @@ class SettleMaturity extends Step {
   }
 
   toString(): string {
-    return `settle_maturity(payable=${this.guided ? 'ready' : ''}${this.index}, funded=${this.funded})`;
+    return `settle_maturity(payable=${this.guided ? 'ready' : ''}${this.index}, funded=${this.funded}, actor=${this.rightRole ? 'right' : 'wrong'})`;
   }
 }
 
@@ -1475,6 +1627,11 @@ async function bootReal(db: Database): Promise<Real> {
   }));
   const anchorAddress = wallets.rows.find((r) => r.entity_type === 'anchor')!.address;
   const anchor = list.find((w) => w.address === anchorAddress)!;
+  const byRole = await actors(db.pool);
+  const roles: Role[] = ['adata_preparer', 'adata_checker', 'straitsx_admin', 'supplier', 'lender'];
+  for (const role of roles) {
+    if (!byRole[role]) throw new Error(`no live app_user with role ${role}; fixtures should always seed one`);
+  }
   return {
     db,
     wallets: list,
@@ -1482,6 +1639,7 @@ async function bootReal(db: Database): Promise<Real> {
     suppliers: suppliers.rows,
     edges: new Set(edges.rows.map((r) => `${r.from_state}->${r.to_state}`)),
     programmeLimit: anchorRow.rows[0]!.programme_limit_base,
+    actorsByRole: byRole as Record<Role, string>,
   };
 }
 
@@ -1573,9 +1731,12 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     .map((p) => new CreatePayable(p.supplier, p.face, p.terms, p.flaw));
 
   const aim = fc.record({ i: payableIndex, g: mostly });
-  const submit = aim.map((c) => new Advance('submit', 'pending_approval', c.i, c.g));
-  const approve = aim.map((c) => new Advance('approve', 'approved', c.i, c.g));
-  const certify = aim.map((c) => new Advance('certify', 'certified', c.i, c.g));
+  // Wrong-role commands are the only route to ADA36, so a third of these post
+  // as a role other than the one their edge names.
+  const aimWithRole = fc.record({ i: payableIndex, g: mostly, r: mostly });
+  const submit = aimWithRole.map((c) => new Advance('submit', 'pending_approval', c.i, c.g, c.r));
+  const approve = aimWithRole.map((c) => new Advance('approve', 'approved', c.i, c.g, c.r));
+  const certify = aimWithRole.map((c) => new Advance('certify', 'certified', c.i, c.g, c.r));
   const grade = fc
     .record({
       i: payableIndex,
@@ -1584,8 +1745,8 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     })
     .map((c) => new Grade(c.i, c.letter, c.g));
   const issue = fc
-    .record({ i: payableIndex, w: walletIndex, g: mostly })
-    .map((c) => new Issue(c.i, c.w, c.g));
+    .record({ i: payableIndex, w: walletIndex, g: mostly, r: mostly })
+    .map((c) => new Issue(c.i, c.w, c.g, c.r));
   const acceptReceipt = aim.map((c) => new Receipt('accept_receipt', c.i, c.g));
   const rejectReceipt = aim.map((c) => new Receipt('reject_receipt', c.i, c.g));
   const topUp = fc
@@ -1632,8 +1793,9 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     )
     .map((d) => new AdvanceClock(d));
   const settle = fc
-    .record({ i: payableIndex, funded: mostly, g: mostly })
-    .map((c) => new SettleMaturity(c.i, c.funded, c.g));
+    .record({ i: payableIndex, funded: mostly, g: mostly, r: mostly })
+    .map((c) => new SettleMaturity(c.i, c.funded, c.g, c.r));
+  const cancelPayable = aimWithRole.map((c) => new CancelPayable(c.i, c.g, c.r));
 
   // Repetition is the weighting: fc.commands draws uniformly from this list, so
   // the commands that move a payable along appear more than once. Without that
@@ -1646,8 +1808,89 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     topUp, transfer, transfer,
     publish, publish, placeBid, placeBid, withdrawBid, withdrawBid,
     acceptBid, acceptBid, buyNow, cancel, cancel,
-    clock, settle, settle,
+    clock, settle, settle, cancelPayable,
   ];
+}
+
+// -- cancel_payable --
+
+class CancelPayable extends Step {
+  readonly kind = 'cancel_payable' as const;
+
+  constructor(
+    private readonly index: number,
+    private readonly guided: boolean,
+    private readonly rightRole: boolean,
+  ) {
+    super();
+  }
+
+  check(model: Readonly<Model>): boolean {
+    return model.payables.size > 0;
+  }
+
+  private subjectOf(model: Model): [string, MPayable] {
+    return aimed(model, this.kind, this.index, this.guided);
+  }
+
+  private role(): Role {
+    return this.rightRole ? EDGE_ROLE.cancel_payable : wrongRoleFor(EDGE_ROLE.cancel_payable);
+  }
+
+  protected subject(model: Model): string {
+    return stateOfPayable(model, this.kind, this.index, this.guided);
+  }
+
+  protected predict(model: Model, real: Real): Verdict {
+    const [id, p] = this.subjectOf(model);
+    // The rejection guard comes first, so a payable that was never issued is
+    // refused for having no rejection rather than for its lifecycle state.
+    if (p.receipt !== 'rejected') {
+      return refuse(
+        'ADA40',
+        `payable ${p.ref} was not rejected by its supplier, so there is nothing to cancel`,
+      );
+    }
+    // app.assert_edge_actor finds a row only where the pair is a real edge, so
+    // a second cancellation of an already-cancelled payable passes the role
+    // check whoever posts it and meets the quantity guard below instead.
+    if (real.edges.has(`${p.status}->cancelled`) && this.role() !== EDGE_ROLE.cancel_payable) {
+      return refuse(
+        'ADA36',
+        `payable ${p.ref} moves from ${p.status} to cancelled on the ${EDGE_ROLE.cancel_payable}, not the ${this.role()}`,
+      );
+    }
+    // The burn takes the whole face out of the anchor's free balance in one
+    // leg, so anything less than the whole face there is refused rather than
+    // partially burnt. A rejection put it all back, but nothing stops the
+    // anchor moving it on afterwards.
+    const holding = held(model, real.anchor.address, 'wallet_free', id);
+    if (holding !== p.face) {
+      return refuse(
+        'ADA40',
+        `payable ${p.ref} cannot be cancelled while the anchor holds ${holding} of its ${p.face} face`,
+      );
+    }
+    return legal;
+  }
+
+  protected actorFor(_model: Model, real: Real): string {
+    return real.actorsByRole[this.role()];
+  }
+
+  protected intent(model: Model): Record<string, unknown> {
+    return { kind: 'cancel_payable', payableId: this.subjectOf(model)[0] };
+  }
+
+  protected apply(model: Model, real: Real): void {
+    const [id, p] = this.subjectOf(model);
+    move(model, real.anchor.address, 'wallet_free', id, -p.face);
+    p.status = 'cancelled';
+  }
+
+  toString(): string {
+    return `cancel_payable(payable=${this.guided ? 'ready' : ''}${this.index}, role=${this.role()})`;
+  }
 }
 
 // --- the property -----------------------------------------------------------
@@ -1685,6 +1928,7 @@ describe('model-based coverage of the payable workflow', () => {
     const reachable: string[] = [];
     for (const state of [
       'none', 'draft', 'pending_approval', 'approved', 'certified', 'issued', 'settled',
+      'cancelled',
     ]) {
       for (const kind of COMMAND_KINDS) {
         const pair = `${state}:${kind}`;
@@ -1698,10 +1942,10 @@ describe('model-based coverage of the payable workflow', () => {
       '',
       '  model-based workflow coverage',
       `    seed ${SEED}, ${RUNS} runs, ${coverage.steps} commands executed`,
-      `    lifecycle states reached : ${coverage.states.size} of 6  [${[...coverage.states].sort().join(', ')}]`,
+      `    lifecycle states reached : ${coverage.states.size} of 7  [${[...coverage.states].sort().join(', ')}]`,
       `    commands exercised       : ${coverage.commands.size} of ${COMMAND_KINDS.length}`,
       `    (state, command) pairs   : ${coverage.pairs.size} of ${reachable.length} reachable`,
-      `    pairs ruled unreachable  : ${unreachable.length} of ${7 * COMMAND_KINDS.length} total`,
+      `    pairs ruled unreachable  : ${unreachable.length} of ${8 * COMMAND_KINDS.length} total`,
       `    outcomes                 : ${[...coverage.verdicts.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([code, n]) => `${code}x${n}`)
@@ -1713,12 +1957,12 @@ describe('model-based coverage of the payable workflow', () => {
 
     expect(spurious, 'a pair declared unreachable was reached anyway').toEqual([]);
     expect([...coverage.states].sort()).toEqual([
-      'approved', 'certified', 'draft', 'issued', 'pending_approval', 'settled',
+      'approved', 'cancelled', 'certified', 'draft', 'issued', 'pending_approval', 'settled',
     ]);
     expect([...coverage.commands].sort()).toEqual([...COMMAND_KINDS].sort());
     expect(missed).toEqual([]);
-    expect(coverage.pairs.size).toBe(75);
-    expect(reachable.length).toBe(75);
+    expect(coverage.pairs.size).toBe(92);
+    expect(reachable.length).toBe(92);
 
     // Every verdict the model is able to reach, so that a refusal path quietly
     // falling out of the generator shows up here rather than as a silently
@@ -1726,10 +1970,10 @@ describe('model-based coverage of the payable workflow', () => {
     // fixture anchor's limit is 250,000,000,000 base units and the generated
     // faces never come within three orders of magnitude of it.
     expect([...coverage.verdicts.keys()].sort()).toEqual([
-      '23502', '23505', '23514',
+      '23505', '23514',
       'ADA01', 'ADA11', 'ADA12', 'ADA15', 'ADA16', 'ADA17', 'ADA19', 'ADA20',
-      'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34',
-      'accepted',
+      'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34', 'ADA35',
+      'ADA36', 'ADA37', 'ADA38', 'ADA39', 'ADA40', 'accepted',
     ]);
   });
 });
@@ -1737,7 +1981,7 @@ describe('model-based coverage of the payable workflow', () => {
 // --- what the model had to bend to fit --------------------------------------
 
 /**
- * Ten behaviours the model predicts because the ledger does them, not because
+ * Two behaviours the model predicts because the ledger does them, not because
  * they look right.
  *
  * The property above is green only because the model reproduces each of these,
@@ -1749,19 +1993,15 @@ describe('model-based coverage of the payable workflow', () => {
  */
 describe('behaviours the model reproduces but would not choose', () => {
   let db: Database;
-  let draftPayable: string;
   let listedPayable: string;
   let sellerWallet: string;
-  let lenderWallet: string;
 
   const LISTING = '00000000-0000-4000-f000-000000000001';
-  const NOWHERE = '00000000-0000-4000-f000-0000000000ee';
 
   beforeAll(async () => {
     db = await freshWorld('model_based_defects');
     const real = await bootReal(db);
     sellerWallet = real.wallets.find((w) => w.label === real.suppliers[0]!.name)!.address;
-    lenderWallet = real.wallets.find((w) => w.institutional)!.address;
 
     const idOf = async (ref: string) =>
       (await db.pool.query<{ id: string }>('SELECT id::text FROM app.payable WHERE ref = $1', [ref]))
@@ -1775,9 +2015,6 @@ describe('behaviours the model reproduces but would not choose', () => {
         faceBase: '1000000',
         termsDays: 90,
       });
-
-    await create('DEF-DRAFT', 'DEF-INV-1');
-    draftPayable = await idOf('DEF-DRAFT');
 
     await create('DEF-LIVE', 'DEF-INV-2');
     listedPayable = await idOf('DEF-LIVE');
@@ -1798,63 +2035,15 @@ describe('behaviours the model reproduces but would not choose', () => {
         buyNowPriceBase: '200',
       },
     ]) {
-      expect(await post(db.pool, intent), `setup: ${intent.kind}`).toMatchObject({ ok: true });
+      expect(
+        await post(db.pool, intent, { actorUserId: correctActor(real, intent.kind) }),
+        `setup: ${intent.kind}`,
+      ).toMatchObject({ ok: true });
     }
   }, 60_000);
 
   afterAll(async () => {
     await db.close();
-  });
-
-  it.fails('names the payable when a receipt is accepted before issuance', async () => {
-    const result = await post(db.pool, { kind: 'accept_receipt', payableId: draftPayable });
-    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
-  });
-
-  it.fails('names the payable when a receipt is rejected before issuance', async () => {
-    const result = await post(db.pool, {
-      kind: 'reject_receipt',
-      payableId: draftPayable,
-      holderWallet: sellerWallet,
-    });
-    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
-  });
-
-  it.fails('refuses a transfer of a payable that was never issued', async () => {
-    const result = await post(db.pool, {
-      kind: 'transfer',
-      payableId: draftPayable,
-      fromWallet: sellerWallet,
-      toWallet: lenderWallet,
-      quantityBase: '1',
-    });
-    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
-  });
-
-  it.fails('refuses a cancellation of a listing that does not exist', async () => {
-    const result = await post(db.pool, { kind: 'cancel_listing', listingId: NOWHERE });
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('refuses a bid on a listing that does not exist', async () => {
-    const result = await post(db.pool, {
-      kind: 'place_bid',
-      bidId: '00000000-0000-4000-f000-000000000002',
-      listingId: NOWHERE,
-      bidderWallet: lenderWallet,
-      priceBase: '100',
-      fundingCode: 'XUSD',
-    });
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('says which bid is missing rather than blaming the bidder', async () => {
-    const result = await post(db.pool, {
-      kind: 'accept_bid',
-      listingId: LISTING,
-      bidId: '00000000-0000-4000-f000-0000000000dd',
-    });
-    expect(result.ok ? '' : result.message).toContain('bid');
   });
 
   it.fails('refuses a second open listing with a named code rather than a raw index error', async () => {
@@ -1868,39 +2057,6 @@ describe('behaviours the model reproduces but would not choose', () => {
       buyNowPriceBase: '200',
     });
     expect(result.ok ? '' : result.code ?? '').toMatch(/^ADA/);
-  });
-
-  it.fails('refuses a bid below the minimum price the seller published', async () => {
-    // PRD section 8 screen 7 has the seller "enter a minimum XUSD price". The
-    // column is stored and shown, and neither place_bid nor accept_bid reads it.
-    const result = await post(db.pool, {
-      kind: 'place_bid',
-      bidId: '00000000-0000-4000-f000-000000000004',
-      listingId: LISTING,
-      bidderWallet: lenderWallet,
-      priceBase: '1',
-      fundingCode: 'XUSD',
-    });
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('does not stamp a confirmed transaction hash on a transfer that moved nothing', async () => {
-    const result = await post(db.pool, {
-      kind: 'transfer',
-      payableId: listedPayable,
-      fromWallet: sellerWallet,
-      toWallet: sellerWallet,
-      quantityBase: '1000',
-    });
-    expect(result, 'a self-transfer is accepted').toMatchObject({ ok: true });
-    const entryId = result.ok ? String(result.receipt.entryId) : '';
-    const { rows } = await db.pool.query<{ legs: number; hash: string | null }>(
-      `SELECT (SELECT count(*) FROM ledger.journal_leg l WHERE l.entry_id = e.id)::int AS legs,
-              e.chain_tx_hash AS hash
-         FROM ledger.journal_entry e WHERE e.id = $1`,
-      [entryId],
-    );
-    expect(rows[0]).toEqual({ legs: 0, hash: null });
   });
 
   it.fails('names maturity when a draft is issued after its own maturity date', async () => {
@@ -1928,14 +2084,17 @@ describe('behaviours the model reproduces but would not choose', () => {
         { kind: 'certify', payableId },
         { kind: 'advance_clock', days: 30 },
       ]) {
-        expect(await post(own.pool, intent), `setup: ${intent.kind}`).toMatchObject({ ok: true });
+        expect(
+          await post(own.pool, intent, { actorUserId: correctActor(real, intent.kind) }),
+          `setup: ${intent.kind}`,
+        ).toMatchObject({ ok: true });
       }
       const result = await post(own.pool, {
         kind: 'issue_payable',
         payableId,
         toWallet: wallet,
         tokenId: 11,
-      });
+      }, { actorUserId: correctActor(real, 'issue_payable') });
       expect(result).toMatchObject({ ok: false, code: 'ADA12' });
     } finally {
       await own.close();

@@ -305,15 +305,28 @@ describe('a listing can be found from its target', () => {
 });
 
 describe('the next action for a seeded persona', () => {
-  it('sends the ADATA checker to fund the overdue payable', async () => {
+  it('sends the ADATA preparer to fund the overdue payable', async () => {
     const personas = await readPersonas();
-    const checker = personas.find((p) => p.name === 'Hsu Po-Chun');
-    expect(checker).toBeDefined();
-    expect(await loadNextAction(checker!, world)).toEqual({
+    const preparer = personas.find((p) => p.name === 'Wei-Ling Chen');
+    expect(preparer).toBeDefined();
+    expect(await loadNextAction(preparer!, world)).toEqual({
       kind: 'yours',
       verb: 'Fund settlement of TP-2026-0119',
       href: '/adata/settlement',
       detail: 'Maturity does not pay anyone. Settlement is an explicit act.',
+    });
+  });
+
+  // app.lifecycle_edge names the adata_preparer on issued -> settled, so the
+  // strip must not send the checker somewhere ledger.post() refuses.
+  it('does not offer the ADATA checker a settlement only the preparer may post', async () => {
+    const personas = await readPersonas();
+    const checker = personas.find((p) => p.name === 'Hsu Po-Chun');
+    expect(checker).toBeDefined();
+    expect(await loadNextAction(checker!, world)).toEqual({
+      kind: 'clear',
+      heading: 'Nothing is waiting on you.',
+      detail: 'Create a payable, or open Explorer to show the trail.',
     });
   });
 

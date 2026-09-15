@@ -24,7 +24,12 @@ export function parseIsoDate(value: string): IsoDate {
     throw new RangeError(`expected a YYYY-MM-DD date, received ${JSON.stringify(value)}`);
   }
   const ms = Date.parse(`${value}T00:00:00Z`);
-  if (Number.isNaN(ms)) {
+  // Date.parse rolls an out-of-range day over instead of returning NaN, so
+  // 2026-02-30 came back as a valid timestamp two days into March. Comparing
+  // the round trip is what catches the day against the length of its month:
+  // the brand promises the date exists, and a rolled-over value changes
+  // identity the moment anything does arithmetic on it.
+  if (Number.isNaN(ms) || new Date(ms).toISOString().slice(0, 10) !== value) {
     throw new RangeError(`not a real calendar date: ${value}`);
   }
   return value as IsoDate;

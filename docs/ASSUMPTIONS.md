@@ -33,11 +33,38 @@ quantity to the anchor's wallet and records an event; the obligation stays
 `issued`, held by ADATA.
 
 **Why this way:** returning the quantity keeps the section 13 rule that holdings
-sum to outstanding face. Burning it would break that rule, and section 4 puts
-operational cancellation out of scope, so there is no cancelled state to move to.
+sum to outstanding face. Burning it inside the rejection would break that rule,
+because the payable is still issued and its face is still outstanding.
 
 **If wrong:** the change is confined to the `reject_receipt` branch of
 `ledger.post()` and the two acceptance gates on listing and transfer.
+
+## What becomes of a payable the supplier refuses
+
+Nothing in the PRD says. Section 3 question 7 gives the supplier the option to
+reject, section 7 draws a lifecycle with no state for a refused obligation, and
+section 4 puts operational cancellation out of scope without saying what to do
+with the one case the product itself creates. A refused payable is otherwise
+stuck: it cannot trade, it cannot be settled (`ADA37`), and the clock carries it
+to maturity and then overdue regardless.
+
+**Built:** a seventh stored state, `cancelled`, and one edge into it,
+`issued -> cancelled`, driven by the `adata_checker`. `cancel_payable` refuses
+with `ADA40` unless `receipt_status` is `rejected`, then burns the full face out
+of the anchor's free balance back to `system_unissued` and moves the obligation
+to `cancelled`, which is terminal. The control sits on the approval queue, the
+checker's own screen, next to the approval it reverses.
+
+**Why this way:** the quantity is in the anchor's wallet by then, not the
+supplier's, so burning it is the anchor withdrawing its own obligation rather
+than taking something from a holder. Outstanding face goes to zero at the same
+moment the tokens do, so section 13 still holds. Restricting it to a rejected
+payable is what keeps this from becoming the operational cancellation section 4
+excludes: an issued payable in a supplier's hands cannot be withdrawn.
+
+**If wrong:** the `cancelled` value in `app.obligation_state`, the sixth row of
+`app.lifecycle_edge`, the `cancel_payable` branch of `ledger.post()`, and
+`TRANSITIONS.cancel` in `src/core/lifecycle.ts`.
 
 ## Overdue grace period
 
@@ -292,6 +319,36 @@ serverless instances can cold-start on the same empty database.
 **If wrong:** the party list and the funding table are two `VALUES` blocks in
 `db/fixtures.sql`, and the counts they have to satisfy are named in
 `tests/ledger/fixtures.sql`.
+
+## Which role may drive each lifecycle edge
+
+Section 7 names an actor for one edge of six. "The ADATA checker approves the
+preparer's submission" is explicit, and section 3 question 6 adds that the
+checker is separate. For the others it describes the event without saying
+whose hands are on it: "StraitsX assigns a grade and certifies eligibility",
+"mock mint assigns the full quantity to the supplier wallet", "ADATA funds the
+full outstanding face". Maker-checker is named as a phase 1 exit criterion, so
+the rule has to be enforced somewhere, against a role table the PRD only half
+supplies.
+
+**Built:** `app.lifecycle_edge.actor_role` carries a role on all six edges and
+`ledger.post()` reads it, refusing any other actor with `ADA36`. Submission and
+redemption belong to the ADATA preparer, approval and cancellation to the ADATA
+checker, and grading, certification and issuance to StraitsX, which matches
+section 7's one explicit edge and follows the obligor-versus-programme split the
+rest of the document draws. The identity half of maker-checker needs no separate rule: a
+user holds exactly one `app.user_role`, set at creation and changed by no
+command, and submission and approval name different roles, so the submitter of
+a payable can never be its approver.
+
+`src/core/lifecycle.ts` holds the same six rows, because the screens disable
+buttons before a person clicks them, and a test in
+`tests/techniques/state-transitions.test.ts` reads `app.lifecycle_edge` out of
+the database and asserts the two agree. A rule written twice drifts, and the
+version that drew a button the database then refused is the one this replaced.
+
+**If wrong:** the rows in `db/schema.sql` §5, `app.assert_edge_actor` in
+`db/post.sql`, and `TRANSITIONS` in `src/core/lifecycle.ts`.
 
 ## Naming who the approval queue is waiting on
 

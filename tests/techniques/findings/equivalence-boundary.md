@@ -7,7 +7,8 @@ guards inside `ledger.post()`.
 
 292 cases. 283 pass. 9 run under `it.fails` because the system does not do what
 its own guard says it does; those are EB-01, EB-02, EB-03, EB-06, EB-07, EB-08
-and EB-09 below. Nothing in `src/` or `db/` was changed.
+and EB-09 below. Nothing in `src/` or `db/` was changed to write this suite. See
+`tests/techniques/README.md` on what a **FIXED** entry means.
 
 Three further findings (EB-04, EB-05, EB-10) are pinned by ordinary passing
 cases rather than by `it.fails`, because the observed behaviour is arguable
@@ -22,6 +23,11 @@ never considered: the absent value, the non-number, and the calendar.
 ---
 
 ## EB-01 `parseIsoDate` accepts dates that do not exist
+
+**FIXED.** The guard compares the round trip,
+`new Date(ms).toISOString().slice(0, 10) !== value`, which is what catches the
+day against the length of its month. `2026-02-29`, `2026-02-30` and
+`2026-04-31` all throw now.
 
 **File:** `src/core/clock.ts`, `parseIsoDate`
 
@@ -75,6 +81,11 @@ passing rows pinning the four values the guard does reject and the
 
 ## EB-02 `formatUnits` accepts a NaN `decimals` and renders a trailing point
 
+**FIXED.** The guard establishes `Number.isInteger(decimals)` before bounding
+it, so `NaN` and `2.5` are both refused with `decimals must be a whole number
+between 0 and 4`. The related `2.5` behaviour this entry pinned as harmless
+went with it, since it had the same root.
+
 **File:** `src/core/money.ts`, `formatUnits`
 
 **Reproduction**
@@ -105,6 +116,8 @@ the `2.5` row under `money.formatUnits(value, decimals)`.
 ---
 
 ## EB-03 `allocateProRata` guards the sum of the weights, not each weight
+
+**FIXED.** The guard is per weight. See finding 3 of `findings/properties.md`.
 
 **File:** `src/core/money.ts`, `allocateProRata`
 
@@ -228,6 +241,14 @@ guarded functions.
 
 ## EB-06 `top_up` with `amountBase` absent is accepted and writes a legless entry
 
+**FIXED.** The guard is `IF v_qty IS NULL OR v_qty <= 0`, so an absent amount is
+refused with the `ADA19` the field already had. A deferred invariant in
+`db/schema.sql` §4b backs it up: an entry carrying a chain receipt and no legs
+raises `ADA39` at COMMIT, so a sixth receipted command cannot reintroduce the
+shape quietly.
+
+The entry below is the state before that change.
+
 **File:** `db/post.sql`, the `top_up` branch and `ledger.post_legs`
 
 **Reproduction**
@@ -270,9 +291,11 @@ HAVING SUM(amount) <> 0;
 `SUM(amount)` is NULL, `NULL <> 0` is NULL, and the row is not inserted. The
 entry commits with no legs at all.
 
-**Why it matters.** The books stay balanced, so the oracle does not catch it:
-the suite asserts `ledgerHealth` after this case and it is `HEALTHY`. An entry
-with no legs trivially balances. What is wrong is the audit trail and the
+**Why it matters.** The books stay balanced, so the oracle did not catch it:
+the suite asserts `ledgerHealth` after this case and it was `HEALTHY`. An entry
+with no legs trivially balances, conserves every asset, and disturbs no escrow,
+which is why none of the three existing deferred invariants could see it and why
+closing it needed a fourth. What is wrong is the audit trail and the
 receipt. The journal is the system's record of what happened, and it now
 contains a confirmed top-up with a transaction hash and a block number that
 moved no money. The same NULL path exists for `transfer.quantityBase`, but there
@@ -285,6 +308,14 @@ first, and a known one still builds legs whose amounts are NULL.
 ---
 
 ## EB-07 `set_certification` with `status` absent leaks a NOT NULL violation
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. An absent status answers `ADA19 unknown certification status none given`.
+
+The entry below is the state before that change.
+
 
 **File:** `db/post.sql`, the `set_certification` branch
 
@@ -324,6 +355,14 @@ passing rows covering the rest of the partition set.
 
 ## EB-08 `btrim` strips only spaces, so a tab-only `invoiceRef` is accepted
 
+**FIXED.** Every `btrim` on a name or reference in `db/post.sql` now passes the
+whitespace set explicitly, `E' \t\n\r\f\v'`. A tab-only invoice reference
+reads as empty and is refused with the `ADA25` the field already had, as are
+the organisation and user name fields that had the same call.
+
+The entry below is the state before that change.
+
+
 **File:** `db/post.sql`, the manual branch of `create_payable`
 
 **Reproduction**
@@ -362,6 +401,14 @@ passing empty, spaces-only, absent, one-character, padded and duplicate rows.
 ---
 
 ## EB-09 `advance_clock` with `days` absent leaks a NOT NULL violation
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. An absent `days` answers `ADA19 the demo clock only moves forward`.
+
+The entry below is the state before that change.
+
 
 **File:** `db/post.sql`, the `advance_clock` branch
 

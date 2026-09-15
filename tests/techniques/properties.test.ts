@@ -137,23 +137,26 @@ describe('money conservation', () => {
   });
 
   /**
-   * FAILS: `allocateProRata` guards only on the weights summing positive, so a
-   * negative weight passes the guard and breaks the postcondition its own
-   * doc comment states. bigint division truncates toward zero, which is a
-   * ceiling for a negative product, so the parts can over-allocate and the
-   * residue loop exits on its `residue <= 0n` break without correcting it.
-   * Shrunk counterexample: total 1n, weights [-4n, 10n, -1n], parts
-   * [0n, 2n, 0n], which sum to 2n.
-   * Written up in tests/techniques/findings/properties.md.
+   * The guard used to be on the weights summing positive, which a negative
+   * weight passes whenever another outweighs it. bigint division truncates
+   * toward zero, a ceiling for a negative product, so the parts over-allocated
+   * and the residue loop exited on its `residue <= 0n` break without
+   * correcting it. total 1n over [-4n, 10n, -1n] returned [0n, 2n, 0n].
+   *
+   * The guard is per weight now, so the postcondition holds for everything the
+   * function admits and the rest is refused by name.
    */
-  it.fails('keeps conservation when a weight is negative', () => {
+  it('refuses to split across a negative weight rather than over-allocating', () => {
     fc.assert(
       fc.property(
         baseUnits(1n, 1_000n),
         fc.array(baseUnits(-10n, 10n), { minLength: 2, maxLength: 4 })
+          .filter((ws) => ws.some((w) => w < 0n))
           .filter((ws) => ws.reduce<bigint>((acc, w) => acc + w, 0n) > 0n),
         (total, ws) => {
-          expect(m.sum(m.allocateProRata(total, ws))).toBe(total);
+          expect(() => m.allocateProRata(total, ws)).toThrow(
+            'allocateProRata cannot split across a negative weight',
+          );
         },
       ),
       RUNS,
@@ -275,26 +278,23 @@ describe('money parsing round-trips', () => {
    * RangeError: not a decimal amount: "1,000.0000".
    * Written up in tests/techniques/findings/properties.md.
    */
-  it.fails('round-trips through its own display format', () => {
+  it('round-trips through its own display format', () => {
     fc.assert(
-      fc.property(nonNegativeMoney, (value) => {
+      fc.property(anyMoney, (value) => {
         expect(m.parseUnits(m.formatUnits(value, 4))).toBe(value);
       }),
       RUNS,
     );
+    expect(m.formatUnits(m.fromBaseUnits(-2_500_000_000n), 4)).toBe('-250,000.0000');
+    expect(m.parseUnits('-250,000.0000')).toBe(-2_500_000_000n);
   });
 
-  // The same round trip with the separators stripped, which is what a caller
-  // has to do today. It holds for every amount and both signs, so the defect
-  // above is the grouping and nothing else.
-  it('round-trips once the thousands separators are stripped', () => {
-    fc.assert(
-      fc.property(anyMoney, (value) => {
-        expect(m.parseUnits(m.formatUnits(value, 4).replace(/,/g, ''))).toBe(value);
-      }),
-      RUNS,
-    );
-    expect(m.formatUnits(m.fromBaseUnits(-2_500_000_000n), 4)).toBe('-250,000.0000');
+  // Only the shape formatUnits emits is read as grouped. Anything else keeps
+  // the comma and is refused, so 1,0000 is not ten thousand.
+  it('refuses a comma that is not a thousands separator', () => {
+    for (const bad of ['1,0000.00', '1,00', '1,,000', ',000', '1000,000']) {
+      expect(() => m.parseUnits(bad), bad).toThrow();
+    }
   });
 });
 
@@ -725,13 +725,19 @@ describe('market filter parsing', () => {
    * is not an integer. Exponent 304 parses fine.
    * Written up in tests/techniques/findings/properties.md.
    */
-  it.fails('survives a size bound written in exponent notation', () => {
+  it('survives a size bound written in exponent notation', () => {
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 400 }), (exponent) => {
-        expect(typeof parseFilter({ smin: `1e${exponent}` }).sizeMin).toBe('bigint');
+        const bound = parseFilter({ smin: `1e${exponent}` }).sizeMin;
+        // The documented contract is that an unparseable value is dropped, not
+        // that every value parses. A bound that overflows the scaling to base
+        // units is dropped like any other, so the marketplace still renders.
+        expect(bound === null || typeof bound === 'bigint').toBe(true);
       }),
       RUNS,
     );
+    expect(parseFilter({ smin: '1e304' }).sizeMin).not.toBe(null);
+    expect(parseFilter({ smin: '1e305' }).sizeMin).toBe(null);
   });
 });
 

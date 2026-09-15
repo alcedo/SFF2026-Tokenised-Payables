@@ -10,6 +10,7 @@ import {
   StatusChip,
 } from '@/components/primitives';
 import { readBalances, readHolders, readPayables, readWorld, serializeBalances } from '@/db/read';
+import { currentPersona } from '@/app/session';
 
 /**
  * PRD §8 screen 4. Settlement.
@@ -22,6 +23,7 @@ import { readBalances, readHolders, readPayables, readWorld, serializeBalances }
  */
 export default async function SettlementPage() {
   const world = await readWorld();
+  const persona = await currentPersona();
   const payables = await readPayables(world);
 
   const due = payables.filter((p) => p.status === 'matured' || p.status === 'overdue');
@@ -128,6 +130,7 @@ export default async function SettlementPage() {
                     <DaysRemaining days={payable.daysRemaining} />
                   </Field>
                   <FundingPanel
+                    actorRole={persona.role}
                     payableId={payable.id}
                     outstandingBase={payable.outstandingBase.toString()}
                     holderCount={holders.length}

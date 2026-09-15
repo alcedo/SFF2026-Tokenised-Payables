@@ -279,6 +279,51 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
 $$;
 
 -- ----------------------------------------------------------------------------
+-- Maker-checker
+-- ----------------------------------------------------------------------------
+-- PRD §7: "the ADATA checker approves the preparer's submission", §11:
+-- "approval events preserve the separate preparer and checker identities", and
+-- the phase 1 exit criterion, "an invoice can be created, independently
+-- approved, certified and issued".
+--
+-- app.lifecycle_edge.actor_role already names the role for each of the five
+-- edges and is NOT NULL on all of them. This is its only reader, so the column
+-- is a rule rather than documentation, and a sixth edge inherits enforcement
+-- from the row rather than from a sixth branch here.
+CREATE OR REPLACE FUNCTION app.assert_edge_actor(
+  p_payable app.payable,
+  p_to      app.obligation_state,
+  p_actor   uuid
+) RETURNS void LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  v_needs app.user_role;
+  v_has   app.user_role;
+BEGIN
+  SELECT actor_role INTO v_needs FROM app.lifecycle_edge
+   WHERE from_state = p_payable.lifecycle_status AND to_state = p_to;
+
+  -- No row means this is not an edge: either a same-state write, which moves
+  -- nobody and so has nobody to check, or an illegal transition, which
+  -- app.enforce_lifecycle_edge refuses with ADA01 a few lines later. Deciding
+  -- that here too would answer "wrong role" for a transition that is not
+  -- available to any role.
+  IF v_needs IS NULL THEN RETURN; END IF;
+
+  SELECT role INTO v_has FROM app.app_user
+   WHERE id = p_actor AND deactivated_at IS NULL;
+  IF v_has IS DISTINCT FROM v_needs THEN
+    RAISE EXCEPTION 'payable % moves from % to % on the %, not the %',
+      p_payable.ref, p_payable.lifecycle_status, p_to, v_needs,
+      COALESCE(v_has::text, 'unknown user') USING ERRCODE = 'ADA36';
+  END IF;
+
+  -- The identity half of maker-checker needs no separate check. A user holds
+  -- exactly one app.user_role, set at INSERT and changed by no command, and the
+  -- two edges name different roles, so the submitter of a payable can never be
+  -- its approver. A guard for it here could not fire.
+END $$;
+
+-- ----------------------------------------------------------------------------
 -- ledger.post
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ledger.post(p_command jsonb) RETURNS jsonb
@@ -298,6 +343,8 @@ DECLARE
   v_listing     app.listing;
   v_bid         app.bid;
   v_asset       uuid;
+  v_target_kind app.listing_target;
+  v_target_id   uuid;
   v_cash        uuid;
   v_qty         bigint;
   v_price       bigint;
@@ -343,6 +390,7 @@ BEGIN
     WHEN 'accept_bid'     THEN 'trade_settlement'
     WHEN 'buy_now'        THEN 'trade_settlement'
     WHEN 'settle_maturity' THEN 'redemption'
+    WHEN 'cancel_payable'  THEN 'payable_cancelled'
     WHEN 'advance_clock'  THEN 'clock_advanced'
     WHEN 'reset_world'    THEN 'world_reset'
     WHEN 'create_payable' THEN 'payable_created'
@@ -388,6 +436,7 @@ BEGIN
       RAISE EXCEPTION 'payable % is % and must be certified before issuance',
         v_payable.ref, v_payable.lifecycle_status USING ERRCODE = 'ADA15';
     END IF;
+    PERFORM app.assert_edge_actor(v_payable, 'issued', v_actor);
 
     -- PRD §8 screen 14 and §5: StraitsX certifies the issuer and sets its
     -- programme limit. Both are checked here, at the only point where face
@@ -437,7 +486,11 @@ BEGIN
   ELSIF v_kind = 'top_up' THEN
     v_cash := ledger.cash_asset((v_intent->>'cashCode')::ledger.cash_code);
     v_qty  := (v_intent->>'amountBase')::bigint;
-    IF v_qty <= 0 THEN
+    -- An absent amountBase casts to NULL, and NULL <= 0 is NULL, which IF does
+    -- not take. The legs were then built with a NULL amount and post_legs
+    -- filtered them out on HAVING SUM(amount) <> 0, so the entry committed with
+    -- no legs and a confirmed receipt over it.
+    IF v_qty IS NULL OR v_qty <= 0 THEN
       RAISE EXCEPTION 'a top-up must be positive' USING ERRCODE = 'ADA19';
     END IF;
     v_legs := ARRAY[
@@ -448,15 +501,35 @@ BEGIN
   ELSIF v_kind = 'transfer' THEN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
     v_asset := ledger.payable_asset(v_payable.id);
+    IF v_asset IS NULL THEN
+      RAISE EXCEPTION 'payable % has not been issued yet', v_payable.ref USING ERRCODE = 'ADA15';
+    END IF;
     v_qty   := (v_intent->>'quantityBase')::bigint;
-    IF v_qty <= 0 THEN
+    IF v_qty IS NULL OR v_qty <= 0 THEN
       RAISE EXCEPTION 'a transfer must be positive' USING ERRCODE = 'ADA19';
+    END IF;
+    -- post_legs sums legs per account and asset, so a transfer to the wallet it
+    -- came from nets to zero and inserts nothing. The entry is still stamped
+    -- with a confirmed transaction hash, and PRD §10's explorer renders that as
+    -- a settled movement. A transfer to yourself is not a transfer.
+    IF (v_intent->>'fromWallet') = (v_intent->>'toWallet') THEN
+      RAISE EXCEPTION 'a transfer needs a different wallet to go to'
+        USING ERRCODE = 'ADA39';
     END IF;
     IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
       RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
     END IF;
-    IF v_payable.receipt_status = 'pending' THEN
-      RAISE EXCEPTION 'payable % has not been accepted by its supplier yet', v_payable.ref
+    -- PRD §3 q7 gives the supplier the choice, and core/lifecycle.canTradeReceipt
+    -- reads it as only an accepted payable may move. This guard used to refuse
+    -- 'pending' alone, so a rejection left the whole quantity in the anchor's
+    -- own wallet and free to move on. Anyone it reached would hold a token that
+    -- settlement refuses (ADA37) and that cancel_payable can no longer burn,
+    -- because the anchor no longer holds the face (ADA40). Refusing here is
+    -- what keeps a refused payable in one place where it can still be withdrawn.
+    IF v_payable.receipt_status IS DISTINCT FROM 'accepted' THEN
+      RAISE EXCEPTION '%', CASE WHEN v_payable.receipt_status = 'rejected'
+        THEN format('payable %s was rejected by its supplier and cannot be traded', v_payable.ref)
+        ELSE format('payable %s has not been accepted by its supplier yet', v_payable.ref) END
         USING ERRCODE = 'ADA15';
     END IF;
     v_legs := ARRAY[
@@ -507,8 +580,11 @@ BEGIN
     ELSE
       SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
       v_asset := ledger.payable_asset(v_payable.id);
+      IF v_asset IS NULL THEN
+        RAISE EXCEPTION 'payable % has not been issued yet', v_payable.ref USING ERRCODE = 'ADA15';
+      END IF;
       v_qty   := (v_intent->>'quantityBase')::bigint;
-      IF v_qty <= 0 THEN
+      IF v_qty IS NULL OR v_qty <= 0 THEN
         RAISE EXCEPTION 'a listing must be positive' USING ERRCODE = 'ADA19';
       END IF;
       IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
@@ -523,8 +599,13 @@ BEGIN
       --
       -- PRD §8 screen 6 presents an inbox: a payable the supplier has not yet
       -- accepted is visible but not yet actionable.
-      IF v_payable.receipt_status = 'pending' THEN
-        RAISE EXCEPTION 'payable % has not been accepted by its supplier yet', v_payable.ref
+      -- Same rule as transfer: only an accepted payable moves. A rejected one
+      -- sits in the anchor's wallet waiting to be cancelled, and listing it
+      -- would sell a token settlement refuses to pay.
+      IF v_payable.receipt_status IS DISTINCT FROM 'accepted' THEN
+        RAISE EXCEPTION '%', CASE WHEN v_payable.receipt_status = 'rejected'
+          THEN format('payable %s was rejected by its supplier and cannot be traded', v_payable.ref)
+          ELSE format('payable %s has not been accepted by its supplier yet', v_payable.ref) END
           USING ERRCODE = 'ADA15';
       END IF;
       INSERT INTO app.listing (id, target_kind, target_payable_id, seller_wallet,
@@ -543,6 +624,9 @@ BEGIN
 
   ELSIF v_kind = 'cancel_listing' THEN
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
+    IF v_listing.id IS NULL THEN
+      RAISE EXCEPTION 'no such listing' USING ERRCODE = 'ADA11';
+    END IF;
     IF v_listing.status <> 'open' THEN
       RAISE EXCEPTION 'listing is %', v_listing.status USING ERRCODE = 'ADA11';
     END IF;
@@ -560,23 +644,45 @@ BEGIN
 
   ELSIF v_kind = 'place_bid' THEN
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
+    IF v_listing.id IS NULL THEN
+      RAISE EXCEPTION 'no such listing' USING ERRCODE = 'ADA11';
+    END IF;
     IF v_listing.status <> 'open' THEN
       RAISE EXCEPTION 'listing is %', v_listing.status USING ERRCODE = 'ADA11';
     END IF;
     IF NOT ledger.wallet_is_institutional(v_intent->>'bidderWallet') THEN
       RAISE EXCEPTION 'only institutional lender accounts can bid' USING ERRCODE = 'ADA34';
     END IF;
+    -- PRD §8 screen 7 has the seller "enter a minimum XUSD price", and
+    -- min_price_base is NOT NULL with a CHECK that it is positive, so it is a
+    -- floor rather than a hint. Checked here, where a bid enters, rather than
+    -- at acceptance: a bid is only ever created by this branch or by buy_now,
+    -- and buy_now prices from buy_now_price_base, which the schema already
+    -- constrains to be at least the minimum. An absent price is below any
+    -- floor, so the comparison is written to catch it rather than to return
+    -- NULL and fall through to the NOT NULL column.
+    v_price := (v_intent->>'priceBase')::bigint;
+    IF v_price IS NULL OR v_price < v_listing.min_price_base THEN
+      RAISE EXCEPTION 'a bid must be at least %, the minimum this listing asks',
+        v_listing.min_price_base USING ERRCODE = 'ADA38';
+    END IF;
     -- PRD §9: bids do not reserve funds. Nothing is locked and no leg is
     -- posted; the balance is rechecked when the seller accepts.
     INSERT INTO app.bid (id, listing_id, bidder_wallet, price_base, funding_code, status)
     VALUES (COALESCE((v_intent->>'bidId')::uuid, gen_random_uuid()), v_listing.id,
-            v_intent->>'bidderWallet', (v_intent->>'priceBase')::bigint,
+            v_intent->>'bidderWallet', v_price,
             (v_intent->>'fundingCode')::ledger.cash_code, 'placed')
     RETURNING * INTO v_bid;
 
   ELSIF v_kind = 'withdraw_bid' THEN
-    UPDATE app.bid SET status = 'withdrawn'
-     WHERE id = (v_intent->>'bidId')::uuid AND status = 'placed';
+    SELECT * INTO v_bid FROM app.bid WHERE id = (v_intent->>'bidId')::uuid FOR UPDATE;
+    IF v_bid.id IS NULL THEN
+      RAISE EXCEPTION 'no such bid' USING ERRCODE = 'ADA11';
+    END IF;
+    IF v_bid.status <> 'placed' THEN
+      RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
+    END IF;
+    UPDATE app.bid SET status = 'withdrawn' WHERE id = v_bid.id;
 
   ELSIF v_kind IN ('accept_bid', 'buy_now') THEN
     -- One settlement path for both. Buy-now is an acceptance the buyer performs
@@ -585,6 +691,28 @@ BEGIN
     -- branch would mean two places that move money, which is exactly what this
     -- design exists to avoid.
     --
+    -- The header states one lock order for the whole system, payable then
+    -- series then listing, and this branch used to take the listing first.
+    -- settle_maturity takes the payable and then expires its listings, so two
+    -- ordinary product actions on one payable deadlocked and a caller got
+    -- 40P01, which is not an ADA code and has no wording behind it.
+    --
+    -- A listing's target is set at INSERT and no command changes it, so an
+    -- unlocked read is enough to learn which instrument to lock first. Nothing
+    -- is decided on that read: the status and everything else are taken off the
+    -- locked row below.
+    SELECT target_kind, COALESCE(target_payable_id, target_series_id)
+      INTO v_target_kind, v_target_id
+      FROM app.listing WHERE id = (v_intent->>'listingId')::uuid;
+    IF v_target_kind IS NULL THEN
+      RAISE EXCEPTION 'no such listing' USING ERRCODE = 'ADA11';
+    END IF;
+    IF v_target_kind = 'series' THEN
+      SELECT * INTO v_series FROM app.series WHERE id = v_target_id FOR NO KEY UPDATE;
+    ELSE
+      SELECT * INTO v_payable FROM app.payable WHERE id = v_target_id FOR NO KEY UPDATE;
+    END IF;
+
     -- Lock by primary key only. See the header note on EvalPlanQual.
     SELECT * INTO v_listing FROM app.listing WHERE id = (v_intent->>'listingId')::uuid FOR UPDATE;
     IF v_listing.id IS NULL THEN
@@ -607,6 +735,9 @@ BEGIN
       RETURNING * INTO v_bid;
     ELSE
       SELECT * INTO v_bid FROM app.bid WHERE id = (v_intent->>'bidId')::uuid FOR UPDATE;
+      IF v_bid.id IS NULL THEN
+        RAISE EXCEPTION 'no such bid' USING ERRCODE = 'ADA11';
+      END IF;
       IF v_bid.status <> 'placed' THEN
         RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
       END IF;
@@ -626,14 +757,13 @@ BEGIN
       RAISE EXCEPTION 'only institutional lender accounts can buy' USING ERRCODE = 'ADA34';
     END IF;
 
-    -- Maturity closes the market whichever kind of lot this is.
+    -- Maturity closes the market whichever kind of lot this is. The instrument
+    -- is already locked, above, in the order the header states.
     IF v_listing.target_kind = 'series' THEN
-      SELECT * INTO v_series FROM app.series WHERE id = v_listing.target_series_id FOR NO KEY UPDATE;
       IF (v_world.t0 + v_world.offset_days) >= v_series.maturity_date THEN
         RAISE EXCEPTION 'series % has reached maturity', v_series.ref USING ERRCODE = 'ADA12';
       END IF;
     ELSE
-      SELECT * INTO v_payable FROM app.payable WHERE id = v_listing.target_payable_id FOR NO KEY UPDATE;
       IF (v_world.t0 + v_world.offset_days) >= v_payable.maturity_date THEN
         RAISE EXCEPTION 'payable % has reached maturity', v_payable.ref USING ERRCODE = 'ADA12';
       END IF;
@@ -680,6 +810,20 @@ BEGIN
     IF (v_world.t0 + v_world.offset_days) < v_payable.maturity_date THEN
       RAISE EXCEPTION 'payable % has not matured', v_payable.ref USING ERRCODE = 'ADA12';
     END IF;
+    PERFORM app.assert_edge_actor(v_payable, 'settled', v_actor);
+
+    -- PRD §7: maturity settlement credits each current holder for the quantity
+    -- they hold. A rejected delivery sent the whole quantity back to the
+    -- anchor's own wallet, so the holder loop would credit the anchor its own
+    -- face and ledger.payer_legs would debit the same amount. The legs net to
+    -- zero per account and asset, the books stay balanced, and the obligation
+    -- is retired having paid nobody. Refusing keeps the payable where a person
+    -- can still see it.
+    IF v_payable.receipt_status = 'rejected' THEN
+      RAISE EXCEPTION 'payable % was rejected by its supplier and has nobody to redeem to',
+        v_payable.ref USING ERRCODE = 'ADA37';
+    END IF;
+
     v_asset := ledger.payable_asset(v_payable.id);
     v_cash  := ledger.cash_asset('XUSD');
     -- The anchor obligor funds redemption from its own wallet.
@@ -699,9 +843,16 @@ BEGIN
     LOOP
       UPDATE app.listing SET status = 'cancelled' WHERE id = v_listing.id;
       UPDATE app.bid SET status = 'superseded' WHERE listing_id = v_listing.id AND status = 'placed';
+      -- Every leg of the listing, not only the settled asset's. The listing is
+      -- cancelled whole, so escrow comes back whole, or
+      -- escrow_matches_open_listings finds the siblings of a series member
+      -- still in wallet_listed against a listing that is no longer open and
+      -- fails the whole redemption at COMMIT. Series members share a maturity
+      -- date by construction, so every listed series lot reached that on its
+      -- first member settled, in any order.
       FOR v_leg IN
         SELECT asset_id, quantity_base FROM app.listing_leg
-         WHERE listing_id = v_listing.id AND asset_id = v_asset ORDER BY asset_id
+         WHERE listing_id = v_listing.id ORDER BY asset_id
       LOOP
         v_legs := v_legs || ARRAY[
           ROW(ledger.wallet_account(v_listing.seller_wallet, 'wallet_listed'), v_leg.asset_id, -v_leg.quantity_base)::ledger.leg_spec,
@@ -737,15 +888,59 @@ BEGIN
 
     UPDATE app.payable SET lifecycle_status = 'settled' WHERE id = v_payable.id;
 
+  ELSIF v_kind = 'cancel_payable' THEN
+    -- A supplier who rejects delivery sends the whole quantity back to the
+    -- anchor, and the obligation is then owed to nobody. Settlement refuses it
+    -- (ADA37), so without this it sits at 'issued' for good. Cancelling burns
+    -- the quantity back to system_unissued, which is where issuance minted it
+    -- from, and moves the payable to a stored state that says it ended without
+    -- being paid. 'settled' would say the opposite.
+    SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
+    IF v_payable.receipt_status IS DISTINCT FROM 'rejected' THEN
+      RAISE EXCEPTION 'payable % was not rejected by its supplier, so there is nothing to cancel',
+        v_payable.ref USING ERRCODE = 'ADA40';
+    END IF;
+    PERFORM app.assert_edge_actor(v_payable, 'cancelled', v_actor);
+
+    v_asset := ledger.payable_asset(v_payable.id);
+    SELECT address INTO v_anchor_wallet FROM app.wallet WHERE entity_id = v_payable.anchor_id LIMIT 1;
+    IF v_anchor_wallet IS NULL THEN
+      RAISE EXCEPTION 'anchor for % has no wallet', v_payable.ref USING ERRCODE = 'ADA15';
+    END IF;
+
+    -- Rejection returns the quantity, but nothing stops the anchor moving or
+    -- listing it afterwards, so the whole face has to still be here and free.
+    -- Burning what the anchor no longer holds would drive a wallet negative or
+    -- leave the rest outstanding against a payable that says it is cancelled.
+    SELECT COALESCE(b.balance, 0) INTO v_qty
+      FROM ledger.account_balance b
+      JOIN ledger.account a ON a.id = b.account_id
+     WHERE a.wallet_address = v_anchor_wallet
+       AND a.purpose = 'wallet_free' AND b.asset_id = v_asset;
+    IF v_qty <> v_payable.face_base THEN
+      RAISE EXCEPTION 'payable % cannot be cancelled while the anchor holds % of its % face',
+        v_payable.ref, v_qty, v_payable.face_base USING ERRCODE = 'ADA40';
+    END IF;
+
+    v_legs := ARRAY[
+      ROW(ledger.wallet_account(v_anchor_wallet, 'wallet_free'), v_asset, -v_qty)::ledger.leg_spec,
+      ROW(ledger.system_account('system_unissued'), v_asset, v_qty)::ledger.leg_spec
+    ];
+    UPDATE app.payable SET lifecycle_status = 'cancelled' WHERE id = v_payable.id;
+
   ELSIF v_kind = 'advance_clock' THEN
     v_days := (v_intent->>'days')::int;
-    IF v_days < 0 THEN
+    IF v_days IS NULL OR v_days < 0 THEN
       RAISE EXCEPTION 'the demo clock only moves forward' USING ERRCODE = 'ADA19';
     END IF;
     UPDATE app.world SET offset_days = offset_days + v_days WHERE only_row;
 
   ELSIF v_kind IN ('accept_receipt', 'reject_receipt') THEN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
+    IF v_payable.receipt_status IS NULL THEN
+      RAISE EXCEPTION 'payable % has not been issued yet, so there is nothing to take delivery of',
+        v_payable.ref USING ERRCODE = 'ADA15';
+    END IF;
     IF v_payable.receipt_status <> 'pending' THEN
       RAISE EXCEPTION 'payable % was already %', v_payable.ref, v_payable.receipt_status
         USING ERRCODE = 'ADA15';
@@ -791,7 +986,13 @@ BEGIN
       v_days        := v_erp.terms_days;
     ELSE
       v_supplier_id := (v_intent->>'supplierId')::uuid;
-      v_invoice_ref := btrim(COALESCE(v_intent->>'invoiceRef', ''));
+      -- btrim with one argument removes spaces and nothing else, so a tab-only
+      -- reference passed the "is required" check below and was stored as "\t".
+      -- The invoice reference is half the key of payable_one_per_invoice, the
+      -- index that stops one supplier's invoice being financed twice, so two
+      -- whitespace-only references of different flavours were two distinct
+      -- keys and two financeable payables a human cannot tell apart.
+      v_invoice_ref := btrim(COALESCE(v_intent->>'invoiceRef', ''), E' \t\n\r\f\v');
       v_qty         := (v_intent->>'faceBase')::bigint;
       v_days        := (v_intent->>'termsDays')::int;
 
@@ -856,13 +1057,13 @@ BEGIN
     -- organisation, its custodial wallet and its first user; create_user adds
     -- another user to an organisation that already exists. Sharing the branch
     -- keeps one set of role rules rather than two that drift.
-    v_name := btrim(COALESCE(v_intent->>'userName', ''));
+    v_name := btrim(COALESCE(v_intent->>'userName', ''), E' \t\n\r\f\v');
     IF v_name = '' THEN
       RAISE EXCEPTION 'a user name is required' USING ERRCODE = 'ADA28';
     END IF;
 
     IF v_kind = 'onboard_entity' THEN
-      IF btrim(COALESCE(v_intent->>'name', '')) = '' THEN
+      IF btrim(COALESCE(v_intent->>'name', ''), E' \t\n\r\f\v') = '' THEN
         RAISE EXCEPTION 'an organisation name is required' USING ERRCODE = 'ADA28';
       END IF;
       IF (v_intent->>'entityType') NOT IN ('supplier', 'lender') THEN
@@ -874,14 +1075,14 @@ BEGIN
 
       BEGIN
         INSERT INTO app.entity (name, entity_type, certification_status)
-        VALUES (btrim(v_intent->>'name'), (v_intent->>'entityType')::app.entity_type,
+        VALUES (btrim(v_intent->>'name', E' \t\n\r\f\v'), (v_intent->>'entityType')::app.entity_type,
                 -- PRD §8 screen 5: "Mark the account KYC verified on submit."
                 -- No document upload; certification here is the demo's stand-in.
                 'certified')
         RETURNING * INTO v_entity;
       EXCEPTION WHEN unique_violation THEN
         RAISE EXCEPTION 'an organisation called % is already on the platform',
-          btrim(v_intent->>'name') USING ERRCODE = 'ADA27';
+          btrim(v_intent->>'name', E' \t\n\r\f\v') USING ERRCODE = 'ADA27';
       END;
 
       -- Custodial wallet. PRD §8 screen 5 is explicit that no external wallet
@@ -942,9 +1143,12 @@ BEGIN
       -- hiding it, and issuance is blocked until it unwinds.
       UPDATE app.entity SET programme_limit_base = v_limit WHERE id = v_entity.id;
     ELSE
-      IF (v_intent->>'status') NOT IN ('uncertified', 'certified', 'suspended') THEN
-        RAISE EXCEPTION 'unknown certification status %', v_intent->>'status'
-          USING ERRCODE = 'ADA19';
+      -- An absent status is outside the enum too, and NULL NOT IN (...) is NULL
+      -- rather than true, which used to let it reach the NOT NULL column.
+      IF (v_intent->>'status') IS NULL
+         OR (v_intent->>'status') NOT IN ('uncertified', 'certified', 'suspended') THEN
+        RAISE EXCEPTION 'unknown certification status %',
+          COALESCE(v_intent->>'status', 'none given') USING ERRCODE = 'ADA19';
       END IF;
       UPDATE app.entity
          SET certification_status = (v_intent->>'status')::app.certification_status
@@ -982,6 +1186,12 @@ BEGIN
     SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
     IF v_kind = 'certify' AND v_payable.grade IS NULL THEN
       RAISE EXCEPTION 'payable % has no grade yet', v_payable.ref USING ERRCODE = 'ADA35';
+    END IF;
+    IF v_kind <> 'grade' THEN
+      PERFORM app.assert_edge_actor(v_payable, CASE v_kind
+        WHEN 'submit'  THEN 'pending_approval'::app.obligation_state
+        WHEN 'approve' THEN 'approved'::app.obligation_state
+        WHEN 'certify' THEN 'certified'::app.obligation_state END, v_actor);
     END IF;
     UPDATE app.payable
        SET lifecycle_status = CASE v_kind

@@ -34,6 +34,7 @@ export const LIFECYCLE_STATUSES = [
   'matured',
   'settled',
   'overdue',
+  'cancelled',
 ] as const;
 export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number];
 
@@ -45,6 +46,7 @@ export const LIFECYCLE_EVENTS = [
   'mature',
   'settle',
   'mark_overdue',
+  'cancel',
 ] as const;
 export type LifecycleEvent = (typeof LIFECYCLE_EVENTS)[number];
 
@@ -98,7 +100,7 @@ export const TRANSITIONS: Readonly<Record<LifecycleEvent, Transition>> = {
   issue: {
     from: 'certified',
     to: 'issued',
-    actors: ['adata_preparer', 'adata_checker', 'straitsx_admin'],
+    actors: ['straitsx_admin'],
     label: 'Issued to supplier wallet',
     action: 'issue it to the supplier',
   },
@@ -112,9 +114,16 @@ export const TRANSITIONS: Readonly<Record<LifecycleEvent, Transition>> = {
   settle: {
     from: 'matured',
     to: 'settled',
-    actors: ['adata_preparer', 'adata_checker'],
+    actors: ['adata_preparer'],
     label: 'Settled to holders',
     action: 'settle it to the holders',
+  },
+  cancel: {
+    from: 'issued',
+    to: 'cancelled',
+    actors: ['adata_checker'],
+    label: 'Cancelled after the supplier rejected it',
+    action: 'cancel it',
   },
   mark_overdue: {
     from: 'matured',
@@ -125,8 +134,12 @@ export const TRANSITIONS: Readonly<Record<LifecycleEvent, Transition>> = {
   },
 };
 
-/** States from which nothing further can happen. PRD section 7. */
-const TERMINAL: ReadonlySet<LifecycleStatus> = new Set<LifecycleStatus>(['settled']);
+/**
+ * States from which nothing further can happen. PRD section 7, plus
+ * `cancelled`, which section 7 does not describe because it does not describe
+ * what becomes of a payable the supplier refuses. See docs/ASSUMPTIONS.md.
+ */
+const TERMINAL: ReadonlySet<LifecycleStatus> = new Set<LifecycleStatus>(['settled', 'cancelled']);
 
 export function isTerminal(status: LifecycleStatus): boolean {
   return TERMINAL.has(status);
@@ -213,13 +226,20 @@ export interface PendingStep {
  * status in the screen is what stops a new state being added without the queue
  * learning who owns it.
  *
- * Null where nobody is being waited on. `settled` is terminal, `issued` moves
- * on the clock rather than on anyone's say-so (see {@link dueStatusFor}), and
- * `overdue` has no transition out of it at all, because PRD section 4 puts
- * recovery workflows out of scope.
+ * Null where nobody is being waited on. `settled` and `cancelled` are terminal,
+ * `issued` moves on the clock rather than on anyone's say-so (see
+ * {@link dueStatusFor}), and `overdue` has no transition out of it at all,
+ * because PRD section 4 puts recovery workflows out of scope.
+ *
+ * `cancel` also leaves `issued`, and it is deliberately not a pending step.
+ * Whether it applies turns on `receipt_status`, which this function does not
+ * see, and an ordinary issued payable is waiting on the clock rather than on
+ * anyone to cancel it. The queue would otherwise tell the checker to cancel
+ * every live payable in the programme.
  */
 export function pendingStep(status: LifecycleStatus): PendingStep | null {
   for (const event of LIFECYCLE_EVENTS) {
+    if (event === 'cancel') continue;
     const transition = TRANSITIONS[event];
     if (transition.from === status && transition.actors.length > 0) {
       return {
@@ -293,4 +313,5 @@ export const STATUS_LABELS: Readonly<Record<LifecycleStatus, string>> = {
   matured: 'Matured',
   settled: 'Settled',
   overdue: 'Overdue',
+  cancelled: 'Cancelled',
 };

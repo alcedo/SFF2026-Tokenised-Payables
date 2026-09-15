@@ -7,8 +7,9 @@ fast-check generates command sequences without regard for legality, the same
 sequence runs against the model and against a fresh Postgres database, and the
 two are compared after every single step.
 
-Nothing in `src/` or `db/` was changed. The suite is green: the model
-reproduces each behaviour below exactly, because the model's job is to predict
+Nothing in `src/` or `db/` was changed to write this suite. See
+`tests/techniques/README.md` on what a **FIXED** entry means. The suite is
+green: the model reproduces each behaviour below exactly, because the model's job is to predict
 what the system does, not what it ought to do. That is also why they would
 otherwise be invisible, so each except the first is additionally recorded as an
 `it.fails(...)` case in
@@ -59,11 +60,11 @@ and every non-zero wallet balance is compared against the model's rendering of
 the same shape. `ledgerHealth` is asserted `HEALTHY` at the end of each
 generated sequence.
 
-**Command classes (18).** `create_payable` (manual shape, with flawed variants
+**Command classes (19).** `create_payable` (manual shape, with flawed variants
 for ADA19/22/23/24/25/26), `submit`, `approve`, `grade`, `certify`,
 `issue_payable`, `accept_receipt`, `reject_receipt`, `top_up`, `transfer`,
 `publish_listing`, `place_bid`, `withdraw_bid`, `accept_bid`, `buy_now`,
-`cancel_listing`, `advance_clock`, `settle_maturity`.
+`cancel_listing`, `advance_clock`, `settle_maturity`, `cancel_payable`.
 
 **Generation.** `fc.commands` plus `fc.asyncModelRun`, 25 runs at seed
 `20260915`, up to 600 commands per run, each run against its own database from
@@ -73,8 +74,8 @@ name); legality is decided inside `run` so that illegal commands really do fire.
 Two commands in three aim at a subject that is ready for them and the third aims
 blind, because walking a six-deep lifecycle by drawing blind never gets past
 `approved`. The aim biases which sequences are generated, never which are judged
-legal, and it is largely the blind third that makes 3,773 of the 6,121
-commands refusals rather than acceptances.
+legal, and it is largely the blind third that makes most of the run's commands
+refusals rather than acceptances.
 
 ---
 
@@ -85,35 +86,52 @@ and asserts it.
 
 | measure | reached | of |
 | --- | --- | --- |
-| lifecycle states | **6** | 6 |
-| command classes | **18** | 18 |
-| (state, command) pairs | **75** | 75 reachable |
-| commands executed | **6,121** | across 25 sequences |
-| accepted / refused | 2,348 / 3,773 | |
+| lifecycle states | **7** | 7 |
+| command classes | **19** | 19 |
+| (state, command) pairs | **92** | 92 reachable |
+| commands executed | **5,378** | across 25 sequences |
+| accepted / refused | 1,317 / 4,061 | |
 
-Pair space is 7 subject states (`none` plus the six lifecycle states) by 18
-commands, so 126 in total, of which **51 are unreachable by construction** and
+The accepted share fell from 2,348 as the fixes below landed. A command the
+system used to take silently, a `cancel_listing` naming nothing or a
+`withdraw_bid` against a bid that was never placed, is a refusal now.
+
+Pair space is 8 subject states (`none` plus the seven lifecycle states) by 19
+commands, so 152 in total, of which **60 are unreachable by construction** and
 are enumerated in `unreachablePairs()`. The suite asserts that none of them is
 ever reached, so a wrong exclusion fails the run rather than inflating the score.
 
-- 18 pairs: `create_payable`, `top_up` and `advance_clock` name no payable, so
-  the six lifecycle states are impossible for them.
-- 10 pairs: `submit`, `approve`, `grade`, `certify`, `issue_payable`,
-  `accept_receipt`, `reject_receipt`, `transfer`, `publish_listing` and
-  `settle_maturity` all name a payable that already exists, so `none` is
-  impossible.
-- 20 pairs: a listing escrows a payable token, and that token is created at
+- 21 pairs: `create_payable`, `top_up` and `advance_clock` name no payable, so
+  the seven lifecycle states are impossible for them.
+- 11 pairs: `submit`, `approve`, `grade`, `certify`, `issue_payable`,
+  `accept_receipt`, `reject_receipt`, `transfer`, `publish_listing`,
+  `settle_maturity` and `cancel_payable` all name a payable that already
+  exists, so `none` is impossible.
+- 25 pairs: a listing escrows a payable token, and that token is created at
   issuance, so no listing or bid can name a payable in `draft`,
-  `pending_approval`, `approved` or `certified`. That rules out those four
-  states for `place_bid`, `withdraw_bid`, `accept_bid`, `buy_now` and
-  `cancel_listing`.
+  `pending_approval`, `approved` or `certified`. A listing also needs an
+  accepted receipt, and a `cancelled` payable was rejected, so it cannot be
+  listed either. That rules out those five states for `place_bid`,
+  `withdraw_bid`, `accept_bid`, `buy_now` and `cancel_listing`.
 - 3 pairs: `place_bid`, `accept_bid` and `buy_now` cannot be generated at all
   until their referent exists, so unlike `cancel_listing` and `withdraw_bid`
   they have no "names nothing" form and cannot pair with `none`.
 
 Refusal codes reached, asserted as an exact set:
-`23502 23505 23514 ADA01 ADA11 ADA12 ADA15 ADA16 ADA17 ADA19 ADA20 ADA21 ADA22
-ADA23 ADA24 ADA25 ADA26 ADA34`.
+`23505 23514 ADA01 ADA11 ADA12 ADA15 ADA16 ADA17 ADA19 ADA20 ADA21 ADA22 ADA23
+ADA24 ADA25 ADA26 ADA34 ADA35 ADA36 ADA37 ADA38 ADA39 ADA40`.
+
+**`cancel_payable` was added after the seven states were.** Adding it found two
+places where the model had been right only because `cancelled` did not exist:
+`transfer` and `publish_listing` treated anything not `issued` or `settled` as
+never issued, and `settle_maturity` predicted `ADA01` for a payable the `ADA37`
+rejection guard answers first. Both were model bugs rather than product ones,
+and neither was reachable before there was a seventh state to reach them from.
+
+`23502` has left the set. Every route to it was a guard that did not fire on a
+row that was not found or a field that was not given, and each of those now
+answers with a code of its own. A raw NOT NULL violation is no longer something
+the write surface can produce.
 
 **Not reached: `ADA33`,** the programme limit. The fixture anchor's
 `programme_limit_base` is 250,000,000,000 and generated faces are 1,000,000 or
@@ -160,6 +178,14 @@ mints listing and bid ids. It creates the payable and reads the id back by
 
 ## 2. A receipt decision before issuance raises a raw check-constraint violation
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `accept_receipt` and `reject_receipt` answer `ADA15 payable <ref> has not been issued yet, so there is nothing to take delivery of`, checked before the already-decided case.
+
+The entry below is the state before that change.
+
+
 **File:** `db/post.sql`, the `accept_receipt` / `reject_receipt` branch.
 
 **Suite cases:** `names the payable when a receipt is accepted before issuance`,
@@ -199,6 +225,14 @@ production code and was not touched.
 
 ## 3. `transfer` and `publish_listing` on a never-issued payable surface NOT NULL violations
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. Both answer `ADA15 payable <ref> has not been issued yet`, checked as soon as `ledger.payable_asset` comes back NULL, which is before the quantity, maturity and receipt checks.
+
+The entry below is the state before that change.
+
+
 **File:** `db/post.sql`, the `transfer` and `publish_listing` branches.
 
 **Suite case:** `refuses a transfer of a payable that was never issued`.
@@ -233,6 +267,14 @@ market state.
 ---
 
 ## 4. `cancel_listing` and `withdraw_bid` accept ids that match nothing
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `cancel_listing` answers `ADA11 no such listing`. `withdraw_bid` reads the row, answers `ADA11 no such bid` for an id matching nothing and `ADA11 bid is <status>` for one that is not placed, so neither writes a journal entry for an event that did not happen.
+
+The entry below is the state before that change.
+
 
 **File:** `db/post.sql`, the `cancel_listing` and `withdraw_bid` branches.
 
@@ -270,6 +312,14 @@ it that describe events that did not happen.
 
 ## 5. `place_bid` on a listing that does not exist raises NOT NULL, not `ADA11`
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `place_bid` answers `ADA11 no such listing`, matching `accept_bid`.
+
+The entry below is the state before that change.
+
+
 **File:** `db/post.sql`, the `place_bid` branch.
 
 **Suite case:** `refuses a bid on a listing that does not exist`.
@@ -296,6 +346,14 @@ was not found has a NULL status. `accept_bid` is the only one that checks.
 ---
 
 ## 6. `accept_bid` on a bid that does not exist blames the bidder
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `accept_bid` answers `ADA11 no such bid`, checked after the listing and before the bid status, the self-trade check and the eligibility check that used to answer first.
+
+The entry below is the state before that change.
+
 
 **File:** `db/post.sql`, the `accept_bid` branch.
 
@@ -384,6 +442,11 @@ drafts sit in the approval queue.
 
 ## 9. `min_price_base` is stored, displayed and never enforced
 
+**FIXED.** `place_bid` refuses a bid below the floor with `ADA38`. See finding 5
+of `findings/decision-tables.md`. The model predicts it and the property hits it
+11 times over 6,228 generated commands. The entry below is the state before that
+change.
+
 **File:** `db/post.sql`, the `place_bid` and `accept_bid` branches.
 
 **Suite case:** `refuses a bid below the minimum price the seller published`.
@@ -436,8 +499,13 @@ able to update a payable without moving it, but the effect is that the approval
 queue can be told the same thing repeatedly and the journal records each telling
 as an event.
 
-**Self-transfers.** `fromWallet` equal to `toWallet` is accepted. Suite case:
-`does not stamp a confirmed transaction hash on a transfer that moved nothing`.
+**Self-transfers.** `fromWallet` equal to `toWallet` was accepted.
+
+**FIXED.** `transfer` refuses it with `ADA39 a transfer needs a different wallet
+to go to`, checked straight after the quantity. The expectation moved to a
+`transfer.toWallet` row in `equivalence-boundary.test.ts`, which is where field
+validation at the `ledger.post()` boundary lives, and the case here is deleted.
+The lifecycle self-edge half of this finding is unchanged and still stands.
 
 ```ts
 await post(pool, { kind: 'transfer', payableId, fromWallet: w, toWallet: w, quantityBase: 5_000 });
@@ -453,6 +521,28 @@ settled movement of nothing. Verified directly: the entry has `legs = 0`,
 `chain_status = 'confirmed'` and a non-null `chain_tx_hash`.
 
 ---
+
+## 11. The model predicted the pre-`c2c8720` certify precedence
+
+Found while triaging, not by the suite. `c2c8720` added an `ADA35` guard that
+reads the stored grade before `ledger.post()` touches the row, so for `certify`
+it now fires ahead of both the lifecycle trigger and the
+`graded_before_certified` CHECK. `Advance.predict` still ordered the edge check
+first and expected `23514` from the CHECK, so the property failed on its first
+generated sequence at seed `20260915`:
+
+```
+AssertionError: certify(payable=ready0) expected refusal ADA01, got ADA35:
+payable MB-1 has no grade yet
+```
+
+The failure aborted the run, which is why
+`reaches every lifecycle state, every command and every reachable pair` then saw
+only `['draft']`.
+
+**Repair.** `Advance.predict` checks `!p.graded` first for `certify` and
+predicts `ADA35`. `ADA35` joins the asserted verdict set. The `23514` branch is
+gone, because no command can reach the CHECK any more.
 
 ## Two things the model checked and found correct
 

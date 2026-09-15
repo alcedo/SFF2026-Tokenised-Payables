@@ -12,6 +12,8 @@
  * the same template at the same time.
  */
 
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { Pool, types, type PoolClient } from 'pg';
 
 const PG_INT8 = 20;
@@ -26,10 +28,36 @@ types.setTypeParser(PG_NUMERIC, (value) => BigInt(value));
 /** `bare` is schema only. `fixtures` is the world a fresh database boots into. `seed` is the demo world. */
 export type TemplateKind = 'bare' | 'fixtures' | 'seed';
 
+// schema.sql defines ledger.post() as a stub that raises 'not implemented';
+// post.sql replaces it. Loading only the first gives a database that refuses
+// every command, so both always load, in this order.
+export const TEMPLATE_SOURCES: Record<TemplateKind, readonly string[]> = {
+  bare: ['db/schema.sql', 'db/post.sql'],
+  fixtures: ['db/schema.sql', 'db/post.sql', 'db/fixtures.sql'],
+  seed: ['db/schema.sql', 'db/post.sql', 'db/seed.sql'],
+};
+
+const ROOT = new URL('../..', import.meta.url).pathname;
+
+/**
+ * Templates are built only when missing, so a fixed name would let a run after
+ * a `db/` edit clone a database built from the SQL as it was before. Every
+ * suite would then pass against code that is no longer in the tree, which is
+ * indistinguishable from passing. Naming the template after a digest of the
+ * files it is built from makes an edit produce a name that does not exist yet,
+ * so the rebuild is a consequence of the edit rather than something to
+ * remember.
+ */
+function templateName(kind: TemplateKind): string {
+  const digest = createHash('sha256');
+  for (const file of TEMPLATE_SOURCES[kind]) digest.update(readFileSync(`${ROOT}/${file}`));
+  return `adata_t_${kind}_${digest.digest('hex').slice(0, 12)}`;
+}
+
 export const TEMPLATES: Record<TemplateKind, string> = {
-  bare: 'adata_t_bare',
-  fixtures: 'adata_t_fixtures',
-  seed: 'adata_t_seed',
+  bare: templateName('bare'),
+  fixtures: templateName('fixtures'),
+  seed: templateName('seed'),
 };
 
 const HOST = process.env.PGHOST ?? '127.0.0.1';

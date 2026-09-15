@@ -14,8 +14,9 @@
  * naming the wrong payable is a defect this suite should catch.
  *
  * Where a table's outcome lookup is keyed on fewer conditions than the table
- * enumerates, the missing conditions are the finding: table 2's outcome is
- * keyed on the lifecycle edge alone, and table 4's ignores receipt_status.
+ * enumerates, the missing conditions are the finding. Table 4's lookup ignores
+ * receipt_status. Table 2's was keyed on the lifecycle edge alone until
+ * ledger.post() began reading the actor's role, and its key now names both.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -200,6 +201,10 @@ interface BuildSpec {
 }
 
 async function buildPayable(pool: Pool, spec: BuildSpec): Promise<BuiltPayable> {
+  // app.lifecycle_edge names one role per edge and ledger.post() refuses any
+  // other with ADA36, so a fixture that walks the lifecycle switches persona
+  // the way a person would.
+  const byRole = await actors(pool);
   refSeq += 1;
   const ref = `TP-DT-${String(refSeq).padStart(5, '0')}`;
   const reached = (state: BuildTarget): boolean =>
@@ -207,22 +212,34 @@ async function buildPayable(pool: Pool, spec: BuildSpec): Promise<BuiltPayable> 
 
   // The id is read back rather than supplied. Supplying one is refused by a
   // foreign key at the idempotency gate. The case below records that defect.
-  await must(pool, {
-    kind: 'create_payable',
-    ref,
-    supplierId: spec.supplierId,
-    invoiceRef: `INV-DT-${String(refSeq).padStart(5, '0')}`,
-    faceBase: spec.faceBase,
-    termsDays: spec.termsDays,
-  });
+  //
+  // Posted as the preparer by name. The harness default is the lowest-id live
+  // user, and the fixtures template onboards its counterparties with
+  // gen_random_uuid(), so whether that default is the preparer or a supplier
+  // depends on how the random ids happened to sort when the template was last
+  // built. A test that asserts who acted cannot rest on that.
+  await must(
+    pool,
+    {
+      kind: 'create_payable',
+      ref,
+      supplierId: spec.supplierId,
+      invoiceRef: `INV-DT-${String(refSeq).padStart(5, '0')}`,
+      faceBase: spec.faceBase,
+      termsDays: spec.termsDays,
+    },
+    byRole.adata_preparer,
+  );
   const id = await scalar<string>(
     pool,
     'SELECT id::text AS value FROM app.payable WHERE ref = $1',
     [ref],
   );
 
-  if (reached('pending_approval')) await must(pool, { kind: 'submit', payableId: id }, spec.submitAs);
-  if (reached('approved')) await must(pool, { kind: 'approve', payableId: id });
+  if (reached('pending_approval')) {
+    await must(pool, { kind: 'submit', payableId: id }, spec.submitAs ?? byRole.adata_preparer);
+  }
+  if (reached('approved')) await must(pool, { kind: 'approve', payableId: id }, byRole.adata_checker);
   if (reached('certified')) {
     // The graded_before_certified CHECK refuses an ungraded payable at
     // 'certified', and a bare constraint violation carries no ADA code, so the
@@ -233,16 +250,15 @@ async function buildPayable(pool: Pool, spec: BuildSpec): Promise<BuiltPayable> 
       grade: 'AAA',
       gradeRationale: 'decision table fixture',
     });
-    await must(pool, { kind: 'certify', payableId: id });
+    await must(pool, { kind: 'certify', payableId: id }, byRole.straitsx_admin);
   }
   if (reached('issued')) {
     tokenSeq += 1;
-    await must(pool, {
-      kind: 'issue_payable',
-      payableId: id,
-      toWallet: spec.toWallet,
-      tokenId: tokenSeq,
-    });
+    await must(
+      pool,
+      { kind: 'issue_payable', payableId: id, toWallet: spec.toWallet, tokenId: tokenSeq },
+      byRole.straitsx_admin,
+    );
   }
 
   return { id, ref };
@@ -448,12 +464,11 @@ describe('table 1: issuance against certification and programme limit', () => {
       [world.anchor.id],
     );
     tokenSeq += 1;
-    const atZero = await post(db.pool, {
-      kind: 'issue_payable',
-      payableId: capped.id,
-      toWallet: supplier.wallet,
-      tokenId: tokenSeq,
-    });
+    const atZero = await post(
+      db.pool,
+      { kind: 'issue_payable', payableId: capped.id, toWallet: supplier.wallet, tokenId: tokenSeq },
+      { actorUserId: world.users.straitsx_admin },
+    );
     expect(observe(atZero, await lifecycleOf(db.pool, capped.id))).toEqual(
       refused(
         'ADA33',
@@ -470,12 +485,11 @@ describe('table 1: issuance against certification and programme limit', () => {
       limitBase: null,
     });
     tokenSeq += 1;
-    const uncapped = await post(db.pool, {
-      kind: 'issue_payable',
-      payableId: capped.id,
-      toWallet: supplier.wallet,
-      tokenId: tokenSeq,
-    });
+    const uncapped = await post(
+      db.pool,
+      { kind: 'issue_payable', payableId: capped.id, toWallet: supplier.wallet, tokenId: tokenSeq },
+      { actorUserId: world.users.straitsx_admin },
+    );
     expect(observe(uncapped, await lifecycleOf(db.pool, capped.id))).toEqual(accepted('issued'));
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
@@ -524,12 +538,11 @@ describe('table 1: issuance against certification and programme limit', () => {
       });
 
       tokenSeq += 1;
-      const result = await post(db.pool, {
-        kind: 'issue_payable',
-        payableId: payable.id,
-        toWallet: supplier.wallet,
-        tokenId: tokenSeq,
-      });
+      const result = await post(
+        db.pool,
+        { kind: 'issue_payable', payableId: payable.id, toWallet: supplier.wallet, tokenId: tokenSeq },
+        { actorUserId: world.users.straitsx_admin },
+      );
 
       const endState = await lifecycleOf(db.pool, payable.id);
       expect(observe(result, endState)).toEqual(
@@ -569,11 +582,19 @@ const ROLES: readonly Role[] = [
 ];
 
 /**
- * The outcome of `approve` is keyed on the lifecycle edge and nothing else.
+ * The outcome of `approve` is keyed on the lifecycle and, on the one edge the
+ * command drives, the actor's role.
  *
- * The role and the identity of the actor are enumerated by the rows below and
- * never appear in this lookup, because `ledger.post()` never reads either one.
- * That absence is the finding, not an omission in the table.
+ * app.assert_edge_actor reads app.lifecycle_edge.actor_role only where a row
+ * exists for the transition it is asked about. pending_approval -> approved has
+ * a row, so the role decides there. approved -> approved has none and is
+ * accepted as a no-op, and every other lifecycle has none and falls through to
+ * ADA01, so on those the role is never read and cannot matter.
+ *
+ * Submitter identity is enumerated by the rows and absent from this key
+ * because it cannot vary on its own. Only an adata_preparer can submit, a role
+ * is set once at INSERT, and the approve edge names a different role, so the
+ * submitter is refused by role before identity could be consulted.
  */
 const APPROVE_OUTCOME: Readonly<Record<Lifecycle, Expected>> = {
   draft: refused('ADA01', 'illegal lifecycle transition draft -> approved', 'draft'),
@@ -583,6 +604,33 @@ const APPROVE_OUTCOME: Readonly<Record<Lifecycle, Expected>> = {
   issued: refused('ADA01', 'illegal lifecycle transition issued -> approved', 'issued'),
   settled: refused('ADA01', 'illegal lifecycle transition settled -> approved', 'settled'),
 };
+
+const NOT_THE_CHECKER = refused(
+  'ADA36',
+  'payable {ref} moves from pending_approval to approved on the adata_checker, not the {role}',
+  'pending_approval',
+);
+
+function approveOutcome(lifecycle: Lifecycle, role: Role): Expected {
+  return lifecycle === 'pending_approval' && role !== 'adata_checker'
+    ? NOT_THE_CHECKER
+    : APPROVE_OUTCOME[lifecycle];
+}
+
+const NEVER_SUBMITTED = 'a draft has never been submitted, so no user is its submitter';
+const submitterIsAlwaysAPreparer = (role: Role): string =>
+  `submit is refused ADA36 to every role but adata_preparer and a role never changes, so no ${role} is ever the submitter`;
+
+function approvalInfeasibility(
+  lifecycle: Lifecycle,
+  role: Role,
+  sameAsSubmitter: boolean,
+): string | undefined {
+  if (!sameAsSubmitter) return undefined;
+  if (lifecycle === 'draft') return NEVER_SUBMITTED;
+  if (role !== 'adata_preparer') return submitterIsAlwaysAPreparer(role);
+  return undefined;
+}
 
 interface ApprovalRow extends TableRow {
   readonly lifecycle: Lifecycle;
@@ -596,16 +644,13 @@ const APPROVAL_TABLE: readonly ApprovalRow[] = LIFECYCLES.flatMap((lifecycle) =>
       const conditions = `${lifecycle} | acting as ${role} | ${
         sameAsSubmitter ? 'same user who submitted' : 'a different user'
       }`;
-      const infeasible =
-        lifecycle === 'draft' && sameAsSubmitter
-          ? 'a draft has never been submitted, so no user is its submitter'
-          : undefined;
+      const infeasible = approvalInfeasibility(lifecycle, role, sameAsSubmitter);
       return {
         conditions,
         lifecycle,
         role,
         sameAsSubmitter,
-        expected: APPROVE_OUTCOME[lifecycle],
+        expected: approveOutcome(lifecycle, role),
         ...(infeasible ? { infeasible } : {}),
       };
     }),
@@ -616,10 +661,24 @@ describe('table 2: maker-checker approval', () => {
   const FACE = 1_000_000;
   let db: Database;
   let world: World;
+  let otherPreparer: string;
 
   beforeAll(async () => {
     db = await freshDatabase('dt_maker_checker', 'fixtures');
     world = await loadWorld(db.pool);
+    // The fixture anchor has one preparer, and a preparer who did not submit
+    // the payable has to be a second one.
+    await must(db.pool, {
+      kind: 'create_user',
+      entityId: world.anchor.id,
+      userName: 'DT Second Preparer',
+      role: 'adata_preparer',
+    });
+    otherPreparer = await scalar<string>(
+      db.pool,
+      'SELECT id::text AS value FROM app.app_user WHERE name = $1',
+      ['DT Second Preparer'],
+    );
   });
 
   afterAll(async () => {
@@ -627,10 +686,10 @@ describe('table 2: maker-checker approval', () => {
   });
 
   it('declares every combination of lifecycle, role and submitter identity', () => {
-    expect(shapeOf(APPROVAL_TABLE)).toEqual({ rows: 60, feasible: 55, infeasible: 5 });
+    expect(shapeOf(APPROVAL_TABLE)).toEqual({ rows: 60, feasible: 35, infeasible: 25 });
   });
 
-  it('carries an actor_role on every lifecycle edge that the write path never reads', async () => {
+  it('carries an actor_role on every lifecycle edge, which ledger.post reads through app.assert_edge_actor', async () => {
     const { rows } = await db.pool.query<{
       from_state: string;
       to_state: string;
@@ -641,21 +700,36 @@ describe('table 2: maker-checker approval', () => {
       { from_state: 'certified', to_state: 'issued', actor_role: 'straitsx_admin' },
       { from_state: 'draft', to_state: 'pending_approval', actor_role: 'adata_preparer' },
       { from_state: 'issued', to_state: 'settled', actor_role: 'adata_preparer' },
+      { from_state: 'issued', to_state: 'cancelled', actor_role: 'adata_checker' },
       { from_state: 'pending_approval', to_state: 'approved', actor_role: 'adata_checker' },
     ]);
 
     const sources = await db.pool.query<{ name: string; body: string }>(`
       SELECT p.proname AS name, pg_get_functiondef(p.oid) AS body
         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE (n.nspname, p.proname) IN (('app', 'enforce_lifecycle_edge'), ('ledger', 'post'))
+       WHERE (n.nspname, p.proname) IN
+             (('app', 'assert_edge_actor'), ('app', 'enforce_lifecycle_edge'), ('ledger', 'post'))
        ORDER BY p.proname`);
-    expect(sources.rows.map((r) => r.name)).toEqual(['enforce_lifecycle_edge', 'post']);
-    expect(sources.rows.map((r) => r.body.includes('actor_role'))).toEqual([false, false]);
-    expect(sources.rows.map((r) => r.body.includes('lifecycle_edge'))).toEqual([true, false]);
+    expect(sources.rows.map((r) => r.name)).toEqual([
+      'assert_edge_actor',
+      'enforce_lifecycle_edge',
+      'post',
+    ]);
+    expect(sources.rows.map((r) => r.body.includes('actor_role'))).toEqual([true, false, false]);
+    expect(sources.rows.map((r) => r.body.includes('lifecycle_edge'))).toEqual([true, true, false]);
+    expect(sources.rows.map((r) => r.body.includes('assert_edge_actor'))).toEqual([
+      true,
+      false,
+      true,
+    ]);
   });
 
-  it('accepts an approval from the supplier who submitted, which core/lifecycle refuses', async () => {
+  it('refuses a supplier at submit and at approve, as core/lifecycle does', async () => {
     const supplier = world.users.supplier;
+    expect(attempt('draft', 'submit', 'supplier')).toEqual({
+      ok: false,
+      reason: 'supplier may not submit a payable',
+    });
     expect(attempt('pending_approval', 'approve', 'supplier')).toEqual({
       ok: false,
       reason: 'supplier may not approve a payable',
@@ -665,26 +739,43 @@ describe('table 2: maker-checker approval', () => {
       supplierId: world.suppliers[0].id,
       faceBase: FACE,
       termsDays: 90,
-      upTo: 'pending_approval',
-      submitAs: supplier,
+      upTo: 'draft',
     });
 
-    const result = await post(
+    const submitted = await post(
+      db.pool,
+      { kind: 'submit', payableId: payable.id },
+      { actorUserId: supplier },
+    );
+    expect(observe(submitted, await lifecycleOf(db.pool, payable.id))).toEqual(
+      refused(
+        'ADA36',
+        `payable ${payable.ref} moves from draft to pending_approval on the adata_preparer, not the supplier`,
+        'draft',
+      ),
+    );
+
+    await must(db.pool, { kind: 'submit', payableId: payable.id }, world.users.adata_preparer);
+    const approved = await post(
       db.pool,
       { kind: 'approve', payableId: payable.id },
       { actorUserId: supplier },
     );
-    expect(result.ok).toBe(true);
-    expect(await lifecycleOf(db.pool, payable.id)).toBe('approved');
-    expect(
-      await scalar<string>(
-        db.pool,
-        `SELECT (u.role::text || $2 || (e.actor_user_id = $3)::text) AS value
-           FROM ledger.journal_entry e JOIN app.app_user u ON u.id = e.actor_user_id
-          WHERE e.payable_id = $1 AND e.kind = 'approved'`,
-        [payable.id, '/', supplier],
+    expect(observe(approved, await lifecycleOf(db.pool, payable.id))).toEqual(
+      refused(
+        'ADA36',
+        `payable ${payable.ref} moves from pending_approval to approved on the adata_checker, not the supplier`,
+        'pending_approval',
       ),
-    ).toBe('supplier/true');
+    );
+    expect(
+      await scalar<bigint>(
+        db.pool,
+        `SELECT count(*) AS value FROM ledger.journal_entry
+          WHERE payable_id = $1 AND actor_user_id = $2`,
+        [payable.id, supplier],
+      ),
+    ).toBe(0n);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
@@ -696,7 +787,11 @@ describe('table 2: maker-checker approval', () => {
       upTo: 'approved',
     });
 
-    const result = await post(db.pool, { kind: 'approve', payableId: payable.id });
+    const result = await post(
+      db.pool,
+      { kind: 'approve', payableId: payable.id },
+      { actorUserId: world.users.adata_checker },
+    );
     expect(result.ok).toBe(true);
     expect(await lifecycleOf(db.pool, payable.id)).toBe('approved');
     expect(
@@ -718,9 +813,11 @@ describe('table 2: maker-checker approval', () => {
 
     it(`${row.conditions} -> ${summarise(row.expected)}`, async () => {
       const actor = world.users[row.role];
-      const other =
-        row.role === 'adata_preparer' ? world.users.adata_checker : world.users.adata_preparer;
-      const submitter = row.sameAsSubmitter ? actor : other;
+      const submitter = row.sameAsSubmitter
+        ? actor
+        : row.role === 'adata_preparer'
+          ? otherPreparer
+          : world.users.adata_preparer;
       const supplier = world.suppliers[0];
       // A settled payable needs the clock past its own maturity, so it is built
       // on one-day terms and the clock is nudged after issuance. The clock only
@@ -739,11 +836,11 @@ describe('table 2: maker-checker approval', () => {
 
       if (row.lifecycle === 'settled') {
         await must(db.pool, { kind: 'advance_clock', days: 1 });
-        await must(db.pool, {
-          kind: 'settle_maturity',
-          payableId: payable.id,
-          fundingCode: 'XUSD',
-        });
+        await must(
+          db.pool,
+          { kind: 'settle_maturity', payableId: payable.id, fundingCode: 'XUSD' },
+          world.users.adata_preparer,
+        );
       }
 
       expect(await lifecycleOf(db.pool, payable.id)).toBe(row.lifecycle);
@@ -754,7 +851,9 @@ describe('table 2: maker-checker approval', () => {
         { actorUserId: actor },
       );
       const endState = await lifecycleOf(db.pool, payable.id);
-      expect(observe(result, endState)).toEqual(resolve(row.expected, {}));
+      expect(observe(result, endState)).toEqual(
+        resolve(row.expected, { ref: payable.ref, role: row.role }),
+      );
       expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
     });
   }
@@ -810,11 +909,7 @@ const BUYER_SHORT = refused(
 );
 const TRADED = accepted('filled');
 
-const BID_MISSING_READS_AS_INELIGIBLE = refused(
-  'ADA34',
-  'only institutional lender accounts can buy',
-  'open',
-);
+const NO_SUCH_BID = refused('ADA11', 'no such bid', 'open');
 
 interface GateRow extends TableRow {
   readonly verb: Verb;
@@ -828,8 +923,8 @@ const GATE_OUTCOME: Readonly<Record<Gate, Expected>> = {
   no_buy_now_price: NO_BUY_NOW,
   bid_withdrawn: BID_WITHDRAWN,
   bid_superseded: BID_SUPERSEDED,
-  bid_missing: BID_MISSING_READS_AS_INELIGIBLE,
-  bid_below_min_price: TRADED,
+  bid_missing: NO_SUCH_BID,
+  bid_below_min_price: refused('ADA38', 'a bid must be at least {minPrice}, the minimum this listing asks', 'open'),
   none: TRADED,
 };
 
@@ -837,6 +932,8 @@ const BUY_NOW_MAKES_ITS_OWN_BID =
   'buy_now creates and accepts its own bid in one command, so no pre-existing bid status applies';
 const SUPERSEDED_NEEDS_A_CLOSED_LISTING =
   'a bid only becomes superseded when its listing is filled or cancelled in the same command, and the listing status is checked first';
+const BELOW_MIN_NEVER_REACHES_ACCEPTANCE =
+  'place_bid refuses a bid below min_price_base with ADA38, and buy_now prices from buy_now_price_base which the schema holds at or above the minimum, so no acceptance can ever see one';
 
 const GATE_TABLE: readonly GateRow[] = VERBS.flatMap((verb) =>
   GATES.map((gate): GateRow => {
@@ -851,7 +948,9 @@ const GATE_TABLE: readonly GateRow[] = VERBS.flatMap((verb) =>
         ? BUY_NOW_MAKES_ITS_OWN_BID
         : gate === 'bid_superseded'
           ? SUPERSEDED_NEEDS_A_CLOSED_LISTING
-          : undefined;
+          : gate === 'bid_below_min_price'
+            ? BELOW_MIN_NEVER_REACHES_ACCEPTANCE
+            : undefined;
     const expected =
       verb === 'accept_bid' && gate === 'no_buy_now_price' ? TRADED : GATE_OUTCOME[gate];
     return { conditions, verb, gate, expected, ...(infeasible ? { infeasible } : {}) };
@@ -934,8 +1033,63 @@ describe('table 3: bid acceptance', () => {
     await db?.close();
   });
 
+  // The gate table can no longer reach a below-minimum bid, because place_bid
+  // refuses one. The floor gets its own boundary triple here instead.
+  it.each([
+    { label: 'one below the minimum', price: 899_999, refused: true },
+    { label: 'exactly the minimum', price: 900_000, refused: false },
+    { label: 'one above the minimum', price: 900_001, refused: false },
+  ])('takes a bid of $label', async ({ price, refused: isRefused }) => {
+    const lot = await listLot({
+      seller: world.suppliers[0].wallet,
+      termsDays: 90,
+      minPriceBase: 900_000,
+      buyNowPriceBase: null,
+    });
+    const result = await post(db.pool, {
+      kind: 'place_bid',
+      bidId: randomUUID(),
+      listingId: lot.listingId,
+      bidderWallet: world.lenders[0].wallet,
+      priceBase: price,
+      fundingCode: 'XUSD',
+    });
+    expect(result).toEqual(
+      isRefused
+        ? {
+            ok: false,
+            code: 'ADA38',
+            message: 'a bid must be at least 900000, the minimum this listing asks',
+          }
+        : expect.objectContaining({ ok: true }),
+    );
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
+  });
+
+  it('refuses a bid with no price at all, which is below any floor', async () => {
+    const lot = await listLot({
+      seller: world.suppliers[1].wallet,
+      termsDays: 90,
+      minPriceBase: 900_000,
+      buyNowPriceBase: null,
+    });
+    const result = await post(db.pool, {
+      kind: 'place_bid',
+      bidId: randomUUID(),
+      listingId: lot.listingId,
+      bidderWallet: world.lenders[0].wallet,
+      fundingCode: 'XUSD',
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: 'ADA38',
+      message: 'a bid must be at least 900000, the minimum this listing asks',
+    });
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
+  });
+
   it('declares every gate against both verbs', () => {
-    expect(shapeOf(GATE_TABLE)).toEqual({ rows: 18, feasible: 13, infeasible: 5 });
+    expect(shapeOf(GATE_TABLE)).toEqual({ rows: 18, feasible: 12, infeasible: 6 });
   });
 
   it('declares every combination of the four conditions after the gates', () => {
@@ -1103,7 +1257,7 @@ describe('table 3: bid acceptance', () => {
         return;
       }
 
-      const minPrice = row.gate === 'bid_below_min_price' ? 900_000 : PRICE;
+      const minPrice = PRICE;
       const lot = await listLot({
         seller,
         termsDays: 90,
@@ -1134,8 +1288,6 @@ describe('table 3: bid acceptance', () => {
         await must(db.pool, { kind: 'withdraw_bid', bidId });
       } else if (row.gate === 'bid_missing') {
         bidId = randomUUID();
-      } else if (row.gate === 'bid_below_min_price') {
-        await placeBid(1);
       } else if (row.verb === 'accept_bid') {
         await placeBid(minPrice);
       }
@@ -1151,14 +1303,6 @@ describe('table 3: bid acceptance', () => {
         resolve(row.expected, { ref: lot.ref }),
       );
 
-      if (row.gate === 'bid_below_min_price') {
-        const paid = await scalar<bigint>(db.pool,
-          `SELECT price_base AS value FROM app.bid WHERE id = $1`,
-          [bidId],
-        );
-        expect(paid).toBe(1n);
-        expect(await tokenBalance(db.pool, buyer, lot.payableId)).toBe(BigInt(FACE));
-      }
       expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
     });
   }
@@ -1268,38 +1412,50 @@ const ANCHOR_SHORT = refused(
   'wallet {anchorWallet} is short {shortfall} of the funding asset',
   'issued',
 );
+const RECEIPT_REJECTED = refused(
+  'ADA37',
+  'payable {ref} was rejected by its supplier and has nobody to redeem to',
+  'issued',
+);
 const SETTLED = accepted('settled');
 
-function settlementKey(c: SettlementConditions): string {
+function settlementKey(c: SettlementConditions, receipt: Receipt): string {
   return [
     c.fundingCode ? 'funding' : 'no-funding',
     c.alreadySettled ? 'settled' : 'issued',
     c.clock,
     c.anchorWallet ? 'wallet' : 'no-wallet',
     c.anchorFunds ? 'funded' : 'short',
+    `receipt ${receipt}`,
   ].join('/');
 }
 
 /**
- * Keyed on five conditions. `receipt_status` is the sixth condition the rows
- * enumerate and it is deliberately absent from this key, because settlement
- * never reads it: a rejected receipt settles exactly like an accepted one.
+ * Keyed on all six conditions. `receipt_status` earns its place in the key
+ * because settlement reads it: a rejected receipt returned the whole quantity
+ * to the anchor, so there is no holder left to credit and the command is
+ * refused. `pending` and `accepted` still settle identically, which is why the
+ * key distinguishes rejected from the other two rather than all three.
  */
 const SETTLEMENT_OUTCOME: Readonly<Record<string, Expected>> = Object.fromEntries(
   [true, false].flatMap((fundingCode) =>
     [true, false].flatMap((alreadySettled) =>
       (['before', 'on', 'after'] as const).flatMap((clock) =>
         [true, false].flatMap((anchorWallet) =>
-          [true, false].map((anchorFunds): [string, Expected] => {
-            const c = { fundingCode, alreadySettled, clock, anchorWallet, anchorFunds };
-            const stay = alreadySettled ? 'settled' : 'issued';
-            if (!fundingCode) return [settlementKey(c), NEEDS_FUNDING_CODE(stay)];
-            if (alreadySettled) return [settlementKey(c), ALREADY_SETTLED];
-            if (clock === 'before') return [settlementKey(c), NOT_MATURED];
-            if (!anchorWallet) return [settlementKey(c), ANCHOR_HAS_NO_WALLET];
-            if (!anchorFunds) return [settlementKey(c), ANCHOR_SHORT];
-            return [settlementKey(c), SETTLED];
-          }),
+          [true, false].flatMap((anchorFunds) =>
+            (['pending', 'accepted', 'rejected'] as const).map((receipt): [string, Expected] => {
+              const c = { fundingCode, alreadySettled, clock, anchorWallet, anchorFunds };
+              const key = settlementKey(c, receipt);
+              const stay = alreadySettled ? 'settled' : 'issued';
+              if (!fundingCode) return [key, NEEDS_FUNDING_CODE(stay)];
+              if (alreadySettled) return [key, ALREADY_SETTLED];
+              if (clock === 'before') return [key, NOT_MATURED];
+              if (receipt === 'rejected') return [key, RECEIPT_REJECTED];
+              if (!anchorWallet) return [key, ANCHOR_HAS_NO_WALLET];
+              if (!anchorFunds) return [key, ANCHOR_SHORT];
+              return [key, SETTLED];
+            }),
+          ),
         ),
       ),
     ),
@@ -1310,8 +1466,8 @@ const SETTLED_IMPLIES_MATURED =
   'settlement is refused before maturity and the clock never rewinds, so a settled payable is never ahead of its maturity date';
 const NO_WALLET_NO_BALANCE =
   'an anchor with no wallet holds no balance, so its funds can never be sufficient';
-const REJECTED_PAYS_ITSELF =
-  'a rejected receipt returns the whole quantity to the anchor, so its redemption credit and debit net to zero and no shortfall is possible';
+const REJECTED_NEVER_SETTLES =
+  'settlement is refused ADA37 once the receipt is rejected, so a rejected payable never reaches settled';
 const SETTLING_PROVED_THE_FUNDS =
   'reaching settled required the anchor to fund the redemption, and no command in this table moves funds back out of its wallet';
 
@@ -1322,7 +1478,7 @@ function settlementInfeasibility(
   if (c.alreadySettled && c.clock === 'before') return SETTLED_IMPLIES_MATURED;
   if (!c.anchorWallet && c.anchorFunds) return NO_WALLET_NO_BALANCE;
   if (c.alreadySettled && !c.anchorFunds) return SETTLING_PROVED_THE_FUNDS;
-  if (receipt === 'rejected' && !c.anchorFunds && c.anchorWallet) return REJECTED_PAYS_ITSELF;
+  if (c.alreadySettled && receipt === 'rejected') return REJECTED_NEVER_SETTLES;
   return undefined;
 }
 
@@ -1335,10 +1491,10 @@ const SETTLEMENT_TABLE: readonly SettlementRow[] = [true, false].flatMap((fundin
             const c = { fundingCode, alreadySettled, clock, anchorWallet, anchorFunds };
             const infeasible = settlementInfeasibility(c, receipt);
             return {
-              conditions: `${settlementKey(c)}/receipt ${receipt}`,
+              conditions: settlementKey(c, receipt),
               ...c,
               receipt,
-              expected: SETTLEMENT_OUTCOME[settlementKey(c)],
+              expected: SETTLEMENT_OUTCOME[settlementKey(c, receipt)],
               ...(infeasible ? { infeasible } : {}),
             };
           }),
@@ -1381,7 +1537,7 @@ describe('table 4: maturity settlement', () => {
   });
 
   it('declares every combination of its six conditions', () => {
-    expect(shapeOf(SETTLEMENT_TABLE)).toEqual({ rows: 144, feasible: 60, infeasible: 84 });
+    expect(shapeOf(SETTLEMENT_TABLE)).toEqual({ rows: 144, feasible: 62, infeasible: 82 });
   });
 
   for (const row of SETTLEMENT_TABLE) {
@@ -1415,11 +1571,11 @@ describe('table 4: maturity settlement', () => {
       if (row.clock === 'after') await must(db.pool, { kind: 'advance_clock', days: 2 });
 
       if (row.alreadySettled) {
-        await must(db.pool, {
-          kind: 'settle_maturity',
-          payableId: payable.id,
-          fundingCode: 'XUSD',
-        });
+        await must(
+          db.pool,
+          { kind: 'settle_maturity', payableId: payable.id, fundingCode: 'XUSD' },
+          world.users.adata_preparer,
+        );
       }
 
       if (!row.anchorWallet) {
@@ -1430,11 +1586,15 @@ describe('table 4: maturity settlement', () => {
       }
 
       const shortfall = BigInt(face) - (await xusdBalance(db.pool, world.anchor.wallet));
-      const result = await post(db.pool, {
-        kind: 'settle_maturity',
-        payableId: payable.id,
-        ...(row.fundingCode ? { fundingCode: 'XUSD' } : {}),
-      });
+      const result = await post(
+        db.pool,
+        {
+          kind: 'settle_maturity',
+          payableId: payable.id,
+          ...(row.fundingCode ? { fundingCode: 'XUSD' } : {}),
+        },
+        { actorUserId: world.users.adata_preparer },
+      );
 
       const endState = await lifecycleOf(db.pool, payable.id);
       expect(observe(result, endState)).toEqual(
@@ -1448,7 +1608,7 @@ describe('table 4: maturity settlement', () => {
     });
   }
 
-  it('settles a payable whose supplier rejected the receipt', async () => {
+  it('refuses to settle a payable whose supplier rejected the receipt', async () => {
     const supplier = world.suppliers[1];
     const payable = await buildPayable(db.pool, {
       supplierId: supplier.id,
@@ -1465,19 +1625,26 @@ describe('table 4: maturity settlement', () => {
     await must(db.pool, { kind: 'advance_clock', days: 1 });
 
     const anchorBefore = await xusdBalance(db.pool, world.anchor.wallet);
-    const result = await post(db.pool, {
-      kind: 'settle_maturity',
-      payableId: payable.id,
-      fundingCode: 'XUSD',
-    });
+    const result = await post(
+      db.pool,
+      { kind: 'settle_maturity', payableId: payable.id, fundingCode: 'XUSD' },
+      { actorUserId: world.users.adata_preparer },
+    );
 
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      code: 'ADA37',
+      message: `payable ${payable.ref} was rejected by its supplier and has nobody to redeem to`,
+    });
+    // The obligation stays where a person can see it. Settling it moved no
+    // money either, because rejection had already returned the quantity to the
+    // anchor, so the credit and the debit were the same wallet.
     expect(
       await scalar<string>(db.pool,
         'SELECT (lifecycle_status::text || $2 || receipt_status::text) AS value FROM app.payable WHERE id = $1',
         [payable.id, '/'],
       ),
-    ).toBe('settled/rejected');
+    ).toBe('issued/rejected');
     expect(await xusdBalance(db.pool, world.anchor.wallet)).toBe(anchorBefore);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
@@ -1880,124 +2047,20 @@ describe('a client-minted payable id', () => {
 });
 
 /**
- * The rules these tables prove absent, stated as the rules a reader expects.
+ * This file used to end with `describe('rules the write path does not
+ * enforce')`, four `it.fails` cases stating rules a reader expects and the
+ * write path did not keep. All four are now kept, so all four were deleted and
+ * the block with them.
  *
- * Everything above pins what the system does, and does it deliberately: a
- * decision table whose outcome is keyed on fewer conditions than it enumerates
- * is how this suite shows which conditions the write path ignores. The cost of
- * that choice is that the whole file stays green while the compliance rule the
- * programme is built on is enforced nowhere, so a reader running `npm test`
- * sees nothing wrong.
+ * The convention still holds for the next one. A decision table whose outcome
+ * is keyed on fewer conditions than it enumerates is how this suite shows which
+ * conditions the write path ignores, and the cost is that the file stays green
+ * while the gap is open. An `it.fails` case beside the table is what makes the
+ * day it closes visible.
  *
- * These cases close that gap. Each asserts the rule a reader would expect to
- * hold, and each is marked `it.fails`, so the day one is enforced this file
- * turns red and someone has to come and delete the case on purpose. They are
- * the same findings as tests/techniques/findings/decision-tables.md, in a form
- * the test runner can report.
+ * One thing that convention does not survive: if the fix moves the refusal
+ * earlier, into the case's own setup, the case keeps reporting "expected fail"
+ * for a reason that is no longer the one it documents. Both min-price cases did
+ * exactly that, and were found by reading them rather than by the run. Read a
+ * surviving case before trusting it.
  */
-describe('rules the write path does not enforce', () => {
-  const FACE = 1_000_000;
-  let db: Database;
-  let world: World;
-
-  beforeAll(async () => {
-    db = await freshDatabase('decision_absent_rules', 'fixtures');
-    world = await loadWorld(db.pool);
-  });
-
-  afterAll(async () => {
-    await db?.close();
-  });
-
-  it.fails('refuses an approval from the same user who submitted the payable', async () => {
-    const preparer = world.users.adata_preparer;
-    const payable = await buildPayable(db.pool, {
-      supplierId: world.suppliers[0].id,
-      faceBase: FACE,
-      termsDays: 90,
-      upTo: 'pending_approval',
-      submitAs: preparer,
-    });
-
-    const result = await post(db.pool, { kind: 'approve', payableId: payable.id }, { actorUserId: preparer });
-    expect(result).toMatchObject({ ok: false });
-    expect(await lifecycleOf(db.pool, payable.id)).toBe('pending_approval');
-  });
-
-  it.fails('refuses an approval from a role the lifecycle edge does not name', async () => {
-    const payable = await buildPayable(db.pool, {
-      supplierId: world.suppliers[0].id,
-      faceBase: FACE,
-      termsDays: 90,
-      upTo: 'pending_approval',
-    });
-
-    const result = await post(
-      db.pool,
-      { kind: 'approve', payableId: payable.id },
-      { actorUserId: world.users.supplier },
-    );
-    expect(result).toMatchObject({ ok: false });
-    expect(await lifecycleOf(db.pool, payable.id)).toBe('pending_approval');
-  });
-
-  it.fails('refuses a bid below the minimum price the seller published', async () => {
-    const supplier = world.suppliers[0];
-    const lender = world.lenders[0];
-    const payable = await buildPayable(db.pool, {
-      supplierId: supplier.id,
-      faceBase: FACE,
-      termsDays: 90,
-      upTo: 'issued',
-      toWallet: supplier.wallet,
-    });
-    await must(db.pool, { kind: 'accept_receipt', payableId: payable.id });
-
-    const listingId = randomUUID();
-    const bidId = randomUUID();
-    await must(db.pool, {
-      kind: 'publish_listing',
-      listingId,
-      payableId: payable.id,
-      sellerWallet: supplier.wallet,
-      quantityBase: FACE,
-      minPriceBase: 900_000,
-    });
-    await must(db.pool, {
-      kind: 'place_bid',
-      bidId,
-      listingId,
-      bidderWallet: lender.wallet,
-      priceBase: 1,
-      fundingCode: 'XUSD',
-    });
-
-    const accepted = await post(db.pool, { kind: 'accept_bid', listingId, bidId });
-    expect(accepted).toMatchObject({ ok: false });
-  });
-
-  it.fails('refuses to settle a payable whose supplier rejected the receipt', async () => {
-    const supplier = world.suppliers[0];
-    const payable = await buildPayable(db.pool, {
-      supplierId: supplier.id,
-      faceBase: FACE,
-      termsDays: 30,
-      upTo: 'issued',
-      toWallet: supplier.wallet,
-    });
-    await must(db.pool, {
-      kind: 'reject_receipt',
-      payableId: payable.id,
-      holderWallet: supplier.wallet,
-    });
-    await must(db.pool, { kind: 'advance_clock', days: 30 });
-
-    const settled = await post(db.pool, {
-      kind: 'settle_maturity',
-      payableId: payable.id,
-      fundingCode: 'XUSD',
-    });
-    expect(settled).toMatchObject({ ok: false });
-    expect(await lifecycleOf(db.pool, payable.id)).toBe('issued');
-  });
-});

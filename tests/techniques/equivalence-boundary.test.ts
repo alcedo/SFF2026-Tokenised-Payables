@@ -24,6 +24,7 @@ import {
   freshDatabase,
   post,
   anyActor,
+  actors,
   ledgerHealth,
   HEALTHY,
   type Database,
@@ -251,10 +252,10 @@ const PURE_CASES: readonly PureCase[] = [
   },
   {
     field: 'money.parseUnits(input)',
-    partition: 'not a decimal: thousands separator',
+    partition: 'a thousands separator, the shape formatUnits emits',
     input: '"1,000"',
     run: () => money.parseUnits('1,000'),
-    expected: rangeError('not a decimal amount: "1,000"'),
+    expected: returns(10_000_000n),
   },
   {
     field: 'money.parseUnits(input)',
@@ -502,27 +503,27 @@ const PURE_CASES: readonly PureCase[] = [
 
   {
     field: 'money.allocateProRata(total, weights)',
-    partition: 'weights sum just below zero',
+    partition: 'a negative weight, whatever the sum comes to',
     edge: 'below',
     input: '(100n, [10n, -11n])',
     run: () => money.allocateProRata(bu(100n), [bu(10n), bu(-11n)]),
-    expected: rangeError('allocateProRata needs at least one positive weight'),
+    expected: rangeError('allocateProRata cannot split across a negative weight'),
   },
   {
     field: 'money.allocateProRata(total, weights)',
-    partition: 'weights sum exactly zero',
+    partition: 'a negative weight cancelling a positive one',
     edge: 'on',
     input: '(100n, [10n, -10n])',
     run: () => money.allocateProRata(bu(100n), [bu(10n), bu(-10n)]),
-    expected: rangeError('allocateProRata needs at least one positive weight'),
+    expected: rangeError('allocateProRata cannot split across a negative weight'),
   },
   {
     field: 'money.allocateProRata(total, weights)',
-    partition: 'weights sum just above zero',
+    partition: 'a negative weight outweighed by a positive one, which used to pass',
     edge: 'above',
     input: '(100n, [10n, -9n])',
     run: () => money.allocateProRata(bu(100n), [bu(10n), bu(-9n)]),
-    expected: returns([1_000n, -900n]),
+    expected: rangeError('allocateProRata cannot split across a negative weight'),
   },
   {
     field: 'money.allocateProRata(total, weights)',
@@ -564,11 +565,10 @@ const PURE_CASES: readonly PureCase[] = [
   },
   {
     field: 'money.allocateProRata(total, weights)',
-    partition: 'a negative weight with a positive sum should still be refused',
+    partition: 'a negative weight with a positive sum, refused by name',
     input: '(100n, [-5n, 10n])',
     run: () => money.allocateProRata(bu(100n), [bu(-5n), bu(10n)]),
-    expected: rangeError('allocateProRata needs at least one positive weight'),
-    defect: 'EB-03',
+    expected: rangeError('allocateProRata cannot split across a negative weight'),
   },
 
   {
@@ -577,7 +577,7 @@ const PURE_CASES: readonly PureCase[] = [
     edge: 'below',
     input: '(12345n, -1)',
     run: () => money.formatUnits(bu(12_345n), -1),
-    expected: rangeError('decimals must be between 0 and 4'),
+    expected: rangeError('decimals must be a whole number between 0 and 4'),
   },
   {
     field: 'money.formatUnits(value, decimals)',
@@ -601,14 +601,14 @@ const PURE_CASES: readonly PureCase[] = [
     edge: 'above',
     input: '(12345n, 5)',
     run: () => money.formatUnits(bu(12_345n), 5),
-    expected: rangeError('decimals must be between 0 and 4'),
+    expected: rangeError('decimals must be a whole number between 0 and 4'),
   },
   {
     field: 'money.formatUnits(value, decimals)',
-    partition: 'a non-integer decimals is not rejected, it truncates',
+    partition: 'a non-integer decimals, which the range alone used to admit',
     input: '(12345n, 2.5)',
     run: () => money.formatUnits(bu(12_345n), 2.5),
-    expected: returns('1.23'),
+    expected: rangeError('decimals must be a whole number between 0 and 4'),
   },
   {
     field: 'money.formatUnits(value, decimals)',
@@ -679,11 +679,10 @@ const PURE_CASES: readonly PureCase[] = [
   },
   {
     field: 'money.formatUnits(value, decimals)',
-    partition: 'a NaN decimals should be outside 0..4 like any other non-value',
+    partition: 'a NaN decimals, which passes both range comparisons',
     input: '(12345n, NaN)',
     run: () => money.formatUnits(bu(12_345n), NaN),
-    expected: rangeError('decimals must be between 0 and 4'),
-    defect: 'EB-02',
+    expected: rangeError('decimals must be a whole number between 0 and 4'),
   },
 
   {
@@ -1324,30 +1323,27 @@ const PURE_CASES: readonly PureCase[] = [
   },
   {
     field: 'clock.parseIsoDate(value)',
-    partition: 'a leap day in a common year is not a real calendar date, EB-01',
+    partition: 'a leap day in a common year',
     edge: 'above',
     input: '"2026-02-29"',
     run: () => clock.parseIsoDate('2026-02-29'),
     expected: rangeError('not a real calendar date: 2026-02-29'),
-    defect: 'EB-01',
   },
   {
     field: 'clock.parseIsoDate(value)',
-    partition: 'no February ever has thirty days, EB-01',
+    partition: 'no February ever has thirty days',
     edge: 'above',
     input: '"2026-02-30"',
     run: () => clock.parseIsoDate('2026-02-30'),
     expected: rangeError('not a real calendar date: 2026-02-30'),
-    defect: 'EB-01',
   },
   {
     field: 'clock.parseIsoDate(value)',
-    partition: 'April has thirty days, EB-01',
+    partition: 'April has thirty days',
     edge: 'above',
     input: '"2026-04-31"',
     run: () => clock.parseIsoDate('2026-04-31'),
     expected: rangeError('not a real calendar date: 2026-04-31'),
-    defect: 'EB-01',
   },
 
   {
@@ -2107,11 +2103,10 @@ const DB_CASES: readonly DbCase[] = [
   },
   {
     field: 'top_up.amountBase',
-    partition: 'absent, which the positive guard should still refuse, EB-06',
+    partition: 'absent, which the positive guard refuses along with zero and below',
     input: 'field omitted',
     intent: (w) => ({ kind: 'top_up', wallet: w.anchorWallet, cashCode: 'USDC' }),
     expected: refused('ADA19', 'a top-up must be positive'),
-    defect: 'EB-06',
   },
   {
     field: 'top_up.cashCode',
@@ -2128,6 +2123,19 @@ const DB_CASES: readonly DbCase[] = [
     expected: refused('22P02', 'invalid input value for enum ledger.cash_code: "EURC"'),
   },
 
+  {
+    field: 'transfer.toWallet',
+    partition: 'the wallet it came from, which moves nothing',
+    input: 'fromWallet',
+    intent: (w) => ({
+      kind: 'transfer',
+      payableId: w.transferPayableId,
+      fromWallet: w.supplierWallet,
+      toWallet: w.supplierWallet,
+      quantityBase: 1,
+    }),
+    expected: refused('ADA39', 'a transfer needs a different wallet to go to'),
+  },
   {
     field: 'transfer.quantityBase',
     partition: 'below the positive floor',
@@ -2347,11 +2355,10 @@ const DB_CASES: readonly DbCase[] = [
   },
   {
     field: 'create_payable.invoiceRef',
-    partition: 'whitespace that is not a space should still read as empty, EB-08',
+    partition: 'whitespace that is not a space, which reads as empty too',
     input: '"\\t"',
     intent: (w, n) => manualPayable(w, n, { invoiceRef: '\t' }),
     expected: refused('ADA25', 'an invoice reference is required'),
-    defect: 'EB-08',
   },
 
   {
@@ -2476,11 +2483,10 @@ const DB_CASES: readonly DbCase[] = [
   },
   {
     field: 'set_certification.status',
-    partition: 'absent, which the enum guard should catch, EB-07',
+    partition: 'absent, which the enum guard catches with the rest',
     input: 'field omitted',
     intent: (w) => ({ kind: 'set_certification', entityId: w.lenderId }),
-    expected: refused('ADA19', 'unknown certification status <NULL>'),
-    defect: 'EB-07',
+    expected: refused('ADA19', 'unknown certification status none given'),
   },
 
   {
@@ -2509,11 +2515,10 @@ const DB_CASES: readonly DbCase[] = [
   },
   {
     field: 'advance_clock.days',
-    partition: 'absent, which the forward-only guard should catch, EB-09',
+    partition: 'absent, which the forward-only guard catches along with negative',
     input: 'field omitted',
     intent: () => ({ kind: 'advance_clock' }),
     expected: refused('ADA19', 'the demo clock only moves forward'),
-    defect: 'EB-09',
   },
 ];
 
@@ -2545,8 +2550,13 @@ describe('layer 2: field validation at the ledger.post() boundary', () => {
   beforeAll(async () => {
     db = await freshDatabase('equivalence_boundary', 'fixtures');
 
-    const must = async (intent: Record<string, unknown>) => {
-      const result = await post(db.pool, intent);
+    // Each lifecycle edge is driven by the role app.lifecycle_edge names for
+    // it, not by whichever user post() would pick by default, so setup needs
+    // one real actor per role rather than the harness default throughout.
+    const roleActors = await actors(db.pool);
+
+    const must = async (intent: Record<string, unknown>, actorUserId?: string) => {
+      const result = await post(db.pool, intent, actorUserId ? { actorUserId } : {});
       if (!result.ok) {
         throw new Error(`suite setup refused ${String(intent.kind)}: ${result.code} ${result.message}`);
       }
@@ -2579,12 +2589,15 @@ describe('layer 2: field validation at the ledger.post() boundary', () => {
       const id = (
         await db.pool.query<{ id: string }>('SELECT id::text FROM app.payable WHERE ref = $1', [ref])
       ).rows[0]!.id;
-      await must({ kind: 'submit', payableId: id });
-      await must({ kind: 'approve', payableId: id });
+      await must({ kind: 'submit', payableId: id }, roleActors.adata_preparer);
+      await must({ kind: 'approve', payableId: id }, roleActors.adata_checker);
       await must({ kind: 'grade', payableId: id, grade: 'AA', gradeRationale: 'suite setup' });
-      await must({ kind: 'certify', payableId: id });
+      await must({ kind: 'certify', payableId: id }, roleActors.straitsx_admin);
       tokenId += 1;
-      await must({ kind: 'issue_payable', payableId: id, toWallet: supplierWallet, tokenId });
+      await must(
+        { kind: 'issue_payable', payableId: id, toWallet: supplierWallet, tokenId },
+        roleActors.straitsx_admin,
+      );
       await must({ kind: 'accept_receipt', payableId: id, holderWallet: supplierWallet });
       return id;
     };

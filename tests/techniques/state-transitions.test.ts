@@ -24,6 +24,7 @@ import {
   type Database,
   type PostResult,
 } from '../support/database';
+import { TRANSITIONS, type LifecycleEvent } from '@/core/lifecycle';
 
 type ObligationState =
   | 'draft'
@@ -31,8 +32,16 @@ type ObligationState =
   | 'approved'
   | 'certified'
   | 'issued'
-  | 'settled';
+  | 'settled'
+  | 'cancelled';
 
+/**
+ * The linear walk, which is what `park()` drives and what the matrices below
+ * enumerate. `cancelled` is stored but is not on it: it branches off `issued`
+ * when a supplier rejects delivery, the way `overdue` branches off `matured`.
+ * It has its own cases beside machine 1 rather than a column in a walk it does
+ * not belong to.
+ */
 const LIFECYCLE_ORDER: readonly ObligationState[] = [
   'draft',
   'pending_approval',
@@ -40,6 +49,10 @@ const LIFECYCLE_ORDER: readonly ObligationState[] = [
   'certified',
   'issued',
   'settled',
+  // Not on the spine. `cancelled` is reached from `issued` by way of a
+  // rejection, so `park` treats it the way it treats `settled`: walk to
+  // `issued`, then take the branch.
+  'cancelled',
 ];
 
 const FACE_BASE = 1_000_000;
@@ -76,6 +89,7 @@ function outcome(result: PostResult): string {
 interface World {
   pool: Pool;
   preparer: string;
+  checker: string;
   admin: string;
   supplier: string;
   supplierId: string;
@@ -105,6 +119,7 @@ async function openWorld(pool: Pool): Promise<World> {
   return {
     pool,
     preparer: byRole.adata_preparer!,
+    checker: byRole.adata_checker!,
     admin: byRole.straitsx_admin!,
     supplier: byRole.supplier!,
     supplierId: suppliers[0]!.entity_id,
@@ -147,6 +162,12 @@ async function createDraft(world: World, ref: string, termsDays: number): Promis
  * is both the honest way to reach a starting state and a second exercise of
  * every command in the chain. `settled` stops at `issued`, since settlement
  * needs the world clock past maturity and that is a decision for the caller.
+ * `cancelled` also stops at `issued` and then takes its own branch, which needs
+ * no clock: the supplier refuses delivery and the checker withdraws it.
+ *
+ * Each edge posts as the role app.lifecycle_edge names for it, or ledger.post
+ * refuses it with ADA36. grade is not a lifecycle edge, so it carries no role
+ * of its own; it is posted alongside certify as the straitsx_admin.
  */
 async function park(
   world: World,
@@ -155,25 +176,57 @@ async function park(
   termsDays: number,
 ): Promise<string> {
   const payableId = await createDraft(world, ref, termsDays);
-  const stop = LIFECYCLE_ORDER.indexOf(target === 'settled' ? 'issued' : target);
+  const stop = LIFECYCLE_ORDER.indexOf(
+    target === 'settled' || target === 'cancelled' ? 'issued' : target,
+  );
   for (let step = 1; step <= stop; step += 1) {
     tokenSeq += 1;
     const state = LIFECYCLE_ORDER[step];
-    const intent: Record<string, unknown> =
+    const actor =
       state === 'pending_approval'
-        ? { kind: 'submit', payableId }
+        ? world.preparer
         : state === 'approved'
-          ? { kind: 'approve', payableId }
+          ? world.checker
+          : world.admin;
+    const intents: Record<string, unknown>[] =
+      state === 'pending_approval'
+        ? [{ kind: 'submit', payableId }]
+        : state === 'approved'
+          ? [{ kind: 'approve', payableId }]
           : state === 'certified'
-            ? { kind: 'certify', payableId, grade: 'AAA', gradeRationale: 'matrix fixture' }
-            : {
-                kind: 'issue_payable',
-                payableId,
-                toWallet: world.supplierWallet,
-                tokenId: 900_000 + tokenSeq,
-              };
-    const done = await post(world.pool, intent, { actorUserId: world.admin });
-    if (!done.ok) throw new Error(`could not park ${ref} at ${state}: ${done.code} ${done.message}`);
+            ? [
+                { kind: 'grade', payableId, grade: 'AAA', gradeRationale: 'matrix fixture' },
+                { kind: 'certify', payableId },
+              ]
+            : [
+                {
+                  kind: 'issue_payable',
+                  payableId,
+                  toWallet: world.supplierWallet,
+                  tokenId: 900_000 + tokenSeq,
+                },
+              ];
+    for (const intent of intents) {
+      const done = await post(world.pool, intent, { actorUserId: actor });
+      if (!done.ok) {
+        throw new Error(`could not park ${ref} at ${state}: ${done.code} ${done.message}`);
+      }
+    }
+  }
+  if (target === 'cancelled') {
+    const branch: [Record<string, unknown>, string][] = [
+      [
+        { kind: 'reject_receipt', payableId, holderWallet: world.supplierWallet },
+        world.supplier,
+      ],
+      [{ kind: 'cancel_payable', payableId }, world.checker],
+    ];
+    for (const [intent, actor] of branch) {
+      const done = await post(world.pool, intent, { actorUserId: actor });
+      if (!done.ok) {
+        throw new Error(`could not park ${ref} at cancelled: ${done.code} ${done.message}`);
+      }
+    }
   }
   return payableId;
 }
@@ -219,8 +272,10 @@ async function bidStatusOf(pool: Pool, bidId: string): Promise<string> {
  * transition can only ever be refused by the edge trigger. Without this an
  * illegal edge and a missing grade would be indistinguishable in the matrix.
  */
-const NEEDS_GRADE = new Set<string>(['certified', 'issued', 'settled']);
-const NEEDS_ISSUANCE_COLUMNS = new Set<string>(['issued', 'settled']);
+// A cancelled payable was certified and issued before it was withdrawn, so it
+// carries the same columns a settled one does and the same CHECKs apply.
+const NEEDS_GRADE = new Set<string>(['certified', 'issued', 'settled', 'cancelled']);
+const NEEDS_ISSUANCE_COLUMNS = new Set<string>(['issued', 'settled', 'cancelled']);
 
 const FORCE_LIFECYCLE = `
   UPDATE app.payable
@@ -346,7 +401,29 @@ describe('machine 1: the obligation lifecycle', () => {
     await db?.close();
   });
 
-  it('stores exactly six obligation states and exactly five legal edges', async () => {
+  // ledger.post() refuses an edge driven by the wrong role with ADA36, reading
+  // app.lifecycle_edge. src/core/lifecycle.ts decides whether to draw the
+  // button. Two statements of one rule drift silently, and a wider list in
+  // TypeScript renders a control the database then refuses, so tie them here.
+  it('agrees with src/core/lifecycle about who may drive each edge', () => {
+    const EVENT_OF: Record<string, LifecycleEvent> = {
+      'draft->pending_approval': 'submit',
+      'pending_approval->approved': 'approve',
+      'approved->certified': 'certify',
+      'certified->issued': 'issue',
+      'issued->settled': 'settle',
+      'issued->cancelled': 'cancel',
+    };
+    expect(
+      edges.map((e) => `${e.from}->${e.to}: ${e.role}`).sort(),
+    ).toEqual(
+      edges
+        .map((e) => `${e.from}->${e.to}: ${TRANSITIONS[EVENT_OF[`${e.from}->${e.to}`]!].actors.join(',')}`)
+        .sort(),
+    );
+  });
+
+  it('stores exactly seven obligation states and exactly six legal edges', async () => {
     expect(await enumLabels(db.pool, 'app.obligation_state')).toEqual([
       'draft',
       'pending_approval',
@@ -354,18 +431,20 @@ describe('machine 1: the obligation lifecycle', () => {
       'certified',
       'issued',
       'settled',
+      'cancelled',
     ]);
     expect(edges).toEqual([
       { from: 'approved', to: 'certified', role: 'straitsx_admin' },
       { from: 'certified', to: 'issued', role: 'straitsx_admin' },
       { from: 'draft', to: 'pending_approval', role: 'adata_preparer' },
+      { from: 'issued', to: 'cancelled', role: 'adata_checker' },
       { from: 'issued', to: 'settled', role: 'adata_preparer' },
       { from: 'pending_approval', to: 'approved', role: 'adata_checker' },
     ]);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('parks one payable in each of the six states through ordinary commands', async () => {
+  it('parks one payable in each of the seven states through ordinary commands', async () => {
     const landed: Record<string, string> = {};
     for (const state of LIFECYCLE_ORDER) landed[state] = await lifecycleOf(db.pool, parked[state]);
     expect(landed).toEqual({
@@ -375,11 +454,12 @@ describe('machine 1: the obligation lifecycle', () => {
       certified: 'certified',
       issued: 'issued',
       settled: 'settled',
+      cancelled: 'cancelled',
     });
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('accepts the five stored edges and refuses the other twenty-five with ADA01', async () => {
+  it('accepts the six stored edges and refuses the other thirty-six with ADA01', async () => {
     const observed: Record<string, string> = {};
     const expected: Record<string, string> = {};
 
@@ -394,13 +474,13 @@ describe('machine 1: the obligation lifecycle', () => {
       }
     }
 
-    expect(Object.keys(observed)).toHaveLength(30);
-    expect(Object.values(expected).filter((cell) => cell.startsWith('accepted'))).toHaveLength(5);
+    expect(Object.keys(observed)).toHaveLength(42);
+    expect(Object.values(expected).filter((cell) => cell.startsWith('accepted'))).toHaveLength(6);
     expect(observed).toEqual(expected);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('treats a same-state write as a free no-op on all six diagonal cells', async () => {
+  it('treats a same-state write as a free no-op on all seven diagonal cells', async () => {
     const observed: Record<string, string> = {};
     const expected: Record<string, string> = {};
     for (const state of LIFECYCLE_ORDER) {
@@ -430,6 +510,10 @@ describe('machine 1: the obligation lifecycle', () => {
   it('covers the full state by command matrix and records which guard wins', async () => {
     const observed: Record<string, string> = {};
     const expected: Record<string, string> = {};
+    // Every command below posts as world.admin (straitsx_admin), so a cell
+    // whose edge names a different role now names its own ADA36 refusal
+    // instead of landing.
+    const roleFor = new Map(edges.map((edge) => [`${edge.from}->${edge.to}`, edge.role]));
 
     for (const from of LIFECYCLE_ORDER) {
       for (const command of COMMANDS) {
@@ -454,11 +538,24 @@ describe('machine 1: the obligation lifecycle', () => {
         observed[key] = `${outcome(result)} -> ${await lifecycleOf(db.pool, id)}`;
 
         const to = TARGET_OF[command];
-        if (command === 'issue_payable' && from !== 'certified') {
+        const graded =
+          LIFECYCLE_ORDER.indexOf(from) >= LIFECYCLE_ORDER.indexOf('certified');
+        if (command === 'certify' && !graded) {
+          expected[key] = `ADA35: payable ${ref} has no grade yet -> ${from}`;
+        } else if (command === 'issue_payable' && from !== 'certified') {
           expected[key] =
             `ADA15: payable ${ref} is ${from} and must be certified before issuance -> ${from}`;
         } else if (command === 'settle_maturity' && from === 'settled') {
           expected[key] = `ADA16: payable ${ref} is already settled -> settled`;
+        } else if (command === 'settle_maturity' && from === 'cancelled') {
+          // A cancelled payable is a rejected one by construction, so the guard
+          // that stops a rejection redeeming answers first. ADA01 never gets
+          // the question.
+          expected[key] =
+            `ADA37: payable ${ref} was rejected by its supplier and has nobody to redeem to -> cancelled`;
+        } else if (edgeKeys.has(`${from}->${to}`) && roleFor.get(`${from}->${to}`) !== 'straitsx_admin') {
+          expected[key] =
+            `ADA36: payable ${ref} moves from ${from} to ${to} on the ${roleFor.get(`${from}->${to}`)}, not the straitsx_admin -> ${from}`;
         } else if (from === to || edgeKeys.has(`${from}->${to}`)) {
           expected[key] = `accepted -> ${to}`;
         } else {
@@ -467,28 +564,44 @@ describe('machine 1: the obligation lifecycle', () => {
       }
     }
 
-    expect(Object.keys(observed)).toHaveLength(30);
+    expect(Object.keys(observed)).toHaveLength(35);
     expect(observed).toEqual(expected);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('lets the row CHECK win over the edge trigger when the edge itself is legal', async () => {
+  it('refuses an ungraded certify by name, ahead of both the trigger and the CHECK', async () => {
     const payableId = await park(world, 'GUARD-ungraded', 'approved', LONG_TERM);
     const refused = await post(
       db.pool,
       { kind: 'certify', payableId },
       { actorUserId: world.admin },
     );
-    expect(refused).toMatchObject({ ok: false, code: '23514' });
-    expect((refused as { message: string }).message).toContain('graded_before_certified');
+    expect(refused).toEqual({
+      ok: false,
+      code: 'ADA35',
+      message: 'payable GUARD-ungraded has no grade yet',
+    });
     expect(await lifecycleOf(db.pool, payableId)).toBe('approved');
 
-    const graded = await post(
+    // The grade is its own command, so an inline grade on certify is refused
+    // too: the guard reads the stored column, not the intent.
+    const inline = await post(
       db.pool,
       { kind: 'certify', payableId, grade: 'AA', gradeRationale: 'graded on the retry' },
       { actorUserId: world.admin },
     );
+    expect(inline).toMatchObject({ ok: false, code: 'ADA35' });
+    expect(await lifecycleOf(db.pool, payableId)).toBe('approved');
+
+    const graded = await post(
+      db.pool,
+      { kind: 'grade', payableId, grade: 'AA', gradeRationale: 'graded on the retry' },
+      { actorUserId: world.admin },
+    );
     expect(graded).toMatchObject({ ok: true });
+    expect(
+      await post(db.pool, { kind: 'certify', payableId }, { actorUserId: world.admin }),
+    ).toMatchObject({ ok: true });
     expect(await lifecycleOf(db.pool, payableId)).toBe('certified');
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
@@ -523,38 +636,82 @@ describe('machine 1: the obligation lifecycle', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('accepts every legal edge from an actor holding the wrong role', async () => {
-    // lifecycle_edge.actor_role names a role per edge and the trigger reads
-    // only (from_state, to_state), so the column constrains nothing. Driving
-    // the whole chain as a supplier is the cheapest proof of that.
-    const payableId = await park(world, 'ROLE-wrong', 'draft', SHORT_TERM);
-    const walk = [
-      { kind: 'submit', payableId },
-      { kind: 'approve', payableId },
-      { kind: 'certify', payableId, grade: 'A' },
-      { kind: 'issue_payable', payableId, toWallet: world.supplierWallet, tokenId: 654_321 },
-      { kind: 'settle_maturity', payableId, fundingCode: 'XUSD' },
+  it('names the ADA36 refusal for every legal edge driven by the wrong role', async () => {
+    // lifecycle_edge.actor_role names a role per edge and ledger.post() now
+    // reads it, refusing the wrong actor with ADA36 before the edge fires. A
+    // supplier holds none of the five required roles, so driving each edge as
+    // a supplier is still the cheapest proof, only now the proof is a named
+    // refusal instead of a walk that lands anyway.
+    const edgeCases: {
+      from: ObligationState;
+      to: ObligationState;
+      role: string;
+      intent: (payableId: string) => Record<string, unknown>;
+    }[] = [
+      {
+        from: 'draft',
+        to: 'pending_approval',
+        role: 'adata_preparer',
+        intent: (payableId) => ({ kind: 'submit', payableId }),
+      },
+      {
+        from: 'pending_approval',
+        to: 'approved',
+        role: 'adata_checker',
+        intent: (payableId) => ({ kind: 'approve', payableId }),
+      },
+      {
+        from: 'approved',
+        to: 'certified',
+        role: 'straitsx_admin',
+        intent: (payableId) => ({ kind: 'certify', payableId }),
+      },
+      {
+        from: 'certified',
+        to: 'issued',
+        role: 'straitsx_admin',
+        intent: (payableId) => {
+          tokenSeq += 1;
+          return {
+            kind: 'issue_payable',
+            payableId,
+            toWallet: world.supplierWallet,
+            tokenId: 800_000 + tokenSeq,
+          };
+        },
+      },
+      {
+        from: 'issued',
+        to: 'settled',
+        role: 'adata_preparer',
+        intent: (payableId) => ({ kind: 'settle_maturity', payableId, fundingCode: 'XUSD' }),
+      },
     ];
-    const landed: string[] = [];
-    for (const intent of walk) {
-      if (intent.kind === 'settle_maturity') {
-        const advanced = await post(
-          db.pool,
-          { kind: 'advance_clock', days: SHORT_TERM },
-          { actorUserId: world.admin },
-        );
-        expect(advanced).toMatchObject({ ok: true });
+
+    for (const edgeCase of edgeCases) {
+      const ref = `ROLE-wrong-${edgeCase.from}`;
+      const payableId = await park(world, ref, edgeCase.from, SHORT_TERM);
+      if (edgeCase.from === 'approved') {
+        // grade is not a lifecycle edge, so it is setup here rather than a
+        // step; park() stops at approved ungraded and certify needs a grade.
+        expect(
+          await post(db.pool, { kind: 'grade', payableId, grade: 'A' }, { actorUserId: world.admin }),
+        ).toMatchObject({ ok: true });
       }
-      const result = await post(db.pool, intent, { actorUserId: world.supplier });
-      landed.push(`${outcome(result)} -> ${await lifecycleOf(db.pool, payableId)}`);
+      if (edgeCase.to === 'settled') {
+        expect(
+          await post(db.pool, { kind: 'advance_clock', days: SHORT_TERM }, { actorUserId: world.admin }),
+        ).toMatchObject({ ok: true });
+      }
+
+      const result = await post(db.pool, edgeCase.intent(payableId), { actorUserId: world.supplier });
+      expect(result).toEqual({
+        ok: false,
+        code: 'ADA36',
+        message: `payable ${ref} moves from ${edgeCase.from} to ${edgeCase.to} on the ${edgeCase.role}, not the supplier`,
+      });
+      expect(await lifecycleOf(db.pool, payableId)).toBe(edgeCase.from);
     }
-    expect(landed).toEqual([
-      'accepted -> pending_approval',
-      'accepted -> approved',
-      'accepted -> certified',
-      'accepted -> issued',
-      'accepted -> settled',
-    ]);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 });
@@ -951,13 +1108,17 @@ describe('machine 3: app.bid_status', () => {
       'placed/accept_bid': 'accepted -> accepted',
       'placed/withdraw_bid': 'accepted -> withdrawn',
       'accepted/accept_bid': 'ADA11: bid is accepted -> accepted',
-      'accepted/withdraw_bid': 'accepted -> accepted',
+      // withdraw_bid now reads the row first, so a non-placed bid is refused
+      // instead of the old no-match UPDATE silently touching nothing.
+      'accepted/withdraw_bid': 'ADA11: bid is accepted -> accepted',
       'withdrawn/accept_bid': 'ADA11: bid is withdrawn -> withdrawn',
-      'withdrawn/withdraw_bid': 'accepted -> withdrawn',
+      'withdrawn/withdraw_bid': 'ADA11: bid is withdrawn -> withdrawn',
       'superseded/accept_bid': 'ADA11: bid is superseded -> superseded',
-      'superseded/withdraw_bid': 'accepted -> superseded',
-      'absent/accept_bid': 'ADA34: only institutional lender accounts can buy -> absent',
-      'absent/withdraw_bid': 'accepted -> absent',
+      'superseded/withdraw_bid': 'ADA11: bid is superseded -> superseded',
+      // A missing bid id is now caught before either command reaches its
+      // status or institutional-buyer checks.
+      'absent/accept_bid': 'ADA11: no such bid -> absent',
+      'absent/withdraw_bid': 'ADA11: no such bid -> absent',
     };
 
     for (const status of BID_STATUSES) {
@@ -1119,7 +1280,7 @@ describe('machine 3: app.bid_status', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('journals a bid_withdrawn entry even when no bid row was touched', async () => {
+  it('refuses withdraw_bid for an absent bid without journaling anything', async () => {
     const before = await db.pool.query<{ n: bigint }>(
       "SELECT count(*) AS n FROM ledger.journal_entry WHERE kind = 'bid_withdrawn'",
     );
@@ -1128,61 +1289,13 @@ describe('machine 3: app.bid_status', () => {
       { kind: 'withdraw_bid', bidId: ABSENT_BID },
       { actorUserId: world.buyer },
     );
-    expect(phantom).toMatchObject({ ok: true });
+    expect(phantom).toEqual({ ok: false, code: 'ADA11', message: 'no such bid' });
 
     const after = await db.pool.query<{ n: bigint }>(
       "SELECT count(*) AS n FROM ledger.journal_entry WHERE kind = 'bid_withdrawn'",
     );
-    expect(Number(after.rows[0]!.n)).toBe(Number(before.rows[0]!.n) + 1);
-
-    const { rows } = await db.pool.query<{ bid_id: string | null; legs: bigint }>(
-      `SELECT e.bid_id::text,
-              (SELECT count(*) FROM ledger.journal_leg l WHERE l.entry_id = e.id) AS legs
-         FROM ledger.journal_entry e
-        WHERE e.kind = 'bid_withdrawn'
-        ORDER BY e.seq DESC LIMIT 1`,
-    );
-    expect(rows[0]).toEqual({ bid_id: null, legs: 0n });
+    expect(Number(after.rows[0]!.n)).toBe(Number(before.rows[0]!.n));
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-  });
-
-  it.fails('should refuse accept_bid for a bid id that does not exist', async () => {
-    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-    const lot = await publishLot(world, 'BD-should-refuse-accept');
-    const result = await post(
-      db.pool,
-      { kind: 'accept_bid', listingId: lot.listingId, bidId: ABSENT_BID },
-      { actorUserId: world.supplier },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('should refuse withdraw_bid for a bid id that does not exist', async () => {
-    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-    const result = await post(
-      db.pool,
-      { kind: 'withdraw_bid', bidId: ABSENT_BID },
-      { actorUserId: world.buyer },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
-  });
-
-  it.fails('should refuse withdraw_bid for a bid that has already been accepted', async () => {
-    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-    const lot = await publishLot(world, 'BD-should-refuse-withdraw');
-    expect(
-      await post(
-        db.pool,
-        { kind: 'accept_bid', listingId: lot.listingId, bidId: lot.bidId },
-        { actorUserId: world.supplier },
-      ),
-    ).toMatchObject({ ok: true });
-    const result = await post(
-      db.pool,
-      { kind: 'withdraw_bid', bidId: lot.bidId },
-      { actorUserId: world.buyer },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'ADA11' });
   });
 });
 
@@ -1282,9 +1395,9 @@ describe('machine 4: app.payable.receipt_status', () => {
         observed[key] = `${code} -> ${await receiptOf(db.pool, id)}`;
 
         if (state === 'null') {
-          // The ADA15 guard tests `receipt_status <> 'pending'`, which is NULL
-          // rather than true before issuance, so the row CHECK is what refuses.
-          expected[key] = '23514 -> null';
+          // The pre-issuance case is now caught by its own ADA15 guard before
+          // the CHECK constraint ever sees the row.
+          expected[key] = 'ADA15 -> null';
         } else if (state === 'pending') {
           expected[key] = command === 'accept_receipt' ? 'accepted -> accepted' : 'accepted -> rejected';
         } else {
@@ -1347,6 +1460,68 @@ describe('machine 4: app.payable.receipt_status', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
+  it('refuses to move a rejected payable, which is the only place it can be withdrawn from', async () => {
+    const payableId = await park(world, 'RC-rejected-trade', 'issued', LONG_TERM);
+    const rejected = await post(
+      db.pool,
+      { kind: 'reject_receipt', payableId, holderWallet: world.supplierWallet },
+      { actorUserId: world.supplier },
+    );
+    expect(rejected).toMatchObject({ ok: true });
+
+    // The rejection put the whole quantity in the anchor's own wallet, which is
+    // where cancel_payable burns it from. Moving it on would strand a token
+    // settlement refuses (ADA37) somewhere cancellation can no longer reach.
+    const { rows } = await db.pool.query<{ address: string }>(
+      'SELECT address FROM app.wallet WHERE entity_id = $1 LIMIT 1',
+      [world.anchorId],
+    );
+    const anchorWallet = rows[0]!.address;
+
+    expect(
+      await post(
+        db.pool,
+        {
+          kind: 'transfer',
+          payableId,
+          fromWallet: anchorWallet,
+          toWallet: world.buyerWallet,
+          quantityBase: FACE_BASE,
+        },
+        { actorUserId: world.preparer },
+      ),
+    ).toEqual({
+      ok: false,
+      code: 'ADA15',
+      message: 'payable RC-rejected-trade was rejected by its supplier and cannot be traded',
+    });
+
+    expect(
+      await post(
+        db.pool,
+        {
+          kind: 'publish_listing',
+          payableId,
+          sellerWallet: anchorWallet,
+          quantityBase: FACE_BASE,
+          minPriceBase: 1,
+        },
+        { actorUserId: world.preparer },
+      ),
+    ).toEqual({
+      ok: false,
+      code: 'ADA15',
+      message: 'payable RC-rejected-trade was rejected by its supplier and cannot be traded',
+    });
+
+    // Still whole, still where the checker can cancel it.
+    expect(
+      await post(db.pool, { kind: 'cancel_payable', payableId }, { actorUserId: world.checker }),
+    ).toMatchObject({ ok: true });
+    expect(await lifecycleOf(db.pool, payableId)).toBe('cancelled');
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
+  });
+
   it('has no edge table of its own, so a direct write may walk the receipt backwards', async () => {
     const payableId = await park(world, 'RC-backwards', 'issued', LONG_TERM);
     expect(
@@ -1357,17 +1532,6 @@ describe('machine 4: app.payable.receipt_status', () => {
     ]);
     expect(await receiptOf(db.pool, payableId)).toBe('pending');
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-  });
-
-  it.fails('should refuse accept_receipt before issuance with the ADA15 it has for the purpose', async () => {
-    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
-    const payableId = await park(world, 'RC-should-refuse', 'certified', LONG_TERM);
-    const result = await post(
-      db.pool,
-      { kind: 'accept_receipt', payableId },
-      { actorUserId: world.supplier },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'ADA15' });
   });
 });
 

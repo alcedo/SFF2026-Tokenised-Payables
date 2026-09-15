@@ -10,15 +10,15 @@ own row counts, so a row silently disappearing fails the suite.
 | Table | Rule | Conditions | Rows | Feasible | Infeasible |
 | --- | --- | --- | ---: | ---: | ---: |
 | 1 | issuance against certification and programme limit | 4 | 48 | 24 | 24 |
-| 2 | maker-checker approval | 3 | 60 | 55 | 5 |
-| 3a | bid acceptance, early gates | 2 | 18 | 13 | 5 |
+| 2 | maker-checker approval | 3 | 60 | 35 | 25 |
+| 3a | bid acceptance, early gates | 2 | 18 | 12 | 6 |
 | 3b | bid acceptance, conditions after the gates | 5 | 32 | 24 | 8 |
-| 4 | maturity settlement | 6 | 144 | 60 | 84 |
+| 4 | maturity settlement | 6 | 144 | 62 | 82 |
 | 5a | `create_user` role against organisation type | 2 | 20 | 20 | 0 |
 | 5b | `onboard_entity` role against organisation type | 2 | 20 | 20 | 0 |
 | 5c | `onboard_entity` name validation | 2 | 15 | 15 | 0 |
 | 6 | user removal | 3 | 12 | 5 | 7 |
-| | | | **369** | **236** | **133** |
+| | | | **369** | **217** | **152** |
 
 Nothing in `src/` or `db/` was changed. Every scenario ends by asserting
 `ledgerHealth(pool)` equals `HEALTHY`; the books balance through all of it.
@@ -26,6 +26,11 @@ Nothing in `src/` or `db/` was changed. Every scenario ends by asserting
 ---
 
 ## 1. Maker-checker is enforced nowhere on the write path
+
+**FIXED.** `ledger.post()` now reads `app.lifecycle_edge.actor_role` through
+`app.assert_edge_actor` and refuses any other actor with `ADA36`. The write-up
+below is the state before that change; what replaced it is at the end of this
+entry.
 
 **Severity: the compliance rule the brief names is absent from the product.**
 
@@ -41,8 +46,9 @@ five edges (`pending_approval -> approved` is `adata_checker`). Nothing reads
 it. The suite proves this from the database itself rather than by inspection:
 `pg_get_functiondef(app.enforce_lifecycle_edge)` selects only `from_state` and
 `to_state`, and `pg_get_functiondef(ledger.post)` contains neither the string
-`actor_role` nor the string `lifecycle_edge`. See the case
-`carries an actor_role on every lifecycle edge that the write path never reads`.
+`actor_role` nor the string `lifecycle_edge`. The case that proved it is now
+`carries an actor_role on every lifecycle edge, which ledger.post reads through
+app.assert_edge_actor`, and it asserts the reader rather than its absence.
 
 `src/core/lifecycle.ts::attempt()` implements the role half in TypeScript. Its
 only callers are `src/app/adata/approvals/page.tsx`, which uses it to decide
@@ -58,8 +64,8 @@ submitter, is implemented nowhere. `attempt()` takes a role and never sees a
 user; its own doc comment says the identity check is "an identity check the
 caller performs", and no caller performs it.
 
-**Reproduction** (`accepts an approval from the supplier who submitted, which
-core/lifecycle refuses`): create a payable, post `submit` as the `supplier`
+**Reproduction** (now `refuses a supplier at submit and at approve, as
+core/lifecycle does`): create a payable, post `submit` as the `supplier`
 user, then post `approve` as the same `supplier` user.
 
 **Expected**: refusal. The PRD maker-checker rule requires an `adata_checker`,
@@ -72,12 +78,64 @@ submitted.
 'supplier')` returns `{ ok: false, reason: 'supplier may not approve a payable' }`,
 so the two layers disagree and the database is the one that decides.
 
-The 60-row table makes the scope of this exact. Its outcome lookup,
-`APPROVE_OUTCOME`, is keyed on the lifecycle state alone. Role and submitter
-identity are enumerated across all 60 rows and appear in no key, because they
-change nothing. All five roles and both identity settings produce the same
+The 60-row table made the scope of this exact. Its outcome lookup,
+`APPROVE_OUTCOME`, was keyed on the lifecycle state alone. Role and submitter
+identity were enumerated across all 60 rows and appeared in no key, because they
+changed nothing. All five roles and both identity settings produced the same
 result for a given state: `ADA01 illegal lifecycle transition <from> -> approved`
 off a bad edge, acceptance on a good one.
+
+### What replaced it
+
+`app.assert_edge_actor(payable, to_state, actor)` in `db/post.sql` looks up
+`app.lifecycle_edge.actor_role` for the edge the command would take, reads the
+actor's role, and refuses a mismatch with
+
+```
+ADA36 payable <ref> moves from <from> to <to> on the <required>, not the <actual>
+```
+
+It is called from every place that moves `lifecycle_status`: the
+`submit`/`approve`/`certify` branch, `issue_payable`, `settle_maturity`, and
+`cancel_payable`, added since. So the column is read on every edge rather than
+on the one the brief named.
+Where the pair is not an edge at all, including a same-state write, it returns
+early and leaves the refusal to `app.enforce_lifecycle_edge`, which still
+answers `ADA01`.
+
+**The identity half needs no rule of its own.** `app.app_user.role` is written
+once at INSERT and no command updates it, and `submit` and `approve` name
+different roles, so the submitter of a payable can never be its approver. A
+guard for it could not fire. Writing one would have added the kind of
+unreachable branch findings 6 and 8 of this file already fault.
+
+**`src/core/lifecycle.ts` disagreed and now does not.** Its `TRANSITIONS.issue`
+allowed `adata_preparer`, `adata_checker` and `straitsx_admin`, and
+`TRANSITIONS.settle` allowed two roles, against one in the edge table. Those
+lists gate buttons, so the approvals screen would have drawn a control the
+database then refused. Both are narrowed to the edge table, and
+`tests/techniques/state-transitions.test.ts` now reads `app.lifecycle_edge` out
+of the database and asserts the two agree, so the next edit cannot drift them
+apart quietly.
+
+**`src/app/adata/settlement/FundingPanel.tsx` had no role gate at all**, only a
+funds check, so every persona could click Fund settlement. It now consults
+`attempt()` the way the approvals screen does.
+`src/core/next-action.ts::sourceSettlementDue` was a third copy, offering the
+step to the checker as well, and now reads `pendingStep('matured').actors`.
+
+**What the rule does not close.** `app.assert_edge_actor` returns early when the
+pair is not an edge, and `approved -> approved` is not one, so finding 2 below
+still stands and now has a sharper form: a wrong-role actor's `approve` on an
+already-approved payable is accepted and writes an `approved` journal entry
+under that actor. The audit trail can still show a supplier approving. Table 2
+pins it as `approved | acting as supplier | a different user -> accepted`.
+
+Table 2's shape moved with the rule. Its outcome is now keyed on lifecycle and,
+at `pending_approval` only, on role, which mirrors the write path reading the
+role only where an edge row exists. Twenty rows became infeasible: `submit` is
+refused to every role but `adata_preparer` and a role never changes, so no other
+role is ever a payable's submitter.
 
 ---
 
@@ -137,6 +195,14 @@ The same hazard exists for `seriesId`, which the gate also writes through.
 
 ## 4. Settlement never reads `receipt_status`, and a rejected payable redeems for free
 
+**FIXED.** `settle_maturity` now refuses a payable whose receipt was rejected,
+with `ADA37 payable <ref> was rejected by its supplier and has nobody to redeem
+to`. The guard sits after the role check and before the anchor-wallet and funds
+checks. Table 4's outcome is now keyed on all six conditions, and
+`receipt_status` earns its place in that key.
+
+The entry below is the state before that change.
+
 File: `db/post.sql` lines 667 to 738.
 
 Table 4 enumerates six conditions across 144 rows. Its outcome lookup,
@@ -166,13 +232,46 @@ anchor's XUSD balance is **identical** before and after, asserted literally in
 the test. The obligation is retired, the token is burned back to
 `system_unissued`, and no money moved.
 
-This is also why the table marks `receipt rejected` with `anchor funds
+This was also why the table marked `receipt rejected` with `anchor funds
 insufficient` infeasible across 12 rows: with the anchor paying itself, the
-shortfall branch can never fire however poor the anchor is.
+shortfall branch could never fire however poor the anchor was.
+
+That infeasibility is gone, because `ADA37` now answers those rows before the
+funds check is reached. A different one replaced it: a rejected payable can no
+longer reach `settled`, so every `already settled | receipt rejected` row is
+infeasible. Table 4 moves from 60 feasible and 84 infeasible to 62 and 82.
+
+The refusal leaves the payable at `issued` with its receipt `rejected`, which is
+a combination no constraint forbids and which a person can still see. Writing
+off a rejected delivery is a different act and there is no command for it. That
+is a gap, not a defect this fix introduces.
 
 ---
 
 ## 5. A bid below `listing.min_price_base` is accepted and settles
+
+**FIXED.** `place_bid` refuses a bid below the floor with `ADA38 a bid must be
+at least <min>, the minimum this listing asks`, checked after the bidder's
+eligibility. It is checked where a bid enters rather than at acceptance,
+because the only two ways a bid is created are `place_bid` and `buy_now`, and
+`buy_now` prices from `buy_now_price_base`, which the schema already holds at
+or above the minimum. A second check at acceptance would be the unreachable
+recheck finding 6 already faults.
+
+An absent `priceBase` is caught by the same guard. It used to be NULL all the
+way to a NOT NULL column.
+
+Table 3a's `bid_below_min_price` gate is now infeasible for both verbs, since no
+acceptance can ever see such a bid, and the floor has a boundary triple of its
+own at 899,999 / 900,000 / 900,001 plus the absent case.
+
+**The seed carried a bid below its own ask.** `db/seed.sql` priced the two
+competing bids on TP-2026-0142 at 98.40% and 98.10% of face against a 98.40%
+ask, describing them as "at a spread". The second was below the floor and the
+seed refused to load once the rule was real. The spread now sits at and above
+the ask, at 98.40% and 98.60%, which is where a competing bid belongs.
+
+The entry below is the state before that change.
 
 File: `db/post.sql` lines 581 to 665, `db/schema.sql` lines 369 to 391.
 
@@ -231,6 +330,15 @@ The line is not wrong, it is unreachable on the path its comment describes.
 ---
 
 ## 7. `accept_bid` with an unknown `bidId` reports the buyer as ineligible
+
+**FIXED** as part of the NULL-guard family. `accept_bid` answers
+`ADA11 no such bid`, checked after the listing and before the bid status, the
+self-trade check and the eligibility check that used to answer first. Seven
+other sites shared the root cause and moved with it; see finding 4 of
+`findings/model-based.md` for the list.
+
+The entry below is the state before that change.
+
 
 File: `db/post.sql` lines 608 to 627.
 

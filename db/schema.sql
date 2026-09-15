@@ -238,7 +238,7 @@ CREATE INDEX account_balance_by_asset ON ledger.account_balance(asset_id)
 -- "presenter fast-forwards and nothing happens".
 
 CREATE TYPE app.obligation_state AS ENUM (
-  'draft', 'pending_approval', 'approved', 'certified', 'issued', 'settled'
+  'draft', 'pending_approval', 'approved', 'certified', 'issued', 'settled', 'cancelled'
 );
 CREATE TYPE app.credit_grade AS ENUM ('AAA', 'AA', 'A');
 
@@ -305,16 +305,17 @@ ALTER TABLE ledger.asset
 -- is modelled as delivery state on the payable rather than as a lifecycle state.
 -- That keeps the obligation diagram exactly as the PRD draws it.
 --
--- A rejection returns the full quantity to the anchor's wallet. Burning it
--- would break the section 13 rule that holdings sum to outstanding face, and
--- section 4 puts operational cancellation out of scope, so there is no
--- cancelled state to move to.
+-- A rejection returns the full quantity to the anchor's wallet and leaves the
+-- obligation issued, because burning at that moment would break the section 13
+-- rule that holdings sum to outstanding face. What then becomes of it is a
+-- separate decision: the checker may cancel it, which burns the quantity back
+-- to unissued and moves the obligation to 'cancelled'. See docs/ASSUMPTIONS.md.
 CREATE TYPE app.receipt_status AS ENUM ('pending', 'accepted', 'rejected');
 ALTER TABLE app.payable ADD COLUMN receipt_status app.receipt_status;
 -- INVARIANT: receipt state exists exactly for a payable that has been issued.
 ALTER TABLE app.payable ADD CONSTRAINT receipt_only_once_issued CHECK (
   (lifecycle_status IN ('draft','pending_approval','approved','certified') AND receipt_status IS NULL)
-  OR (lifecycle_status IN ('issued','settled') AND receipt_status IS NOT NULL)
+  OR (lifecycle_status IN ('issued','settled','cancelled') AND receipt_status IS NOT NULL)
 );
 
 CREATE TABLE app.lifecycle_edge (
@@ -328,7 +329,13 @@ INSERT INTO app.lifecycle_edge VALUES
   ('pending_approval', 'approved',         'adata_checker'),
   ('approved',         'certified',        'straitsx_admin'),
   ('certified',        'issued',           'straitsx_admin'),
-  ('issued',           'settled',          'adata_preparer');
+  ('issued',           'settled',          'adata_preparer'),
+  -- A supplier who rejects delivery sends the whole quantity back to the
+  -- anchor, which then holds an obligation to itself that nobody is owed. The
+  -- checker cancels it rather than the preparer: settlement pays an obligation
+  -- and cancellation ends one without paying, so it is the act that wants the
+  -- second pair of eyes.
+  ('issued',           'cancelled',        'adata_checker');
 -- Note there is no edge into 'matured' or 'overdue'. There is no such row to
 -- write, because there is no such stored state.
 
@@ -442,7 +449,8 @@ CREATE TYPE ledger.entry_kind AS ENUM (
   'entity_onboarded', 'user_created', 'user_removed',
   'programme_limit_set', 'issuer_certification_changed',
   -- legged: chain-relevant actions
-  'issuance', 'receipt_rejected', 'top_up', 'transfer', 'trade_settlement', 'redemption'
+  'issuance', 'receipt_rejected', 'payable_cancelled', 'top_up', 'transfer',
+  'trade_settlement', 'redemption'
 );
 CREATE TYPE ledger.chain_status AS ENUM ('not_applicable', 'pending', 'confirmed', 'failed');
 
@@ -655,6 +663,38 @@ CREATE CONSTRAINT TRIGGER assets_are_conserved
   AFTER INSERT ON ledger.journal_leg
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION ledger.assert_asset_conservation();
+
+-- (4b) A RECEIPT MEANS SOMETHING MOVED. PRD §10 gives issuance, trade
+-- settlement, transfer, redemption and top-up a simulated receipt, and those
+-- are exactly the five kinds that move value. An entry carrying a confirmed
+-- transaction hash and no legs is a receipt over a movement of nothing, which
+-- the explorer renders as a settled transfer.
+--
+-- The three invariants above cannot see it. An entry with no legs balances
+-- trivially, conserves every asset trivially, and disturbs no escrow, so the
+-- books stay HEALTHY while the audit trail gains an event that did not happen.
+-- Two commands reached this, `top_up` with no amountBase and a self-transfer,
+-- and both are refused by name in post.sql now. This is the backstop, so a
+-- sixth receipted command cannot reintroduce it quietly.
+--
+-- Deferred and keyed on the entry, because the legs are inserted after it.
+CREATE FUNCTION ledger.assert_receipt_moved_something() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_entry ledger.journal_entry;
+BEGIN
+  SELECT * INTO v_entry FROM ledger.journal_entry WHERE id = NEW.id;
+  IF v_entry.id IS NULL OR v_entry.chain_tx_hash IS NULL THEN RETURN NULL; END IF;
+  PERFORM 1 FROM ledger.journal_leg WHERE entry_id = v_entry.id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'entry % is a % carrying a chain receipt and no legs',
+      v_entry.id, v_entry.kind USING ERRCODE = 'ADA39';
+  END IF;
+  RETURN NULL;
+END $$;
+CREATE CONSTRAINT TRIGGER receipt_means_something_moved
+  AFTER INSERT ON ledger.journal_entry
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION ledger.assert_receipt_moved_something();
 
 -- (5) NO SILENT REWRITES. The journal is append-only once a receipt exists.
 --
@@ -872,6 +912,9 @@ BEGIN
   --   ADA30 last_user           ADA31 supplier_not_onboarded
   --   ADA32 issuer_not_certified ADA33 programme_limit_exceeded
   --   ADA34 not_institutional    ADA35 not_graded
+  --   ADA36 wrong_actor_role     ADA37 receipt_rejected
+  --   ADA38 below_min_price      ADA39 moved_nothing
+  --   ADA40 not_cancellable
   -- ADA22 to ADA26 exist because PRD §8 screen 2's manual entry is the first
   -- form a person types into freely. Folding them into not_permitted would
   -- tell a preparer who mistyped an invoice number that they lack permission,

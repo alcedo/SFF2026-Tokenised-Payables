@@ -60,6 +60,7 @@ const STATUS_TONE: Record<LifecycleStatus, string> = {
   matured: 'bg-caution-soft text-caution border-caution/30',
   settled: 'bg-surface-raised text-ink-muted border-rule-strong',
   overdue: 'bg-critical-soft text-critical border-critical/30',
+  cancelled: 'bg-surface-raised text-ink-muted border-rule-strong',
 };
 
 export function StatusChip({ status }: { status: LifecycleStatus }) {

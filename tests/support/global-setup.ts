@@ -6,8 +6,10 @@
  *
  * Templates are created only when missing, under an advisory lock, and are
  * never dropped here. Dropping and rebuilding them would pull the ground out
- * from under a run that is already cloning. Set REBUILD_TEMPLATES=1 to force a
- * rebuild after a schema change.
+ * from under a run that is already cloning. A `db/` edit needs no flag and no
+ * rebuild: the template name carries a digest of the SQL it is built from, so
+ * edited SQL asks for a name that does not exist yet. REBUILD_TEMPLATES=1
+ * still forces one, for a template corrupted by something other than an edit.
  *
  * Teardown removes only the clones this process made. An earlier version swept
  * every `adata_x_%` database, which deleted other runs' databases mid-test.
@@ -15,7 +17,14 @@
 
 import { execFileSync } from 'node:child_process';
 import { Pool } from 'pg';
-import { ADMIN_URL, TEMPLATES, urlFor, clonePrefix, type TemplateKind } from './database';
+import {
+  ADMIN_URL,
+  TEMPLATES,
+  TEMPLATE_SOURCES,
+  urlFor,
+  clonePrefix,
+  type TemplateKind,
+} from './database';
 
 const ROOT = new URL('../..', import.meta.url).pathname;
 const BUILD_LOCK = 20261001;
@@ -25,15 +34,6 @@ function psql(url: string, files: readonly string[]): void {
   for (const file of files) args.push('-f', `${ROOT}/${file}`);
   execFileSync('psql', [url, ...args], { stdio: 'pipe' });
 }
-
-// schema.sql defines ledger.post() as a stub that raises 'not implemented';
-// post.sql replaces it. Loading only the first gives a database that refuses
-// every command, so both always load, in this order.
-const SOURCES: Record<TemplateKind, readonly string[]> = {
-  bare: ['db/schema.sql', 'db/post.sql'],
-  fixtures: ['db/schema.sql', 'db/post.sql', 'db/fixtures.sql'],
-  seed: ['db/schema.sql', 'db/post.sql', 'db/seed.sql'],
-};
 
 async function exists(admin: Pool, name: string): Promise<boolean> {
   const { rows } = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [name]);
@@ -60,7 +60,7 @@ export async function setup(): Promise<void> {
         }
         if (await exists(admin, name)) continue;
         await admin.query(`CREATE DATABASE ${name}`);
-        psql(urlFor(name), SOURCES[kind]);
+        psql(urlFor(name), TEMPLATE_SOURCES[kind]);
       }
     } finally {
       await admin.query('SELECT pg_advisory_unlock($1)', [BUILD_LOCK]);

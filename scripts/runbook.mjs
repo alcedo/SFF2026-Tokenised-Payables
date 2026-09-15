@@ -95,8 +95,13 @@ try {
 
   await page.goto(`${BASE}/adata/approvals`, { waitUntil: 'domcontentloaded' });
   // Capture the reference the system assigned. The marketplace sorts by yield,
-  // not by age, so "the newest listing" is not a position on the page.
-  const created = (await page.locator('body').innerText()).match(/TP-2026-\d{4}/)?.[0];
+  // not by age, so "the newest listing" is not a position on the page. Read it
+  // off the queue row that still offers Submit, because the chrome strip names
+  // a payable of its own on every screen and a body-wide match can pick that.
+  const waiting = page
+    .locator('section', { has: page.getByRole('button', { name: 'Submit for approval' }) })
+    .first();
+  const created = (await waiting.innerText()).match(/TP-2026-\d{4}/)?.[0];
   if (!created) throw new Error('could not read the new payable reference');
   await clickThrough('Submit for approval');
   await say('submits it for approval');

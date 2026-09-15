@@ -33,7 +33,7 @@ display unit. Rounding is half away from zero and happens in exactly one place,
 `money.roundDiv`. A float anywhere in the money path fails a check in
 `npm test`.
 
-The payable lifecycle has six stored states and its legal edges are **rows** in
+The payable lifecycle has seven stored states and its legal edges are **rows** in
 `app.lifecycle_edge`, not code. Read them from the database rather than
 hardcoding them. `matured` and `overdue` are derived from the clock in
 TypeScript and never stored.

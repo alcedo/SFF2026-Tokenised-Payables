@@ -33,7 +33,7 @@ fixes the precedence, and the matrix confirms it cell by cell.
 | Situation | Guard that fires | Cells |
 | --- | --- | --- |
 | Illegal edge, any companion column state | trigger `payable_lifecycle_edge`, `ADA01` | 25 of matrix 1, 16 of matrix 3 |
-| Legal edge `approved -> certified`, `grade IS NULL` | CHECK `graded_before_certified`, `23514` | `certify` with no grade |
+| `certify` with `grade IS NULL`, any state | in-command pre-check, `ADA35` | 3, and see finding 10 |
 | `issue_payable` from any state but `certified` | in-command pre-check, `ADA15` | 5 |
 | `settle_maturity` on a settled payable | in-command pre-check, `ADA16` | 1 |
 | `settle_maturity` before maturity | in-command pre-check, `ADA12` | beats `ADA01`, tested separately |
@@ -58,6 +58,14 @@ Two orderings are worth naming because they hide a friendlier message:
   two bid statuses directly to put that guard under test at all.
 
 ## 1. `withdraw_bid` has no row check, so it succeeds against anything
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `withdraw_bid` reads the row first and answers `ADA11 no such bid` or `ADA11 bid is <status>`.
+
+The entry below is the state before that change.
+
 
 File: `db/post.sql:577-579`
 
@@ -89,6 +97,14 @@ exist`, `should refuse withdraw_bid for a bid that has already been accepted`.
 
 ## 2. `accept_bid` on an unknown bid id is refused for the wrong reason
 
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. `accept_bid` answers `ADA11 no such bid`.
+
+The entry below is the state before that change.
+
+
 File: `db/post.sql:609-612`
 
 ```sql
@@ -116,6 +132,14 @@ the message sends the operator to the wrong screen.
 `it.fails` case: `should refuse accept_bid for a bid id that does not exist`.
 
 ## 3. The receipt guard is skipped before issuance, for the same NULL reason
+
+**FIXED** as part of the NULL-guard family. A guard comparing against a column
+that is NULL when the row was not found did not fire, so execution fell through
+to whatever failed next. Every site in `db/post.sql` now checks for the missing
+row, or the absent field, first. The branch answers `ADA15 payable <ref> has not been issued yet, so there is nothing to take delivery of` before it reaches the CHECK.
+
+The entry below is the state before that change.
+
 
 File: `db/post.sql:747-752`
 
@@ -177,6 +201,11 @@ design, that is wrong.
 
 ## 5. `app.lifecycle_edge.actor_role` is a dead column
 
+**FIXED.** `app.assert_edge_actor` in `db/post.sql` reads the column on all five
+edges and refuses any other actor with `ADA36`. See finding 1 of
+`findings/decision-tables.md` for what replaced it. The entry below is the state
+before that change.
+
 File: `db/schema.sql:320-334` defines the column and populates it with a role
 per edge. `app.enforce_lifecycle_edge()` at `db/schema.sql:335-344` selects on
 `(from_state, to_state)` only.
@@ -185,11 +214,12 @@ Reproduction: `machine 1 > accepts every legal edge from an actor holding the
 wrong role` drives the whole chain, `submit` through `settle_maturity`, as a
 supplier user. All five edges are accepted.
 
-`tests/support/CONTRACT.md` already states that role and identity rules are not
-enforced in the database, so this is consistent with the design rather than a
-regression. It is recorded because the column reads as a rule: a contributor
-adding a sixth edge will fill in an `actor_role` believing it constrains
-something.
+`tests/support/CONTRACT.md` stated that role and identity rules were not
+enforced in the database, so this was consistent with the design rather than a
+regression. It was recorded because the column read as a rule: a contributor
+adding an edge would fill in an `actor_role` believing it constrained
+something. It now does, and the sixth edge added since, `issued -> cancelled`,
+inherited enforcement from its row without a line of its own.
 
 ## 6. `set_certification` has no ordering at all
 
@@ -206,7 +236,7 @@ issue under this programme`, and one `set_certification` back to `certified`
 makes the very next issuance succeed. There is no intermediate state, no second
 approver, and no record of review beyond the journal entry that the change
 happened. Compared with the obligation lifecycle, which spends an entire table
-and a trigger on five edges, the issuer machine that gates every issuance has
+and a trigger on its edges, the issuer machine that gates every issuance has
 no machine at all.
 
 ## 7. `create_payable` cannot accept a caller-supplied `payableId`
@@ -262,6 +292,92 @@ No command does this, so it is an asymmetry rather than a live defect, and it
 is recorded so that the contrast with machine 1 is deliberate rather than
 accidental. It is also what makes findings 3's CHECK the only backstop: there
 is no trigger behind it.
+
+## 11. The trade gate refused a pending receipt but not a rejected one
+
+**FIXED.** Both gates now refuse anything that is not `accepted`, and name a
+rejection when that is what they found.
+
+Found while adding the `cancelled` state, not by the suite. `db/post.sql`
+refused a trade on `receipt_status = 'pending'` in two places, the `transfer`
+branch and `publish_listing`. `src/core/lifecycle.canTradeReceipt` reads the
+rule as `receipt === 'accepted'` and every screen gates on that, and
+`docs/ASSUMPTIONS.md` says a payable "cannot be listed or transferred until
+accepted". The database was the loosest of the three, which is the direction
+that matters: the UI drew no button, so nothing in the product exercised the
+gap, and nothing in the suites looked for it.
+
+**Impact.** A rejection returns the whole quantity to the anchor's own wallet.
+From there the anchor could transfer or list it, and whoever received it held a
+token that `settle_maturity` refuses to pay (`ADA37`) and that `cancel_payable`
+can no longer burn, because the anchor no longer holds the face (`ADA40`). The
+tokens would sit outstanding against an obligation nobody can discharge and
+nobody can withdraw.
+
+The `ADA37` guard is what made this reachable, so it dates from the commit that
+stopped a rejected payable redeeming for free rather than from the original
+design. Cancellation is what makes it matter: the refused payable now has
+exactly one way out, and it only works while the quantity is still whole and
+still in the anchor's wallet.
+
+**Reproduction.** `machine 4 > refuses to move a rejected payable, which is the
+only place it can be withdrawn from`: reject a receipt, then try both a
+transfer and a listing from the anchor's wallet, then cancel it.
+
+```
+ADA15 payable RC-rejected-trade was rejected by its supplier and cannot be traded
+```
+
+## 10. The suite ran dark for four of its five machines
+
+Found while triaging this file, not by the suite. Recorded here because it
+invalidates the cell counts above for every run between `bd17de7` and the
+commit that carries this note.
+
+`c2c8720 fix(certify): grade on the admin path before certification`, merged
+into main at `bd17de7` after this suite was written at `842123c`, added a guard
+to `ledger.post()`:
+
+```sql
+IF v_kind = 'certify' AND v_payable.grade IS NULL THEN
+  RAISE EXCEPTION 'payable % has no grade yet', v_payable.ref USING ERRCODE = 'ADA35';
+END IF;
+```
+
+It reads the **stored** grade, and it runs before the `UPDATE` that would apply
+a grade carried on the intent. So `{kind: 'certify', grade: 'AAA'}` in one
+command is refused, always. `park()` posted exactly that shape, so every
+`beforeAll` that parks a payable past `approved` threw.
+
+Vitest reports a suite whose `beforeAll` throws as **skipped**, not failed. The
+result was 34 of 38 tests never running while the file reported one failure, and
+`npm test` overall reporting `3 failed | 1178 passed | 167 skipped`.
+
+Reproduced directly against a seeded database rather than inferred from the
+test:
+
+```
+NOTICE:  RESULT: certify-with-inline-grade REFUSED sqlstate=ADA35 msg=payable PROBE-1 has no grade yet
+```
+
+`db/post.sql` is correct and `tests/ledger/lifecycle.sql` lines 134 to 165
+already assert the two-step flow, including `PASS  certify without a grade is
+refused by name`. The suite was what had drifted.
+
+**Repair.** `park()` now posts `grade` and then `certify`. Three matrix cells
+moved with it, and all three moved to a better answer:
+
+| cell | before `c2c8720` | now |
+| --- | --- | --- |
+| `draft/certify` | `ADA01 illegal lifecycle transition draft -> certified` | `ADA35 payable ... has no grade yet` |
+| `pending_approval/certify` | `ADA01` | `ADA35` |
+| `approved/certify` | accepted | `ADA35` |
+
+Finding 3's table row `Legal edge approved -> certified, grade IS NULL | CHECK
+graded_before_certified, 23514` is therefore obsolete. The in-command guard now
+fires first and `graded_before_certified` is unreachable from the command
+surface. `it('lets the row CHECK win over the edge trigger when the edge itself
+is legal')` was renamed and rewritten to assert that.
 
 ## What held
 

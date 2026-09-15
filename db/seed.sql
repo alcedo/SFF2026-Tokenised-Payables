@@ -302,7 +302,10 @@ END $$;
 
 -- PRD §12: "two competing bids on another seeded listing to make the bid book
 -- immediately visible." Both lenders bid on the 48,000 ticket, at a spread, so
--- the Offers screen has a real choice on it.
+-- the Offers screen has a real choice on it. The spread sits at and above the
+-- seller's 98.40% ask, not either side of it: ledger.post() refuses a bid below
+-- min_price_base, and a bid book whose best offer undercuts the published
+-- minimum would show the seller a choice they cannot take.
 DO $$
 DECLARE v_list uuid; v_face bigint := 480000000;
 BEGIN
@@ -315,7 +318,7 @@ BEGIN
   PERFORM pg_temp.act('bidbook-b', '11111111-0000-0000-0000-000000000007',
     jsonb_build_object('kind','place_bid','listingId',v_list,
       'bidderWallet','0xfe5700000000000000000000000000000000d902',
-      'priceBase',(v_face * 9810) / 10000,'fundingCode','XSGD'));
+      'priceBase',(v_face * 9860) / 10000,'fundingCode','XSGD'));
 END $$;
 
 -- ============================================================================

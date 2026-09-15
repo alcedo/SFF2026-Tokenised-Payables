@@ -19,9 +19,9 @@ describe('obligation machine: happy path', () => {
       submit: 'adata_preparer',
       approve: 'adata_checker',
       certify: 'straitsx_admin',
-      issue: 'adata_preparer',
+      issue: 'straitsx_admin',
       mature: 'adata_preparer',
-      settle: 'adata_checker',
+      settle: 'adata_preparer',
     };
 
     for (const event of PRD_HAPPY_PATH) {
