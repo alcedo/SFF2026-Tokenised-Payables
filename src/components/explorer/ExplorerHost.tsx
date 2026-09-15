@@ -84,7 +84,7 @@ function ExplorerDialog() {
       }}
     >
       {view.mode === 'closed' ? null : (
-        <div className="flex max-h-[min(90vh,840px)] w-[min(960px,calc(100vw-1.5rem))] flex-col">
+        <div className="flex max-h-[min(90vh,840px)] w-full flex-col">
           <header className="flex items-center justify-between gap-3 border-b border-rule px-3 py-2">
             <h2 className="text-[13px] font-semibold tracking-wide text-ink uppercase">{title}</h2>
             <button
