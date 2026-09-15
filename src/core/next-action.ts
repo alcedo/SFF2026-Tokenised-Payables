@@ -62,23 +62,39 @@ export function sourcePendingReceipt(snapshot: NextActionSnapshot): NextAction |
   );
 }
 
+export function lifecycleActionHref(
+  payable: NextActionPayable,
+  role: Role,
+): '/adata/approvals' | '/admin/grading' | null {
+  const { storedStatus } = payable;
+  if (
+    storedStatus !== 'draft' &&
+    storedStatus !== 'pending_approval' &&
+    storedStatus !== 'approved' &&
+    storedStatus !== 'certified'
+  ) {
+    return null;
+  }
+  const step = pendingStep(storedStatus);
+  if (!step || !step.actors.includes(role)) return null;
+  if (storedStatus === 'approved' && role === 'straitsx_admin') return '/admin/grading';
+  return '/adata/approvals';
+}
+
 export function sourceLifecycleYours(snapshot: NextActionSnapshot): NextAction | null {
   const { role } = snapshot.actor;
   for (const payable of snapshot.payables) {
-    const step = pendingStep(payable.storedStatus);
-    if (!step || !step.actors.includes(role)) continue;
+    const href = lifecycleActionHref(payable, role);
+    if (href === null) continue;
     if (payable.storedStatus === 'approved' && payable.grade === null) {
-      if (role !== 'straitsx_admin') continue;
       return yours(
         `Grade ${payable.ref}`,
-        '/admin/grading',
+        href,
         'Assign a sample grade, then certify it under the programme.',
       );
     }
-    const href =
-      role === 'straitsx_admin' && (payable.storedStatus === 'approved' || payable.storedStatus === 'certified')
-        ? '/admin/grading'
-        : '/adata/approvals';
+    const step = pendingStep(payable.storedStatus);
+    if (!step) continue;
     const verb =
       payable.storedStatus === 'draft'
         ? `Submit ${payable.ref}`

@@ -10,7 +10,8 @@ import { execFileSync } from 'node:child_process';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
 import { closePool } from '@/db/client';
-import { loadNextAction } from '@/app/next-action-data';
+import { loadNextAction, loadNextActionSnapshot } from '@/app/next-action-data';
+import { deriveTabCounts } from '@/core/tab-badges';
 import {
   readBalances,
   readBids,
@@ -336,5 +337,39 @@ describe('the next action for a seeded persona', () => {
       heading: 'Programme is current.',
       detail: 'Open Explorer to show the trail, or Accounts to add a user.',
     });
+  });
+});
+
+describe('tab counts for a seeded persona', () => {
+  it('badges Hsu Po-Chun settlement only', async () => {
+    const personas = await readPersonas();
+    const hsu = personas.find((p) => p.name === 'Hsu Po-Chun');
+    expect(hsu).toBeDefined();
+    expect(deriveTabCounts(await loadNextActionSnapshot(hsu!, world))).toEqual({
+      '/adata/settlement': 1,
+    });
+  });
+
+  it('sums Lin Ya-Ting offers from placed bids on her listing', async () => {
+    const personas = await readPersonas();
+    const lin = personas.find((p) => p.name === 'Lin Ya-Ting');
+    expect(lin).toBeDefined();
+    expect(deriveTabCounts(await loadNextActionSnapshot(lin!, world))).toEqual({
+      '/supplier/offers': 2,
+    });
+  });
+
+  it('gives Nadia Rahman no queue badges', async () => {
+    const personas = await readPersonas();
+    const nadia = personas.find((p) => p.name === 'Nadia Rahman');
+    expect(nadia).toBeDefined();
+    expect(deriveTabCounts(await loadNextActionSnapshot(nadia!, world))).toEqual({});
+  });
+
+  it('does not badge the marketplace for Rina Okafor', async () => {
+    const personas = await readPersonas();
+    const rina = personas.find((p) => p.name === 'Rina Okafor');
+    expect(rina).toBeDefined();
+    expect(deriveTabCounts(await loadNextActionSnapshot(rina!, world))).toEqual({});
   });
 });

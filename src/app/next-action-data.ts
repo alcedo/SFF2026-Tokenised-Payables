@@ -1,13 +1,13 @@
-import { deriveNextAction, type NextAction } from '@/core/next-action';
+import { deriveNextAction, type NextAction, type NextActionSnapshot } from '@/core/next-action';
 import { readHoldings, readMarketplace, readPayables, type Persona, type World } from '@/db/read';
 
-export async function loadNextAction(persona: Persona, world: World): Promise<NextAction> {
+export async function loadNextActionSnapshot(persona: Persona, world: World): Promise<NextActionSnapshot> {
   const [payables, holdings, listings] = await Promise.all([
     readPayables(world),
     readHoldings(persona.wallet, world),
     readMarketplace(world),
   ]);
-  return deriveNextAction({
+  return {
     actor: { role: persona.role, name: persona.name, wallet: persona.wallet },
     payables: payables.map((p) => ({
       id: p.id,
@@ -33,5 +33,9 @@ export async function loadNextAction(persona: Persona, world: World): Promise<Ne
       sellerWallet: l.sellerWallet,
       bidCount: l.bidCount,
     })),
-  });
+  };
+}
+
+export async function loadNextAction(persona: Persona, world: World): Promise<NextAction> {
+  return deriveNextAction(await loadNextActionSnapshot(persona, world));
 }

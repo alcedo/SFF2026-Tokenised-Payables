@@ -131,6 +131,30 @@ describe('deriveNextAction', () => {
     });
   });
 
+  it('sends the admin to the approval queue to issue a certified payable', () => {
+    const snapshot: NextActionSnapshot = {
+      actor: actor('straitsx_admin'),
+      payables: [
+        {
+          id: 'p1',
+          ref: 'TP-2026-0203',
+          storedStatus: 'certified',
+          status: 'certified',
+          daysRemaining: 70,
+          grade: 'A',
+        },
+      ],
+      holdings: [],
+      listings: [],
+    };
+    expect(deriveNextAction(snapshot)).toEqual({
+      kind: 'yours',
+      verb: 'Issue TP-2026-0203',
+      href: '/adata/approvals',
+      detail: 'Next step: issue it to the supplier.',
+    });
+  });
+
   it('asks the admin to grade an approved payable that has no grade', () => {
     const snapshot: NextActionSnapshot = {
       actor: actor('straitsx_admin'),
