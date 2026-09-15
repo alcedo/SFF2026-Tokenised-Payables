@@ -685,6 +685,181 @@ export async function readEvents(
   }));
 }
 
+export interface ReceiptMovement {
+  legNo: number;
+  direction: 'debit' | 'credit';
+  amountBase: BaseUnits;
+  accountPurpose: string;
+  wallet: string | null;
+  entityName: string | null;
+  cashAsset: Asset | null;
+  tokenId: string | null;
+}
+
+export interface SimulatedReceipt {
+  simulated: true;
+  txHash: string;
+  blockNumber: bigint;
+  status: 'confirmed' | 'failed';
+  kind: string;
+  worldDate: IsoDate;
+  actorName: string;
+  payableRef: string | null;
+  fundingAsset: Asset | null;
+  sourceAmountBase: BaseUnits | null;
+  fxRateE6: bigint | null;
+  movements: ReceiptMovement[];
+}
+
+/**
+ * One mocked chain receipt, looked up by hash. Null when the hash is unknown
+ * or the journal row is audit-only (no chain_tx_hash).
+ */
+export async function readSimulatedReceipt(txHash: string): Promise<SimulatedReceipt | null> {
+  const rows = await query<{
+    entry_id: string;
+    seq: bigint;
+    kind: string;
+    world_date: Date;
+    tx_hash: string;
+    block_number: bigint;
+    chain_status: 'confirmed' | 'failed';
+    actor_name: string;
+    payable_ref: string | null;
+    funding_code: Asset | null;
+    source_amount_base: bigint | null;
+    fx_rate_e6: bigint | null;
+    leg_no: number;
+    amount: bigint;
+    purpose: string;
+    wallet_address: string | null;
+    entity_name: string | null;
+    cash_code: Asset | null;
+    token_id: string | null;
+  }>(
+    `SELECT e.id AS entry_id, e.seq, e.kind::text, e.world_date,
+            e.chain_tx_hash AS tx_hash, e.chain_block_number AS block_number,
+            e.chain_status::text AS chain_status,
+            u.name AS actor_name, p.ref AS payable_ref,
+            e.funding_code, e.source_amount_base, e.fx_rate_e6,
+            l.leg_no, l.amount, a.purpose::text AS purpose,
+            a.wallet_address, ent.name AS entity_name,
+            s.cash_code, s.token_id::text AS token_id
+       FROM ledger.journal_entry e
+       JOIN app.app_user u ON u.id = e.actor_user_id
+       LEFT JOIN app.payable p ON p.id = e.payable_id
+       JOIN ledger.journal_leg l ON l.entry_id = e.id
+       JOIN ledger.account a ON a.id = l.account_id
+       JOIN ledger.asset s ON s.id = l.asset_id
+       LEFT JOIN app.entity ent ON ent.id = (
+         SELECT w.entity_id FROM app.wallet w WHERE w.address = a.wallet_address
+       )
+      WHERE e.chain_tx_hash = $1
+      ORDER BY l.leg_no`,
+    [txHash],
+  );
+  const first = rows[0];
+  if (!first) return null;
+  return {
+    simulated: true,
+    txHash: first.tx_hash,
+    blockNumber: first.block_number,
+    status: first.chain_status,
+    kind: first.kind,
+    worldDate: parseIsoDate(first.world_date.toISOString().slice(0, 10)),
+    actorName: first.actor_name,
+    payableRef: first.payable_ref,
+    fundingAsset: first.funding_code,
+    sourceAmountBase:
+      first.source_amount_base === null ? null : fromBaseUnits(first.source_amount_base),
+    fxRateE6: first.fx_rate_e6,
+    movements: rows.map((r) => ({
+      legNo: Number(r.leg_no),
+      direction: r.amount < 0n ? 'debit' : 'credit',
+      amountBase: fromBaseUnits(r.amount < 0n ? -r.amount : r.amount),
+      accountPurpose: r.purpose,
+      wallet: r.wallet_address,
+      entityName: r.entity_name,
+      cashAsset: r.cash_code,
+      tokenId: r.token_id,
+    })),
+  };
+}
+
+export interface SerialEventRow {
+  entryId: string;
+  seq: string;
+  kind: string;
+  worldDate: IsoDate;
+  actorName: string;
+  actorRole: Role;
+  payableRef: string | null;
+  txHash: string | null;
+  blockNumber: string | null;
+  fundingAsset: Asset | null;
+  sourceAmountBase: string | null;
+}
+
+export function serializeEvent(e: EventRow): SerialEventRow {
+  return {
+    entryId: e.entryId,
+    seq: String(e.seq),
+    kind: e.kind,
+    worldDate: e.worldDate,
+    actorName: e.actorName,
+    actorRole: e.actorRole,
+    payableRef: e.payableRef,
+    txHash: e.txHash,
+    blockNumber: e.blockNumber === null ? null : String(e.blockNumber),
+    fundingAsset: e.fundingAsset,
+    sourceAmountBase: e.sourceAmountBase === null ? null : String(e.sourceAmountBase),
+  };
+}
+
+export interface SerialReceipt {
+  simulated: true;
+  txHash: string;
+  blockNumber: string;
+  status: 'confirmed' | 'failed';
+  kind: string;
+  worldDate: IsoDate;
+  actorName: string;
+  payableRef: string | null;
+  fundingAsset: Asset | null;
+  sourceAmountBase: string | null;
+  fxRateE6: string | null;
+  movements: Array<{
+    legNo: number;
+    direction: 'debit' | 'credit';
+    amountBase: string;
+    accountPurpose: string;
+    wallet: string | null;
+    entityName: string | null;
+    cashAsset: Asset | null;
+    tokenId: string | null;
+  }>;
+}
+
+export function serializeReceipt(r: SimulatedReceipt): SerialReceipt {
+  return {
+    simulated: true,
+    txHash: r.txHash,
+    blockNumber: String(r.blockNumber),
+    status: r.status,
+    kind: r.kind,
+    worldDate: r.worldDate,
+    actorName: r.actorName,
+    payableRef: r.payableRef,
+    fundingAsset: r.fundingAsset,
+    sourceAmountBase: r.sourceAmountBase === null ? null : String(r.sourceAmountBase),
+    fxRateE6: r.fxRateE6 === null ? null : String(r.fxRateE6),
+    movements: r.movements.map((m) => ({
+      ...m,
+      amountBase: String(m.amountBase),
+    })),
+  };
+}
+
 // --- programme totals -------------------------------------------------------
 
 export interface ProgrammeTotals {

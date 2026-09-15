@@ -23,6 +23,7 @@ import {
   readPayables,
   readPersonas,
   readProgrammeTotals,
+  readSimulatedReceipt,
   readWorld,
   type World,
 } from '@/db/read';
@@ -228,6 +229,19 @@ describe('audit history', () => {
     expect(issuance.txHash).toMatch(/^0x[0-9a-f]{64}$/);
     const published = events.find((e) => e.kind === 'listing_published')!;
     expect(published.txHash).toBeNull();
+  });
+
+  it('reopens a chain receipt by hash with its legs', async () => {
+    const events = await readEvents({ limit: 200 });
+    const issuance = events.find((e) => e.kind === 'issuance' && e.txHash)!;
+    const receipt = await readSimulatedReceipt(issuance.txHash!);
+    expect(receipt).not.toBeNull();
+    expect(receipt!.simulated).toBe(true);
+    expect(receipt!.txHash).toBe(issuance.txHash);
+    expect(receipt!.kind).toBe('issuance');
+    expect(receipt!.movements.length).toBeGreaterThan(0);
+    expect(receipt!.movements.every((m) => m.amountBase > 0n)).toBe(true);
+    expect(await readSimulatedReceipt('0xdeadbeef')).toBeNull();
   });
 });
 

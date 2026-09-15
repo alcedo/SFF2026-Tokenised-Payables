@@ -13,11 +13,13 @@ import {
   StatusChip,
 } from '@/components/primitives';
 import { ActionButton } from '@/components/ActionButton';
+import { NextActionStrip } from '@/components/NextActionStrip';
 import { acceptReceipt, rejectReceipt } from '@/app/actions';
 import { currentPersona } from '@/app/session';
+import { deriveNextAction } from '@/core/next-action';
 import { formatUnits } from '@/core/money';
 import { priceFromPercent, quote } from '@/core/pricing';
-import { readBalances, readHoldings, readWorld } from '@/db/read';
+import { readBalances, readHoldings, readMarketplace, readWorld } from '@/db/read';
 
 /**
  * PRD §8 screen 6. The supplier's inbox and holdings.
@@ -35,10 +37,31 @@ const INDICATIVE_ASK_BPS = 9785; // 97.85%, the PRD's worked example
 
 export default async function SupplierPage() {
   const [persona, world] = await Promise.all([currentPersona(), readWorld()]);
-  const [holdings, balances] = await Promise.all([
+  const [holdings, balances, listings] = await Promise.all([
     readHoldings(persona.wallet, world),
     readBalances(persona.wallet),
+    readMarketplace(world),
   ]);
+  const next = deriveNextAction({
+    actor: { role: persona.role, name: persona.name, wallet: persona.wallet },
+    payables: [],
+    holdings: holdings.map((h) => ({
+      receipt: h.receipt,
+      freeBase: h.freeBase,
+      payable: {
+        id: h.payable.id,
+        ref: h.payable.ref,
+        status: h.payable.status,
+        daysRemaining: h.payable.daysRemaining,
+      },
+    })),
+    listings: listings.map((l) => ({
+      id: l.id,
+      targetRef: l.targetRef,
+      sellerWallet: l.sellerWallet,
+      bidCount: l.bidCount,
+    })),
+  });
 
   const totalFace = holdings.reduce<bigint>((acc, h) => acc + h.quantityBase, 0n);
 
@@ -51,6 +74,8 @@ export default async function SupplierPage() {
           or part of one for early payment, or hold it to maturity.
         </p>
       </div>
+
+      <NextActionStrip action={next} />
 
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <Stat label="Payables held" value={holdings.length} />

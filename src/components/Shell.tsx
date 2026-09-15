@@ -1,6 +1,8 @@
 import Link from 'next/link';
 
 import { DemoControls } from './DemoControls';
+import { ExplorerHost } from './explorer/ExplorerHost';
+import { ExplorerOpenButton } from './explorer/ExplorerOpenButton';
 import { Address } from './primitives';
 import { currentPersona, navFor } from '@/app/session';
 import { formatUnits } from '@/core/money';
@@ -73,7 +75,9 @@ export async function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
-          <dl className="chrome-balances pb-1.5">
+          <div className="chrome-meta">
+            <ExplorerOpenButton />
+            <dl className="chrome-balances pb-1.5">
             {(['XUSD', 'USDC', 'USDT', 'XSGD'] as const).map((asset) => (
               <div key={asset} className="text-right">
                 <dt className="text-[10px] tracking-wide text-ink-faint uppercase">{asset}</dt>
@@ -82,11 +86,13 @@ export async function Shell({ children }: { children: React.ReactNode }) {
                 </dd>
               </div>
             ))}
-          </dl>
+            </dl>
+          </div>
         </div>
       </header>
 
       <main className="mx-auto min-w-0 max-w-[1600px] p-3">{children}</main>
+      <ExplorerHost />
     </div>
   );
 }
