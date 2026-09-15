@@ -353,24 +353,23 @@ END $$;
 -- ============================================================================
 --  The Series — PRD §6 and §12
 -- ============================================================================
--- Twelve small invoices with the same anchor, currency and maturity, bundled
--- into one lot worth a bank's time. 180,000 XUSD across twelve 15,000 tickets.
+-- Six small invoices with the same anchor, currency and maturity, bundled
+-- into one lot worth a bank's time. 180,000 XUSD across six 30,000 tickets.
 INSERT INTO app.series (id, ref, anchor_id, maturity_date, grade, grade_rationale)
 VALUES ('5e000000-0000-0000-0000-000000000430', 'SERIES-2026-Q4-30D',
         'e0000000-0000-0000-0000-00000000ada7', pg_temp.t0() + 30, 'A',
-        'Aggregate of twelve tier-2 suppliers against one anchor obligation. The grade is assigned to the lot, not to its members. Sample value assigned by StraitsX, not an external rating.');
+        'Aggregate of six tier-2 suppliers against one anchor obligation. The grade is assigned to the lot, not to its members. Sample value assigned by StraitsX, not an external rating.');
 
 DO $$
 DECLARE
   v_names text[] := ARRAY[
     'Cheng Hui Fasteners','Tai Yuan Coatings','Bao Sheng Tooling','Jin Li Connectors',
-    'He Feng Castings','Wan Ho Bearings','Shun Da Seals','Li Chuan Wiring',
-    'Guo Xin Enclosures','Pei Yu Optics','Zhong An Springs','Mao Chi Laminates'];
+    'He Feng Castings','Wan Ho Bearings'];
   v_series uuid := '5e000000-0000-0000-0000-000000000430';
   v_holder text := '0x6d1470000000000000000000000000000000b43c';
   v_entity uuid; v_payable uuid; i int;
 BEGIN
-  FOR i IN 1..12 LOOP
+  FOR i IN 1..6 LOOP
     v_entity  := ('e0000000-0000-0000-0000-0000000005' || lpad(i::text, 2, '0'))::uuid;
     v_payable := ('9a000000-0000-0000-0000-0000000005' || lpad(i::text, 2, '0'))::uuid;
 
@@ -384,7 +383,7 @@ BEGIN
     VALUES (v_payable, 'TP-2026-05' || lpad(i::text, 2, '0'),
             'e0000000-0000-0000-0000-00000000ada7', v_entity,
             'INV-TW-7' || lpad((3000 + i)::text, 4, '0'),
-            150000000, pg_temp.t0() + 30, 'A',
+            300000000, pg_temp.t0() + 30, 'A',
             'Series member. The lot carries the grade; see SERIES-2026-Q4-30D. Sample value.',
             'certified', v_series);
 

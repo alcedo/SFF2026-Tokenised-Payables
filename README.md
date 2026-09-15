@@ -38,9 +38,9 @@ lender, and the StraitsX admin — covering every screen PRD §8 lists:
 | **Admin** | issuer certification · grading · accounts · programme oversight · overdue and recovery |
 | **Anyone** | onboarding with a custodial wallet · transfer · mock chain explorer · reset |
 
-The demo world seeds itself with 26 organisations, 19 accounts, 29 payables
+The demo world seeds itself with 20 organisations, 19 accounts, 23 payables
 across all three grades and 30 to 180 day tenors, nine open listings with live
-bids, a 12-invoice series lot, a settled position, an overdue one, and a
+bids, a 6-invoice series lot, a settled position, an overdue one, and a
 24-invoice ERP register. T0 is the day the world was seeded, so the tenors stay
 realistic however long the URL stays up.
 

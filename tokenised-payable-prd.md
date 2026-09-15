@@ -290,7 +290,7 @@ Use fictional supplier names, invoice numbers, financials, grades, and histories
 | TP-2026-0143 | Ming Kuo Components | 1,200,000 | 30 | AAA | 99.42 | 7.1% | Issued / Listed |
 | TP-2026-0141 | Chien Yu Precision | 250,000 | 90 | AA | 97.85 | 8.9% | Issued / Listed |
 | TP-2026-0142 | Hsin Ta Electronics | 48,000 | 60 | A | 98.40 | 9.9% | Issued / Listed |
-| SERIES-2026-Q4-30D | 12 fictional suppliers; one current holder | 180,000 | 30 | A | 99.20 | 9.8% | Issued / Listed |
+| SERIES-2026-Q4-30D | 6 invoices; one current holder | 180,000 | 30 | A | 99.20 | 9.8% | Issued / Listed |
 | TP-2026-0128 | Yung Sheng Metals | 320,000 | — | AA | — | 9.2% realised annualised yield | Settled |
 | TP-2026-0119 | Fu Hsing Plastics | 75,000 | Past due | A | — | — | Overdue / showcase demo recovery |
 

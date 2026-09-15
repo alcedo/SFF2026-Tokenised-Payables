@@ -86,10 +86,10 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS  TP-2026-0119 is % days past due and unpaid', -v_n;
 
-  -- PRD §12: twelve fictional suppliers, one current holder.
+  -- PRD §12: six invoices, one current holder.
   SELECT count(*) INTO v_n FROM app.payable p
     JOIN app.series s ON s.id = p.series_id WHERE s.ref = 'SERIES-2026-Q4-30D';
-  IF v_n <> 12 THEN RAISE EXCEPTION 'FAIL: the series has % members, expected 12', v_n; END IF;
+  IF v_n <> 6 THEN RAISE EXCEPTION 'FAIL: the series has % members, expected 6', v_n; END IF;
 
   SELECT count(DISTINCT a.wallet_address) INTO v_n
     FROM app.payable p
@@ -99,7 +99,7 @@ BEGIN
     JOIN ledger.account a ON a.id = b.account_id AND a.class = 'wallet'
    WHERE s.ref = 'SERIES-2026-Q4-30D';
   IF v_n <> 1 THEN RAISE EXCEPTION 'FAIL: the series has % holders, expected 1', v_n; END IF;
-  RAISE NOTICE 'PASS  the series bundles 12 invoices under a single holder';
+  RAISE NOTICE 'PASS  the series bundles 6 invoices under a single holder';
 
   -- PRD §12: at least two competing bids so the bid book is visible on arrival.
   SELECT count(*) INTO v_n FROM app.bid b

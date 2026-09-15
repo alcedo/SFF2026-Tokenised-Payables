@@ -160,7 +160,7 @@ export default async function PayableDetail({ params }: { params: Promise<{ id: 
             PRD §8 screen 10: "Expand a Series to inspect its members."
             A <details> rather than a client component: the rows are already
             on the page, so expanding is a browser affordance and costs no
-            round trip. Collapsed by default because twelve invoices sharing
+            round trip. Collapsed by default because six invoices sharing
             one anchor and one maturity is a detail, not the headline.
           */}
           {members.length > 0 ? (

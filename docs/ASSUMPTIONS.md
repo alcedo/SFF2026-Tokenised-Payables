@@ -159,7 +159,7 @@ fresh world.
 
 ## Suppliers on the ERP register versus suppliers on the platform
 
-Not every supplier ADATA buys from has an account. The seed has twelve tier-2
+Not every supplier ADATA buys from has an account. The seed has six tier-2
 suppliers who originated the invoices in the series lot, sold their whole
 position, and have no live account — which is a real state, not a broken one.
 
