@@ -32,8 +32,16 @@ type ObligationState =
   | 'approved'
   | 'certified'
   | 'issued'
-  | 'settled';
+  | 'settled'
+  | 'cancelled';
 
+/**
+ * The linear walk, which is what `park()` drives and what the matrices below
+ * enumerate. `cancelled` is stored but is not on it: it branches off `issued`
+ * when a supplier rejects delivery, the way `overdue` branches off `matured`.
+ * It has its own cases beside machine 1 rather than a column in a walk it does
+ * not belong to.
+ */
 const LIFECYCLE_ORDER: readonly ObligationState[] = [
   'draft',
   'pending_approval',
@@ -41,6 +49,10 @@ const LIFECYCLE_ORDER: readonly ObligationState[] = [
   'certified',
   'issued',
   'settled',
+  // Not on the spine. `cancelled` is reached from `issued` by way of a
+  // rejection, so `park` treats it the way it treats `settled`: walk to
+  // `issued`, then take the branch.
+  'cancelled',
 ];
 
 const FACE_BASE = 1_000_000;
@@ -150,6 +162,8 @@ async function createDraft(world: World, ref: string, termsDays: number): Promis
  * is both the honest way to reach a starting state and a second exercise of
  * every command in the chain. `settled` stops at `issued`, since settlement
  * needs the world clock past maturity and that is a decision for the caller.
+ * `cancelled` also stops at `issued` and then takes its own branch, which needs
+ * no clock: the supplier refuses delivery and the checker withdraws it.
  *
  * Each edge posts as the role app.lifecycle_edge names for it, or ledger.post
  * refuses it with ADA36. grade is not a lifecycle edge, so it carries no role
@@ -162,7 +176,9 @@ async function park(
   termsDays: number,
 ): Promise<string> {
   const payableId = await createDraft(world, ref, termsDays);
-  const stop = LIFECYCLE_ORDER.indexOf(target === 'settled' ? 'issued' : target);
+  const stop = LIFECYCLE_ORDER.indexOf(
+    target === 'settled' || target === 'cancelled' ? 'issued' : target,
+  );
   for (let step = 1; step <= stop; step += 1) {
     tokenSeq += 1;
     const state = LIFECYCLE_ORDER[step];
@@ -194,6 +210,21 @@ async function park(
       const done = await post(world.pool, intent, { actorUserId: actor });
       if (!done.ok) {
         throw new Error(`could not park ${ref} at ${state}: ${done.code} ${done.message}`);
+      }
+    }
+  }
+  if (target === 'cancelled') {
+    const branch: [Record<string, unknown>, string][] = [
+      [
+        { kind: 'reject_receipt', payableId, holderWallet: world.supplierWallet },
+        world.supplier,
+      ],
+      [{ kind: 'cancel_payable', payableId }, world.checker],
+    ];
+    for (const [intent, actor] of branch) {
+      const done = await post(world.pool, intent, { actorUserId: actor });
+      if (!done.ok) {
+        throw new Error(`could not park ${ref} at cancelled: ${done.code} ${done.message}`);
       }
     }
   }
@@ -241,8 +272,10 @@ async function bidStatusOf(pool: Pool, bidId: string): Promise<string> {
  * transition can only ever be refused by the edge trigger. Without this an
  * illegal edge and a missing grade would be indistinguishable in the matrix.
  */
-const NEEDS_GRADE = new Set<string>(['certified', 'issued', 'settled']);
-const NEEDS_ISSUANCE_COLUMNS = new Set<string>(['issued', 'settled']);
+// A cancelled payable was certified and issued before it was withdrawn, so it
+// carries the same columns a settled one does and the same CHECKs apply.
+const NEEDS_GRADE = new Set<string>(['certified', 'issued', 'settled', 'cancelled']);
+const NEEDS_ISSUANCE_COLUMNS = new Set<string>(['issued', 'settled', 'cancelled']);
 
 const FORCE_LIFECYCLE = `
   UPDATE app.payable
@@ -379,6 +412,7 @@ describe('machine 1: the obligation lifecycle', () => {
       'approved->certified': 'certify',
       'certified->issued': 'issue',
       'issued->settled': 'settle',
+      'issued->cancelled': 'cancel',
     };
     expect(
       edges.map((e) => `${e.from}->${e.to}: ${e.role}`).sort(),
@@ -389,7 +423,7 @@ describe('machine 1: the obligation lifecycle', () => {
     );
   });
 
-  it('stores exactly six obligation states and exactly five legal edges', async () => {
+  it('stores exactly seven obligation states and exactly six legal edges', async () => {
     expect(await enumLabels(db.pool, 'app.obligation_state')).toEqual([
       'draft',
       'pending_approval',
@@ -397,18 +431,20 @@ describe('machine 1: the obligation lifecycle', () => {
       'certified',
       'issued',
       'settled',
+      'cancelled',
     ]);
     expect(edges).toEqual([
       { from: 'approved', to: 'certified', role: 'straitsx_admin' },
       { from: 'certified', to: 'issued', role: 'straitsx_admin' },
       { from: 'draft', to: 'pending_approval', role: 'adata_preparer' },
+      { from: 'issued', to: 'cancelled', role: 'adata_checker' },
       { from: 'issued', to: 'settled', role: 'adata_preparer' },
       { from: 'pending_approval', to: 'approved', role: 'adata_checker' },
     ]);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('parks one payable in each of the six states through ordinary commands', async () => {
+  it('parks one payable in each of the seven states through ordinary commands', async () => {
     const landed: Record<string, string> = {};
     for (const state of LIFECYCLE_ORDER) landed[state] = await lifecycleOf(db.pool, parked[state]);
     expect(landed).toEqual({
@@ -418,11 +454,12 @@ describe('machine 1: the obligation lifecycle', () => {
       certified: 'certified',
       issued: 'issued',
       settled: 'settled',
+      cancelled: 'cancelled',
     });
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('accepts the five stored edges and refuses the other twenty-five with ADA01', async () => {
+  it('accepts the six stored edges and refuses the other thirty-six with ADA01', async () => {
     const observed: Record<string, string> = {};
     const expected: Record<string, string> = {};
 
@@ -437,13 +474,13 @@ describe('machine 1: the obligation lifecycle', () => {
       }
     }
 
-    expect(Object.keys(observed)).toHaveLength(30);
-    expect(Object.values(expected).filter((cell) => cell.startsWith('accepted'))).toHaveLength(5);
+    expect(Object.keys(observed)).toHaveLength(42);
+    expect(Object.values(expected).filter((cell) => cell.startsWith('accepted'))).toHaveLength(6);
     expect(observed).toEqual(expected);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
-  it('treats a same-state write as a free no-op on all six diagonal cells', async () => {
+  it('treats a same-state write as a free no-op on all seven diagonal cells', async () => {
     const observed: Record<string, string> = {};
     const expected: Record<string, string> = {};
     for (const state of LIFECYCLE_ORDER) {
@@ -510,6 +547,12 @@ describe('machine 1: the obligation lifecycle', () => {
             `ADA15: payable ${ref} is ${from} and must be certified before issuance -> ${from}`;
         } else if (command === 'settle_maturity' && from === 'settled') {
           expected[key] = `ADA16: payable ${ref} is already settled -> settled`;
+        } else if (command === 'settle_maturity' && from === 'cancelled') {
+          // A cancelled payable is a rejected one by construction, so the guard
+          // that stops a rejection redeeming answers first. ADA01 never gets
+          // the question.
+          expected[key] =
+            `ADA37: payable ${ref} was rejected by its supplier and has nobody to redeem to -> cancelled`;
         } else if (edgeKeys.has(`${from}->${to}`) && roleFor.get(`${from}->${to}`) !== 'straitsx_admin') {
           expected[key] =
             `ADA36: payable ${ref} moves from ${from} to ${to} on the ${roleFor.get(`${from}->${to}`)}, not the straitsx_admin -> ${from}`;
@@ -521,7 +564,7 @@ describe('machine 1: the obligation lifecycle', () => {
       }
     }
 
-    expect(Object.keys(observed)).toHaveLength(30);
+    expect(Object.keys(observed)).toHaveLength(35);
     expect(observed).toEqual(expected);
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });

@@ -60,18 +60,21 @@ suite.
 - Money is a whole number of base units in `bigint`. `BASE_UNITS_PER_UNIT` is
   `10_000n`, so one base unit is 0.0001 display units. Rounding is half away
   from zero, implemented once in `money.roundDiv`.
-- The obligation lifecycle has six stored states: `draft`, `pending_approval`,
-  `approved`, `certified`, `issued`, `settled`. The legal edges live as rows in
-  `app.lifecycle_edge`. Read them from the database rather than hardcoding
-  them. Illegal transitions raise `ADA01`.
+- The obligation lifecycle has seven stored states: `draft`, `pending_approval`,
+  `approved`, `certified`, `issued`, `settled`, `cancelled`. The legal edges
+  live as rows in `app.lifecycle_edge`, with the role that may drive each one.
+  Read them from the database rather than hardcoding them. Illegal transitions
+  raise `ADA01`; the right transition by the wrong role raises `ADA36`.
 - `matured` and `overdue` are derived in TypeScript from the clock and are
   never stored.
-- The four constraint triggers (`entry_must_balance`, `assets_are_conserved`,
-  `escrow_matches_open_listings`, and the leg variant) are
-  `DEFERRABLE INITIALLY DEFERRED`, so `ADA03`, `ADA04` and `ADA05` fire at
-  COMMIT. The harness posts in autocommit, so you will see them.
-- `actor_user_id` is recorded on every journal entry and consulted by nothing.
-  Role and identity rules are not enforced in the database.
+- The five constraint triggers (`entry_must_balance`, `assets_are_conserved`,
+  `escrow_matches_open_listings`, the leg variant, and
+  `receipt_means_something_moved`) are `DEFERRABLE INITIALLY DEFERRED`, so
+  `ADA03`, `ADA04`, `ADA05` and `ADA39` fire at COMMIT. The harness posts in
+  autocommit, so you will see them.
+- `actor_user_id` is recorded on every journal entry and is read on every
+  lifecycle edge: `app.assert_edge_actor` compares the actor's role against
+  `app.lifecycle_edge.actor_role` and refuses with `ADA36`.
 
 ## What "done" means for your suite
 

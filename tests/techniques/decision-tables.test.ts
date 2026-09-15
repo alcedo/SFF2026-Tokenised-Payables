@@ -700,6 +700,7 @@ describe('table 2: maker-checker approval', () => {
       { from_state: 'certified', to_state: 'issued', actor_role: 'straitsx_admin' },
       { from_state: 'draft', to_state: 'pending_approval', actor_role: 'adata_preparer' },
       { from_state: 'issued', to_state: 'settled', actor_role: 'adata_preparer' },
+      { from_state: 'issued', to_state: 'cancelled', actor_role: 'adata_checker' },
       { from_state: 'pending_approval', to_state: 'approved', actor_role: 'adata_checker' },
     ]);
 

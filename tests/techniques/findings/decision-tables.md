@@ -95,9 +95,10 @@ actor's role, and refuses a mismatch with
 ADA36 payable <ref> moves from <from> to <to> on the <required>, not the <actual>
 ```
 
-It is called from all three places that move `lifecycle_status`: the
-`submit`/`approve`/`certify` branch, `issue_payable`, and `settle_maturity`. So
-the column is read on all five edges rather than on the one the brief named.
+It is called from every place that moves `lifecycle_status`: the
+`submit`/`approve`/`certify` branch, `issue_payable`, `settle_maturity`, and
+`cancel_payable`, added since. So the column is read on every edge rather than
+on the one the brief named.
 Where the pair is not an edge at all, including a same-state write, it returns
 early and leaves the refusal to `app.enforce_lifecycle_edge`, which still
 answers `ADA01`.

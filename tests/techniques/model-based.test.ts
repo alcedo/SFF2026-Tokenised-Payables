@@ -40,7 +40,8 @@ type LifecycleState =
   | 'approved'
   | 'certified'
   | 'issued'
-  | 'settled';
+  | 'settled'
+  | 'cancelled';
 
 type ReceiptState = 'pending' | 'accepted' | 'rejected';
 type ListingState = 'open' | 'filled' | 'cancelled' | 'closed_by_transfer';
@@ -50,7 +51,7 @@ const COMMAND_KINDS = [
   'create_payable', 'submit', 'approve', 'grade', 'certify', 'issue_payable',
   'accept_receipt', 'reject_receipt', 'top_up', 'transfer', 'publish_listing',
   'place_bid', 'withdraw_bid', 'accept_bid', 'buy_now', 'cancel_listing',
-  'advance_clock', 'settle_maturity',
+  'advance_clock', 'settle_maturity', 'cancel_payable',
 ] as const;
 type CommandKind = (typeof COMMAND_KINDS)[number];
 
@@ -220,6 +221,7 @@ function note(kind: CommandKind, state: string, verdict: Verdict): void {
 function unreachablePairs(): string[] {
   const lifecycle: LifecycleState[] = [
     'draft', 'pending_approval', 'approved', 'certified', 'issued', 'settled',
+    'cancelled',
   ];
   const out: string[] = [];
   // These name no payable, so they can only ever be counted against `none`.
@@ -230,6 +232,7 @@ function unreachablePairs(): string[] {
   for (const kind of [
     'submit', 'approve', 'grade', 'certify', 'issue_payable', 'accept_receipt',
     'reject_receipt', 'transfer', 'publish_listing', 'settle_maturity',
+    'cancel_payable',
   ] as const) {
     out.push(`${NO_PAYABLE}:${kind}`);
   }
@@ -241,6 +244,9 @@ function unreachablePairs(): string[] {
     for (const state of ['draft', 'pending_approval', 'approved', 'certified'] as const) {
       out.push(`${state}:${kind}`);
     }
+    // A listing needs an accepted receipt, and a cancelled payable was rejected,
+    // so no listing or bid can ever name one either.
+    out.push(`cancelled:${kind}`);
   }
   // These three refuse to be generated at all until their referent exists, so
   // unlike cancel_listing and withdraw_bid they have no "names nothing" form.
@@ -253,13 +259,12 @@ function unreachablePairs(): string[] {
 // --- maker-checker roles -----------------------------------------------------
 
 /**
- * The role app.lifecycle_edge names for each of the five edges, read here as a
- * fixed table rather than from the database, because the whole point of this
- * suite is a second implementation that predicts the first rather than a copy
- * of it.
+ * The role app.lifecycle_edge names for each edge, read here as a fixed table
+ * rather than from the database, because the whole point of this suite is a
+ * second implementation that predicts the first rather than a copy of it.
  */
 const EDGE_ROLE: Record<
-  'submit' | 'approve' | 'certify' | 'issue_payable' | 'settle_maturity',
+  'submit' | 'approve' | 'certify' | 'issue_payable' | 'settle_maturity' | 'cancel_payable',
   Role
 > = {
   submit: 'adata_preparer',
@@ -267,6 +272,7 @@ const EDGE_ROLE: Record<
   certify: 'straitsx_admin',
   issue_payable: 'straitsx_admin',
   settle_maturity: 'adata_preparer',
+  cancel_payable: 'adata_checker',
 };
 
 const ROLE_ORDER: readonly Role[] = [
@@ -374,6 +380,7 @@ const AIMS: Partial<Record<CommandKind, Aim>> = {
   transfer: (p, m) => p.status === 'issued' && p.receipt !== 'pending' && m.day < p.maturity,
   publish_listing: (p, m) => p.status === 'issued' && p.receipt !== 'pending' && m.day < p.maturity,
   settle_maturity: (p, m) => p.status === 'issued' && m.day >= p.maturity,
+  cancel_payable: (p) => p.status === 'issued' && p.receipt === 'rejected',
 };
 
 function payableAt(model: Model, index: number, aim: Aim | null = null): [string, MPayable] {
@@ -913,7 +920,9 @@ class Transfer extends Step {
     const [id, p] = this.subjectOf(model);
     // The guard resolves the asset before anything else, so a never-issued
     // payable refuses here, whatever quantity was asked for.
-    if (p.status !== 'issued' && p.status !== 'settled') {
+    // `settled` and `cancelled` are past issuance, so the asset resolves and the
+    // guard falls through to the ones below rather than answering here.
+    if (p.status !== 'issued' && p.status !== 'settled' && p.status !== 'cancelled') {
       return refuse('ADA15', `payable ${p.ref} has not been issued yet`);
     }
     const quantity = this.quantityOf(model, real);
@@ -1006,7 +1015,9 @@ class PublishListing extends Step {
     const [id, p] = this.subjectOf(model);
     // The guard resolves the asset before anything else, so a never-issued
     // payable refuses here, whatever quantity was asked for.
-    if (p.status !== 'issued' && p.status !== 'settled') {
+    // `settled` and `cancelled` are past issuance, so the asset resolves and the
+    // guard falls through to the ones below rather than answering here.
+    if (p.status !== 'issued' && p.status !== 'settled' && p.status !== 'cancelled') {
       return refuse('ADA15', `payable ${p.ref} has not been issued yet`);
     }
     const quantity = this.quantityOf(model, real);
@@ -1476,28 +1487,30 @@ class SettleMaturity extends Step {
     }
     if (p.status === 'settled') return refuse('ADA16', `payable ${p.ref} is already settled`);
     if (model.day < p.maturity) return refuse('ADA12', `payable ${p.ref} has not matured`);
-    // The redemption legs are built before the lifecycle write, but the write
-    // happens before any leg is posted, so an unissued payable is stopped by
-    // the lifecycle trigger rather than by a missing token. app.assert_edge_actor
-    // is called before that write too, but only an already-issued payable names
-    // a row for it to find, so the role check only ever applies here.
-    if (p.status !== 'issued') {
-      return refuse('ADA01', `illegal lifecycle transition ${p.status} -> settled`);
-    }
-    if (this.role() !== EDGE_ROLE.settle_maturity) {
+    // app.assert_edge_actor finds a row only where the pair is a real edge, so
+    // the role check applies to an issued payable and to nothing else.
+    if (real.edges.has(`${p.status}->settled`) && this.role() !== EDGE_ROLE.settle_maturity) {
       return refuse(
         'ADA36',
-        `payable ${p.ref} moves from issued to settled on the ${EDGE_ROLE.settle_maturity}, not the ${this.role()}`,
+        `payable ${p.ref} moves from ${p.status} to settled on the ${EDGE_ROLE.settle_maturity}, not the ${this.role()}`,
       );
     }
     // Rejection returned the whole quantity to the anchor, so there is no
-    // holder left to credit. Checked after the role and before the anchor's
-    // wallet and funds.
+    // holder left to credit. Checked after the role and before the lifecycle
+    // write, which is why a cancelled payable answers here too: cancellation
+    // only ever follows a rejection, so this guard is reached before the
+    // trigger has anything to say.
     if (p.receipt === 'rejected') {
       return refuse(
         'ADA37',
         `payable ${p.ref} was rejected by its supplier and has nobody to redeem to`,
       );
+    }
+    // The redemption legs are built before the lifecycle write, but the write
+    // happens before any leg is posted, so an unissued payable is stopped by
+    // the lifecycle trigger rather than by a missing token.
+    if (p.status !== 'issued') {
+      return refuse('ADA01', `illegal lifecycle transition ${p.status} -> settled`);
     }
     let total = 0n;
     for (const wallet of real.wallets) total += position(model, wallet.address, id);
@@ -1766,6 +1779,7 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
   const settle = fc
     .record({ i: payableIndex, funded: mostly, g: mostly, r: mostly })
     .map((c) => new SettleMaturity(c.i, c.funded, c.g, c.r));
+  const cancelPayable = aimWithRole.map((c) => new CancelPayable(c.i, c.g, c.r));
 
   // Repetition is the weighting: fc.commands draws uniformly from this list, so
   // the commands that move a payable along appear more than once. Without that
@@ -1778,8 +1792,89 @@ function commandArbitraries(): fc.Arbitrary<fc.AsyncCommand<Model, Real>>[] {
     topUp, transfer, transfer,
     publish, publish, placeBid, placeBid, withdrawBid, withdrawBid,
     acceptBid, acceptBid, buyNow, cancel, cancel,
-    clock, settle, settle,
+    clock, settle, settle, cancelPayable,
   ];
+}
+
+// -- cancel_payable --
+
+class CancelPayable extends Step {
+  readonly kind = 'cancel_payable' as const;
+
+  constructor(
+    private readonly index: number,
+    private readonly guided: boolean,
+    private readonly rightRole: boolean,
+  ) {
+    super();
+  }
+
+  check(model: Readonly<Model>): boolean {
+    return model.payables.size > 0;
+  }
+
+  private subjectOf(model: Model): [string, MPayable] {
+    return aimed(model, this.kind, this.index, this.guided);
+  }
+
+  private role(): Role {
+    return this.rightRole ? EDGE_ROLE.cancel_payable : wrongRoleFor(EDGE_ROLE.cancel_payable);
+  }
+
+  protected subject(model: Model): string {
+    return stateOfPayable(model, this.kind, this.index, this.guided);
+  }
+
+  protected predict(model: Model, real: Real): Verdict {
+    const [id, p] = this.subjectOf(model);
+    // The rejection guard comes first, so a payable that was never issued is
+    // refused for having no rejection rather than for its lifecycle state.
+    if (p.receipt !== 'rejected') {
+      return refuse(
+        'ADA40',
+        `payable ${p.ref} was not rejected by its supplier, so there is nothing to cancel`,
+      );
+    }
+    // app.assert_edge_actor finds a row only where the pair is a real edge, so
+    // a second cancellation of an already-cancelled payable passes the role
+    // check whoever posts it and meets the quantity guard below instead.
+    if (real.edges.has(`${p.status}->cancelled`) && this.role() !== EDGE_ROLE.cancel_payable) {
+      return refuse(
+        'ADA36',
+        `payable ${p.ref} moves from ${p.status} to cancelled on the ${EDGE_ROLE.cancel_payable}, not the ${this.role()}`,
+      );
+    }
+    // The burn takes the whole face out of the anchor's free balance in one
+    // leg, so anything less than the whole face there is refused rather than
+    // partially burnt. A rejection put it all back, but nothing stops the
+    // anchor moving it on afterwards.
+    const holding = held(model, real.anchor.address, 'wallet_free', id);
+    if (holding !== p.face) {
+      return refuse(
+        'ADA40',
+        `payable ${p.ref} cannot be cancelled while the anchor holds ${holding} of its ${p.face} face`,
+      );
+    }
+    return legal;
+  }
+
+  protected actorFor(_model: Model, real: Real): string {
+    return real.actorsByRole[this.role()];
+  }
+
+  protected intent(model: Model): Record<string, unknown> {
+    return { kind: 'cancel_payable', payableId: this.subjectOf(model)[0] };
+  }
+
+  protected apply(model: Model, real: Real): void {
+    const [id, p] = this.subjectOf(model);
+    move(model, real.anchor.address, 'wallet_free', id, -p.face);
+    p.status = 'cancelled';
+  }
+
+  toString(): string {
+    return `cancel_payable(payable=${this.guided ? 'ready' : ''}${this.index}, role=${this.role()})`;
+  }
 }
 
 // --- the property -----------------------------------------------------------
@@ -1817,6 +1912,7 @@ describe('model-based coverage of the payable workflow', () => {
     const reachable: string[] = [];
     for (const state of [
       'none', 'draft', 'pending_approval', 'approved', 'certified', 'issued', 'settled',
+      'cancelled',
     ]) {
       for (const kind of COMMAND_KINDS) {
         const pair = `${state}:${kind}`;
@@ -1830,10 +1926,10 @@ describe('model-based coverage of the payable workflow', () => {
       '',
       '  model-based workflow coverage',
       `    seed ${SEED}, ${RUNS} runs, ${coverage.steps} commands executed`,
-      `    lifecycle states reached : ${coverage.states.size} of 6  [${[...coverage.states].sort().join(', ')}]`,
+      `    lifecycle states reached : ${coverage.states.size} of 7  [${[...coverage.states].sort().join(', ')}]`,
       `    commands exercised       : ${coverage.commands.size} of ${COMMAND_KINDS.length}`,
       `    (state, command) pairs   : ${coverage.pairs.size} of ${reachable.length} reachable`,
-      `    pairs ruled unreachable  : ${unreachable.length} of ${7 * COMMAND_KINDS.length} total`,
+      `    pairs ruled unreachable  : ${unreachable.length} of ${8 * COMMAND_KINDS.length} total`,
       `    outcomes                 : ${[...coverage.verdicts.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([code, n]) => `${code}x${n}`)
@@ -1845,12 +1941,12 @@ describe('model-based coverage of the payable workflow', () => {
 
     expect(spurious, 'a pair declared unreachable was reached anyway').toEqual([]);
     expect([...coverage.states].sort()).toEqual([
-      'approved', 'certified', 'draft', 'issued', 'pending_approval', 'settled',
+      'approved', 'cancelled', 'certified', 'draft', 'issued', 'pending_approval', 'settled',
     ]);
     expect([...coverage.commands].sort()).toEqual([...COMMAND_KINDS].sort());
     expect(missed).toEqual([]);
-    expect(coverage.pairs.size).toBe(75);
-    expect(reachable.length).toBe(75);
+    expect(coverage.pairs.size).toBe(92);
+    expect(reachable.length).toBe(92);
 
     // Every verdict the model is able to reach, so that a refusal path quietly
     // falling out of the generator shows up here rather than as a silently
@@ -1861,7 +1957,7 @@ describe('model-based coverage of the payable workflow', () => {
       '23505', '23514',
       'ADA01', 'ADA11', 'ADA12', 'ADA15', 'ADA16', 'ADA17', 'ADA19', 'ADA20',
       'ADA21', 'ADA22', 'ADA23', 'ADA24', 'ADA25', 'ADA26', 'ADA34', 'ADA35',
-      'ADA36', 'ADA37', 'ADA38', 'ADA39', 'accepted',
+      'ADA36', 'ADA37', 'ADA38', 'ADA39', 'ADA40', 'accepted',
     ]);
   });
 });

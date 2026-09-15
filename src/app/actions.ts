@@ -152,6 +152,10 @@ export async function certifyPayable(payableId: string, key?: string): Promise<A
   return run({ kind: 'certify', payableId }, key);
 }
 
+export async function cancelPayable(payableId: string, key?: string): Promise<ActionResult> {
+  return run({ kind: 'cancel_payable', payableId }, key);
+}
+
 export async function gradePayable(
   payableId: string,
   grade: 'AAA' | 'AA' | 'A',

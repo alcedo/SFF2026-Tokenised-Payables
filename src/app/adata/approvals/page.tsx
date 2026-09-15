@@ -9,7 +9,13 @@ import {
   StatusChip,
 } from '@/components/primitives';
 import { GradeForm } from '@/app/admin/grading/GradeForm';
-import { approvePayable, certifyPayable, issuePayable, submitPayable } from '@/app/actions';
+import {
+  approvePayable,
+  cancelPayable,
+  certifyPayable,
+  issuePayable,
+  submitPayable,
+} from '@/app/actions';
 import { currentPersona } from '@/app/session';
 import { attempt, pendingStep, ROLE_LABELS } from '@/core/lifecycle';
 import { readEvents, readPayables, readPersonas, readWorld } from '@/db/read';
@@ -46,6 +52,12 @@ export default async function ApprovalsPage() {
   const inFlight = payables.filter((p) =>
     ['draft', 'pending_approval', 'approved', 'certified'].includes(p.storedStatus),
   );
+
+  // A payable the supplier refused is issued and stuck: it cannot trade, it
+  // cannot be redeemed, and the clock will carry it to maturity regardless. The
+  // checker who approved it is the one who withdraws it. See
+  // docs/ASSUMPTIONS.md; the PRD does not say what becomes of a rejection.
+  const refused = payables.filter((p) => p.storedStatus === 'issued' && p.receipt === 'rejected');
 
   // Whose move each one is, and the sentence that says so, decided once. The
   // header count and the notice on each row are the same question asked at two
@@ -257,6 +269,46 @@ export default async function ApprovalsPage() {
           );
         })
       )}
+
+      {refused.length > 0 ? (
+        <Panel title="Refused by their supplier">
+          <p className="mb-2 text-[11.5px] text-ink-muted">
+            The supplier rejected delivery of these, so nobody may trade them and ADATA may not
+            settle them. Cancelling burns the tokens back out of the supplier&apos;s wallet and
+            closes the obligation. The {ROLE_LABELS.adata_checker} does it, as with the approval.
+          </p>
+          <div className="space-y-2">
+            {refused.map((p) => (
+              <div
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-2 border-b border-rule py-2 last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <span className="text-[12.5px] font-medium">{p.ref}</span>
+                  <span className="ml-2 text-[11.5px] text-ink-muted">
+                    {p.supplierName} · {p.invoiceRef} ·{' '}
+                    <Amount value={p.faceBase} decimals={2} showAsset asset="XUSD" />
+                  </span>
+                </div>
+                <ActionButton
+                  label="Cancel payable"
+                  variant="danger"
+                  disabled={!attempt(p.storedStatus, 'cancel', persona.role).ok}
+                  disabledReason={`Only the ${ROLE_LABELS.adata_checker} may cancel a refused payable.`}
+                  confirm={
+                    <>
+                      Burns the full face of {p.ref} out of {p.supplierName}&apos;s wallet and
+                      closes the obligation. There is no way back from cancelled.
+                    </>
+                  }
+                  action={cancelPayable}
+                  args={[p.id]}
+                />
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
     </div>
   );
 }

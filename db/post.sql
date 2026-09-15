@@ -390,6 +390,7 @@ BEGIN
     WHEN 'accept_bid'     THEN 'trade_settlement'
     WHEN 'buy_now'        THEN 'trade_settlement'
     WHEN 'settle_maturity' THEN 'redemption'
+    WHEN 'cancel_payable'  THEN 'payable_cancelled'
     WHEN 'advance_clock'  THEN 'clock_advanced'
     WHEN 'reset_world'    THEN 'world_reset'
     WHEN 'create_payable' THEN 'payable_created'
@@ -872,6 +873,46 @@ BEGIN
     v_legs := v_legs || v_payment.legs;
 
     UPDATE app.payable SET lifecycle_status = 'settled' WHERE id = v_payable.id;
+
+  ELSIF v_kind = 'cancel_payable' THEN
+    -- A supplier who rejects delivery sends the whole quantity back to the
+    -- anchor, and the obligation is then owed to nobody. Settlement refuses it
+    -- (ADA37), so without this it sits at 'issued' for good. Cancelling burns
+    -- the quantity back to system_unissued, which is where issuance minted it
+    -- from, and moves the payable to a stored state that says it ended without
+    -- being paid. 'settled' would say the opposite.
+    SELECT * INTO v_payable FROM app.payable WHERE id = (v_intent->>'payableId')::uuid FOR NO KEY UPDATE;
+    IF v_payable.receipt_status IS DISTINCT FROM 'rejected' THEN
+      RAISE EXCEPTION 'payable % was not rejected by its supplier, so there is nothing to cancel',
+        v_payable.ref USING ERRCODE = 'ADA40';
+    END IF;
+    PERFORM app.assert_edge_actor(v_payable, 'cancelled', v_actor);
+
+    v_asset := ledger.payable_asset(v_payable.id);
+    SELECT address INTO v_anchor_wallet FROM app.wallet WHERE entity_id = v_payable.anchor_id LIMIT 1;
+    IF v_anchor_wallet IS NULL THEN
+      RAISE EXCEPTION 'anchor for % has no wallet', v_payable.ref USING ERRCODE = 'ADA15';
+    END IF;
+
+    -- Rejection returns the quantity, but nothing stops the anchor moving or
+    -- listing it afterwards, so the whole face has to still be here and free.
+    -- Burning what the anchor no longer holds would drive a wallet negative or
+    -- leave the rest outstanding against a payable that says it is cancelled.
+    SELECT COALESCE(b.balance, 0) INTO v_qty
+      FROM ledger.account_balance b
+      JOIN ledger.account a ON a.id = b.account_id
+     WHERE a.wallet_address = v_anchor_wallet
+       AND a.purpose = 'wallet_free' AND b.asset_id = v_asset;
+    IF v_qty <> v_payable.face_base THEN
+      RAISE EXCEPTION 'payable % cannot be cancelled while the anchor holds % of its % face',
+        v_payable.ref, v_qty, v_payable.face_base USING ERRCODE = 'ADA40';
+    END IF;
+
+    v_legs := ARRAY[
+      ROW(ledger.wallet_account(v_anchor_wallet, 'wallet_free'), v_asset, -v_qty)::ledger.leg_spec,
+      ROW(ledger.system_account('system_unissued'), v_asset, v_qty)::ledger.leg_spec
+    ];
+    UPDATE app.payable SET lifecycle_status = 'cancelled' WHERE id = v_payable.id;
 
   ELSIF v_kind = 'advance_clock' THEN
     v_days := (v_intent->>'days')::int;

@@ -60,11 +60,11 @@ and every non-zero wallet balance is compared against the model's rendering of
 the same shape. `ledgerHealth` is asserted `HEALTHY` at the end of each
 generated sequence.
 
-**Command classes (18).** `create_payable` (manual shape, with flawed variants
+**Command classes (19).** `create_payable` (manual shape, with flawed variants
 for ADA19/22/23/24/25/26), `submit`, `approve`, `grade`, `certify`,
 `issue_payable`, `accept_receipt`, `reject_receipt`, `top_up`, `transfer`,
 `publish_listing`, `place_bid`, `withdraw_bid`, `accept_bid`, `buy_now`,
-`cancel_listing`, `advance_clock`, `settle_maturity`.
+`cancel_listing`, `advance_clock`, `settle_maturity`, `cancel_payable`.
 
 **Generation.** `fc.commands` plus `fc.asyncModelRun`, 25 runs at seed
 `20260915`, up to 600 commands per run, each run against its own database from
@@ -74,8 +74,8 @@ name); legality is decided inside `run` so that illegal commands really do fire.
 Two commands in three aim at a subject that is ready for them and the third aims
 blind, because walking a six-deep lifecycle by drawing blind never gets past
 `approved`. The aim biases which sequences are generated, never which are judged
-legal, and it is largely the blind third that makes 3,773 of the 6,121
-commands refusals rather than acceptances.
+legal, and it is largely the blind third that makes most of the run's commands
+refusals rather than acceptances.
 
 ---
 
@@ -86,39 +86,47 @@ and asserts it.
 
 | measure | reached | of |
 | --- | --- | --- |
-| lifecycle states | **6** | 6 |
-| command classes | **18** | 18 |
-| (state, command) pairs | **75** | 75 reachable |
-| commands executed | **6,194** | across 25 sequences |
-| accepted / refused | 1,430 / 4,764 | |
+| lifecycle states | **7** | 7 |
+| command classes | **19** | 19 |
+| (state, command) pairs | **92** | 92 reachable |
+| commands executed | **5,378** | across 25 sequences |
+| accepted / refused | 1,317 / 4,061 | |
 
 The accepted share fell from 2,348 as the fixes below landed. A command the
 system used to take silently, a `cancel_listing` naming nothing or a
 `withdraw_bid` against a bid that was never placed, is a refusal now.
 
-Pair space is 7 subject states (`none` plus the six lifecycle states) by 18
-commands, so 126 in total, of which **51 are unreachable by construction** and
+Pair space is 8 subject states (`none` plus the seven lifecycle states) by 19
+commands, so 152 in total, of which **60 are unreachable by construction** and
 are enumerated in `unreachablePairs()`. The suite asserts that none of them is
 ever reached, so a wrong exclusion fails the run rather than inflating the score.
 
-- 18 pairs: `create_payable`, `top_up` and `advance_clock` name no payable, so
-  the six lifecycle states are impossible for them.
-- 10 pairs: `submit`, `approve`, `grade`, `certify`, `issue_payable`,
-  `accept_receipt`, `reject_receipt`, `transfer`, `publish_listing` and
-  `settle_maturity` all name a payable that already exists, so `none` is
-  impossible.
-- 20 pairs: a listing escrows a payable token, and that token is created at
+- 21 pairs: `create_payable`, `top_up` and `advance_clock` name no payable, so
+  the seven lifecycle states are impossible for them.
+- 11 pairs: `submit`, `approve`, `grade`, `certify`, `issue_payable`,
+  `accept_receipt`, `reject_receipt`, `transfer`, `publish_listing`,
+  `settle_maturity` and `cancel_payable` all name a payable that already
+  exists, so `none` is impossible.
+- 25 pairs: a listing escrows a payable token, and that token is created at
   issuance, so no listing or bid can name a payable in `draft`,
-  `pending_approval`, `approved` or `certified`. That rules out those four
-  states for `place_bid`, `withdraw_bid`, `accept_bid`, `buy_now` and
-  `cancel_listing`.
+  `pending_approval`, `approved` or `certified`. A listing also needs an
+  accepted receipt, and a `cancelled` payable was rejected, so it cannot be
+  listed either. That rules out those five states for `place_bid`,
+  `withdraw_bid`, `accept_bid`, `buy_now` and `cancel_listing`.
 - 3 pairs: `place_bid`, `accept_bid` and `buy_now` cannot be generated at all
   until their referent exists, so unlike `cancel_listing` and `withdraw_bid`
   they have no "names nothing" form and cannot pair with `none`.
 
 Refusal codes reached, asserted as an exact set:
 `23505 23514 ADA01 ADA11 ADA12 ADA15 ADA16 ADA17 ADA19 ADA20 ADA21 ADA22 ADA23
-ADA24 ADA25 ADA26 ADA34 ADA35 ADA36 ADA37 ADA38 ADA39`.
+ADA24 ADA25 ADA26 ADA34 ADA35 ADA36 ADA37 ADA38 ADA39 ADA40`.
+
+**`cancel_payable` was added after the seven states were.** Adding it found two
+places where the model had been right only because `cancelled` did not exist:
+`transfer` and `publish_listing` treated anything not `issued` or `settled` as
+never issued, and `settle_maturity` predicted `ADA01` for a payable the `ADA37`
+rejection guard answers first. Both were model bugs rather than product ones,
+and neither was reachable before there was a seventh state to reach them from.
 
 `23502` has left the set. Every route to it was a guard that did not fire on a
 row that was not found or a field that was not given, and each of those now

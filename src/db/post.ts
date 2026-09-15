@@ -82,6 +82,7 @@ export type Intent =
   // PRD §3 question 13: redemption is denominated in XUSD; the asset is chosen
   // only for payment, so it is required rather than defaulted.
   | { kind: 'settle_maturity'; payableId: string; fundingCode: Asset }
+  | { kind: 'cancel_payable'; payableId: string }
   | { kind: 'advance_clock'; days: number }
   | { kind: 'submit'; payableId: string }
   | { kind: 'approve'; payableId: string }
@@ -164,6 +165,7 @@ export type PostErrorCode =
   | 'receipt_rejected'
   | 'below_min_price'
   | 'moved_nothing'
+  | 'not_cancellable'
   | 'unknown';
 
 export interface PostError {
@@ -216,6 +218,7 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA37: 'receipt_rejected',
   ADA38: 'below_min_price',
   ADA39: 'moved_nothing',
+  ADA40: 'not_cancellable',
   ADA20: 'insufficient_funds',
   ADA21: 'insufficient_quantity',
   '23505': 'duplicate_listing',
@@ -336,6 +339,8 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
   not_institutional:
     'Only institutional lender accounts can bid or buy. Switch to a lender persona in the demo controls.',
   not_graded: 'This payable has no grade yet. Assign one before certifying it.',
+  not_cancellable:
+    'Only a payable the supplier rejected can be cancelled, and the whole quantity has to be back in the ADATA wallet first.',
   moved_nothing:
     'That would move nothing. A transfer needs a different wallet to send to.',
   below_min_price:

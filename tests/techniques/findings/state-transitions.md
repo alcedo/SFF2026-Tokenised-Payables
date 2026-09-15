@@ -217,8 +217,9 @@ supplier user. All five edges are accepted.
 `tests/support/CONTRACT.md` stated that role and identity rules were not
 enforced in the database, so this was consistent with the design rather than a
 regression. It was recorded because the column read as a rule: a contributor
-adding a sixth edge would fill in an `actor_role` believing it constrained
-something. It now does, and a sixth edge inherits enforcement from its row.
+adding an edge would fill in an `actor_role` believing it constrained
+something. It now does, and the sixth edge added since, `issued -> cancelled`,
+inherited enforcement from its row without a line of its own.
 
 ## 6. `set_certification` has no ordering at all
 
@@ -235,7 +236,7 @@ issue under this programme`, and one `set_certification` back to `certified`
 makes the very next issuance succeed. There is no intermediate state, no second
 approver, and no record of review beyond the journal entry that the change
 happened. Compared with the obligation lifecycle, which spends an entire table
-and a trigger on five edges, the issuer machine that gates every issuance has
+and a trigger on its edges, the issuer machine that gates every issuance has
 no machine at all.
 
 ## 7. `create_payable` cannot accept a caller-supplied `payableId`
