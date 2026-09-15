@@ -1878,3 +1878,66 @@ describe('a client-minted payable id', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 });
+
+/**
+ * The rules these tables prove absent, stated as the rules a reader expects.
+ *
+ * Everything above pins what the system does, and does it deliberately: a
+ * decision table whose outcome is keyed on fewer conditions than it enumerates
+ * is how this suite shows which conditions the write path ignores. The cost of
+ * that choice is that the whole file stays green while the compliance rule the
+ * programme is built on is enforced nowhere, so a reader running `npm test`
+ * sees nothing wrong.
+ *
+ * These cases close that gap. Each asserts the rule a reader would expect to
+ * hold, and each is marked `it.fails`, so the day one is enforced this file
+ * turns red and someone has to come and delete the case on purpose. They are
+ * the same findings as tests/techniques/findings/decision-tables.md, in a form
+ * the test runner can report.
+ */
+describe('rules the write path does not enforce', () => {
+  const FACE = 1_000_000;
+  let db: Database;
+  let world: World;
+
+  beforeAll(async () => {
+    db = await freshDatabase('decision_absent_rules', 'fixtures');
+    world = await loadWorld(db.pool);
+  });
+
+  afterAll(async () => {
+    await db?.close();
+  });
+
+  it.fails('refuses an approval from the same user who submitted the payable', async () => {
+    const preparer = world.users.adata_preparer;
+    const payable = await buildPayable(db.pool, {
+      supplierId: world.suppliers[0].id,
+      faceBase: FACE,
+      termsDays: 90,
+      upTo: 'pending_approval',
+      submitAs: preparer,
+    });
+
+    const result = await post(db.pool, { kind: 'approve', payableId: payable.id }, { actorUserId: preparer });
+    expect(result).toMatchObject({ ok: false });
+    expect(await lifecycleOf(db.pool, payable.id)).toBe('pending_approval');
+  });
+
+  it.fails('refuses an approval from a role the lifecycle edge does not name', async () => {
+    const payable = await buildPayable(db.pool, {
+      supplierId: world.suppliers[0].id,
+      faceBase: FACE,
+      termsDays: 90,
+      upTo: 'pending_approval',
+    });
+
+    const result = await post(
+      db.pool,
+      { kind: 'approve', payableId: payable.id },
+      { actorUserId: world.users.supplier },
+    );
+    expect(result).toMatchObject({ ok: false });
+    expect(await lifecycleOf(db.pool, payable.id)).toBe('pending_approval');
+  });
+});
