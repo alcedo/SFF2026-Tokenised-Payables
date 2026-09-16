@@ -23,6 +23,7 @@ import {
   readListingForTarget,
   readMarketplace,
   readPayable,
+  readAllPayables,
   readPayables,
   readPersonas,
   readProgrammeTotals,
@@ -30,6 +31,7 @@ import {
   readWorld,
   type World,
 } from '@/db/read';
+import { clockAt, today } from '@/core/clock';
 import { formatUnits } from '@/core/money';
 import { formatPercent } from '@/core/pricing';
 
@@ -301,6 +303,95 @@ describe('the ERP inbox', () => {
     const runbook = inbox.find((i) => i.amountBase === 2_500_000_000n && i.termsDays === 90);
     expect(runbook).toBeDefined();
     expect(runbook!.docNo).toMatch(/^\d{10}$/);
+  });
+});
+
+describe('the obligation book versus the marketplace projection', () => {
+  const SERIES_MEMBERS = [
+    'TP-2026-0501',
+    'TP-2026-0502',
+    'TP-2026-0503',
+    'TP-2026-0504',
+    'TP-2026-0505',
+  ] as const;
+
+  it('hides series members from the marketplace list and keeps them in the book', async () => {
+    const standalone = await readPayables(world);
+    const all = await readAllPayables(world);
+    for (const ref of SERIES_MEMBERS) {
+      expect(standalone.find((p) => p.ref === ref), ref).toBeUndefined();
+      const member = all.find((p) => p.ref === ref);
+      expect(member?.storedStatus, ref).toBe('issued');
+      expect(member?.status, ref).toBe('issued');
+      expect(member?.daysRemaining, ref).toBe(30);
+      expect(member?.faceBase, ref).toBe(360_000_000n);
+      expect(member?.seriesRef, ref).toBe('SERIES-2026-Q4-30D');
+    }
+  });
+
+  it('reconciles live face with programme totals once members are visible', async () => {
+    const totals = await readProgrammeTotals(world);
+    const liveFace = (await readAllPayables(world))
+      .filter((p) => ['issued', 'matured', 'overdue'].includes(p.status))
+      .reduce((acc, p) => acc + p.faceBase, 0n);
+    expect(liveFace).toBe(totals.issuedFaceBase);
+  });
+
+  it('leaves the T0 settlement queue as the seeded overdue case', async () => {
+    const due = (await readAllPayables(world))
+      .filter((p) => p.status === 'matured' || p.status === 'overdue')
+      .map((p) => p.ref);
+    expect(due).toEqual(['TP-2026-0119']);
+  });
+
+  it('puts the series members on the settlement queue when the clock reaches their maturity', async () => {
+    const later: World = {
+      ...world,
+      clock: clockAt(world.clock.t0, 30),
+      today: today(clockAt(world.clock.t0, 30)),
+    };
+    const due = (await readAllPayables(later)).filter(
+      (p) => p.status === 'matured' || p.status === 'overdue',
+    );
+    expect(due.filter((p) => p.status === 'overdue').map((p) => p.ref)).toEqual(['TP-2026-0119']);
+    expect(due.filter((p) => p.ref.startsWith('TP-2026-05')).map((p) => p.ref)).toEqual([
+      ...SERIES_MEMBERS,
+    ]);
+    expect(due.find((p) => p.ref === 'TP-2026-0143')?.status).toBe('matured');
+
+    // The marketplace projection still hides the lot's members, which is why
+    // settlement used to have no Fund control for 180,000 XUSD of live face.
+    expect(
+      (await readPayables(later))
+        .filter((p) => p.status === 'matured' || p.status === 'overdue')
+        .map((p) => p.ref),
+    ).toEqual(['TP-2026-0119', 'TP-2026-0143']);
+  });
+
+  it('jumps only to live issued tenors, including the series lot', async () => {
+    const ahead = (await readAllPayables(world))
+      .filter((p) => p.status === 'issued' && p.daysRemaining > 0)
+      .map((p) => p.daysRemaining)
+      .sort((a, b) => a - b);
+    expect(ahead[0]).toBe(30);
+    expect(ahead.filter((days) => days === 30)).toHaveLength(6);
+  });
+
+  it('sends the preparer to fund the series once it has matured', async () => {
+    const later: World = {
+      ...world,
+      clock: clockAt(world.clock.t0, 30),
+      today: today(clockAt(world.clock.t0, 30)),
+    };
+    const personas = await readPersonas();
+    const preparer = personas.find((p) => p.name === 'Wei-Ling Chen');
+    expect(preparer).toBeDefined();
+    expect(await loadNextAction(preparer!, later)).toEqual({
+      kind: 'yours',
+      verb: 'Fund settlement of 7 payables',
+      href: '/adata/settlement',
+      detail: 'Maturity does not pay anyone. Settlement is an explicit act.',
+    });
   });
 });
 

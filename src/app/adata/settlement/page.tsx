@@ -9,7 +9,7 @@ import {
   Panel,
   StatusChip,
 } from '@/components/primitives';
-import { readBalances, readHolders, readPayables, readWorld, serializeBalances } from '@/db/read';
+import { readAllPayables, readBalances, readHolders, readWorld, serializeBalances } from '@/db/read';
 import { currentPersona } from '@/app/session';
 
 /**
@@ -24,7 +24,7 @@ import { currentPersona } from '@/app/session';
 export default async function SettlementPage() {
   const world = await readWorld();
   const persona = await currentPersona();
-  const payables = await readPayables(world);
+  const payables = await readAllPayables(world);
 
   const due = payables.filter((p) => p.status === 'matured' || p.status === 'overdue');
   const anchorWallet = '0xada7a0000000000000000000000000000000c21d';

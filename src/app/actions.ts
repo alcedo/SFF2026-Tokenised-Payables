@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 
 import { ERROR_MESSAGE, type Intent, post } from '@/db/post';
-import { readPayables, readPersonas, readWorld } from '@/db/read';
+import { readAllPayables, readPersonas, readWorld } from '@/db/read';
 import { personaAfterOnboarding } from './onboard-persona';
 import { currentPersona, setPersona } from './session';
 
@@ -85,8 +85,13 @@ export async function advanceClock(days: number): Promise<ActionResult> {
  */
 export async function jumpToNextMaturity(): Promise<ActionResult> {
   const world = await readWorld();
-  const ahead = (await readPayables(world))
-    .filter((p) => p.status !== 'settled' && p.daysRemaining > 0)
+  // Live issued obligations still ahead of the clock, including series
+  // members. Settled, cancelled, drafts and already-due rows are not a
+  // "next maturity" — they used to steal the jump after a short-dated
+  // payable was cancelled, and a matured series lot was invisible here
+  // because readPayables hides members.
+  const ahead = (await readAllPayables(world))
+    .filter((p) => p.status === 'issued' && p.daysRemaining > 0)
     .map((p) => p.daysRemaining)
     .sort((a, b) => a - b);
   if (ahead.length === 0) {

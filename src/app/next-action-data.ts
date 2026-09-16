@@ -1,9 +1,9 @@
 import { deriveNextAction, type NextAction, type NextActionSnapshot } from '@/core/next-action';
-import { readHoldings, readMarketplace, readPayables, type Persona, type World } from '@/db/read';
+import { readAllPayables, readHoldings, readMarketplace, type Persona, type World } from '@/db/read';
 
 export async function loadNextActionSnapshot(persona: Persona, world: World): Promise<NextActionSnapshot> {
   const [payables, holdings, listings] = await Promise.all([
-    readPayables(world),
+    readAllPayables(world),
     readHoldings(persona.wallet, world),
     readMarketplace(world),
   ]);

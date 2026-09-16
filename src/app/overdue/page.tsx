@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 import { Address, Amount, Field, LedgerScroll, Notice, Panel, StatusChip } from '@/components/primitives';
-import { readEvents, readHolders, readPayables, readWorld } from '@/db/read';
+import { readAllPayables, readEvents, readHolders, readWorld } from '@/db/read';
 
 /**
  * PRD §11's "Trigger overdue" control, and the recovery case from §7 and §8
@@ -15,7 +15,7 @@ import { readEvents, readHolders, readPayables, readWorld } from '@/db/read';
  */
 export default async function OverduePage() {
   const world = await readWorld();
-  const payables = await readPayables(world);
+  const payables = await readAllPayables(world);
   const overdue = payables.filter((p) => p.status === 'overdue');
 
   if (overdue.length === 0) {
