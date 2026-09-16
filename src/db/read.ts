@@ -628,6 +628,8 @@ export interface EventRow {
   blockNumber: bigint | null;
   fundingAsset: Asset | null;
   sourceAmountBase: BaseUnits | null;
+  /** The command as posted, so the log shows what was asked for and not only what it became. */
+  intent: Record<string, unknown>;
 }
 
 /**
@@ -650,12 +652,14 @@ export async function readEvents(
     block_number: bigint | null;
     funding_code: Asset | null;
     source_amount_base: bigint | null;
+    payload: Record<string, unknown>;
   }>(
     `SELECT e.id AS entry_id, e.seq, e.kind::text, e.world_date,
             u.name AS actor_name, u.role::text AS actor_role,
             p.ref AS payable_ref,
             e.chain_tx_hash AS tx_hash, e.chain_block_number AS block_number,
-            e.funding_code, e.source_amount_base
+            e.funding_code, e.source_amount_base,
+            e.payload
        FROM ledger.journal_entry e
        JOIN app.app_user u ON u.id = e.actor_user_id
        LEFT JOIN app.payable p ON p.id = e.payable_id
@@ -682,6 +686,7 @@ export async function readEvents(
     blockNumber: r.block_number,
     fundingAsset: r.funding_code,
     sourceAmountBase: r.source_amount_base === null ? null : fromBaseUnits(r.source_amount_base),
+    intent: r.payload,
   }));
 }
 
@@ -798,6 +803,7 @@ export interface SerialEventRow {
   blockNumber: string | null;
   fundingAsset: Asset | null;
   sourceAmountBase: string | null;
+  intent: Record<string, unknown>;
 }
 
 export function serializeEvent(e: EventRow): SerialEventRow {
@@ -813,6 +819,7 @@ export function serializeEvent(e: EventRow): SerialEventRow {
     blockNumber: e.blockNumber === null ? null : String(e.blockNumber),
     fundingAsset: e.fundingAsset,
     sourceAmountBase: e.sourceAmountBase === null ? null : String(e.sourceAmountBase),
+    intent: e.intent,
   };
 }
 

@@ -20,6 +20,8 @@ import { currentPersona, setPersona } from './session';
 export interface ActionResult {
   ok: boolean;
   message: string;
+  /** The database's own reason for a refusal, so a screen can be traced without a log. */
+  detail?: string;
   receipt?: { txHash: string; blockNumber: string; simulated: true } | null;
   conversion?: { fundingAsset: string; sourceDebit: string; rateE6: string } | null;
   replayed?: boolean;
@@ -38,7 +40,7 @@ async function run(intent: Intent, key?: string): Promise<ActionResult> {
   const result = await post({ key: key ?? randomUUID(), actorUserId: persona.userId, intent });
 
   if (!result.ok) {
-    return { ok: false, message: ERROR_MESSAGE[result.error.code] };
+    return { ok: false, message: ERROR_MESSAGE[result.error.code], detail: result.error.detail };
   }
 
   // The whole world is shared, so a write anywhere can change any screen.

@@ -17,6 +17,7 @@ import {
   readBids,
   readErpInbox,
   readEvents,
+  serializeEvent,
   readHolders,
   readHoldings,
   readListingForTarget,
@@ -223,6 +224,14 @@ describe('audit history', () => {
     const events = await readEvents({ limit: 200 });
     expect(events.length).toBeGreaterThan(20);
     for (const e of events) expect(e.actorName).toBeTruthy();
+  });
+
+  it('keeps the command that produced each event', async () => {
+    const events = await readEvents({ limit: 200 });
+    const issuance = events.find((e) => e.kind === 'issuance')!;
+    expect(issuance.intent.kind).toBe('issue_payable');
+    expect(typeof issuance.intent.payableId).toBe('string');
+    expect(serializeEvent(issuance).intent).toEqual(issuance.intent);
   });
 
   it('mints a receipt for chain-relevant events and none for audit-only ones', async () => {

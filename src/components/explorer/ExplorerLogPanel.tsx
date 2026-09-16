@@ -2,6 +2,13 @@ import { Amount, EmptyState, LedgerScroll, MockTxRef, Panel, Stat } from '@/comp
 import { fromBaseUnits } from '@/core/money';
 import type { SerialEventRow } from '@/db/read';
 
+function describeIntent(intent: Record<string, unknown>): string {
+  return Object.entries(intent)
+    .filter(([key]) => key !== 'kind')
+    .map(([key, value]) => `${key} ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    .join(' · ');
+}
+
 export function ExplorerLogPanel({
   events,
   bookDrift,
@@ -40,6 +47,7 @@ export function ExplorerLogPanel({
                   <th className="num">#</th>
                   <th>Date</th>
                   <th>Event</th>
+                  <th>Command</th>
                   <th>Payable</th>
                   <th>Actor</th>
                   <th>Funding</th>
@@ -48,11 +56,16 @@ export function ExplorerLogPanel({
                 </tr>
               </thead>
               <tbody>
-                {events.map((e) => (
+                {events.map((e) => {
+                  const command = describeIntent(e.intent);
+                  return (
                   <tr key={e.entryId}>
                     <td className="num text-ink-faint">{e.seq}</td>
                     <td className="num">{e.worldDate}</td>
                     <td className="font-medium">{e.kind.replace(/_/g, ' ')}</td>
+                    <td className="max-w-[28ch] truncate text-[11px] text-ink-faint" title={command}>
+                      {command || '—'}
+                    </td>
                     <td className="text-ink-muted">{e.payableRef ?? '—'}</td>
                     <td className="text-ink-muted">{e.actorName}</td>
                     <td>{e.fundingAsset ?? '—'}</td>
@@ -71,7 +84,8 @@ export function ExplorerLogPanel({
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </LedgerScroll>

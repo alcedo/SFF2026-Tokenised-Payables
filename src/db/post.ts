@@ -146,7 +146,7 @@ export type PostErrorCode =
   | 'invalid_amount'
   // PRD §8 screen 2's manual entry is the first form a person types into
   // freely, so its refusals get their own codes rather than being folded into
-  // not_permitted. See the registry in db/schema.sql.
+  // not_permitted. CODE_BY_SQLSTATE below is the registry.
   | 'duplicate_invoice'
   | 'invalid_terms'
   | 'unknown_supplier'
@@ -166,6 +166,11 @@ export type PostErrorCode =
   | 'below_min_price'
   | 'moved_nothing'
   | 'not_cancellable'
+  | 'illegal_transition'
+  // ADA02, ADA03, ADA05, ADA17 and ADA18 are checks no persona can trip from
+  // the screen. Tagging them apart from `unknown` keeps "the ledger caught a
+  // defect" distinct from "an error nobody mapped".
+  | 'internal'
   | 'unknown';
 
 export interface PostError {
@@ -185,10 +190,11 @@ export type PostResult = { ok: true; value: PostSuccess } | { ok: false; error: 
  * explicit check in application code, it needs a CHECK and a mapping here.
  */
 const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
-  ADA02: 'unknown',
-  ADA03: 'unknown',
+  ADA01: 'illegal_transition',
+  ADA02: 'internal',
+  ADA03: 'internal',
   ADA04: 'insufficient_quantity',
-  ADA05: 'unknown',
+  ADA05: 'internal',
   ADA06: 'not_permitted',
   ADA10: 'key_reused',
   ADA11: 'listing_not_open',
@@ -197,8 +203,8 @@ const CODE_BY_SQLSTATE: Record<string, PostErrorCode> = {
   ADA14: 'series_not_whole_lot',
   ADA15: 'not_permitted',
   ADA16: 'already_settled',
-  ADA17: 'unknown',
-  ADA18: 'unknown',
+  ADA17: 'internal',
+  ADA18: 'internal',
   ADA19: 'invalid_amount',
   ADA22: 'duplicate_invoice',
   ADA23: 'invalid_terms',
@@ -267,6 +273,14 @@ export async function post(command: Command): Promise<PostResult> {
     const detail = pg.message ?? String(error);
     const code =
       sqlstate === '23514' ? codeForCheckViolation(detail) : (CODE_BY_SQLSTATE[sqlstate] ?? 'unknown');
+    console.error('ledger.post refused', {
+      sqlstate,
+      code,
+      kind: command.intent.kind,
+      actor: command.actorUserId,
+      key: command.key,
+      detail,
+    });
     return { ok: false, error: { code, detail } };
   }
 }
@@ -349,5 +363,8 @@ export const ERROR_MESSAGE: Record<PostErrorCode, string> = {
     'This payable was rejected by its supplier, so the quantity went back to ADATA and there is nobody to redeem to. It cannot be settled.',
   wrong_actor_role:
     'That persona cannot take this step. Each lifecycle step belongs to one role: the preparer submits and redeems, a separate checker approves, and StraitsX certifies and issues.',
+  illegal_transition:
+    'This payable is not at the step that action belongs to. Reload to see where it is now.',
+  internal: 'An internal check refused this and nothing was changed. This is a defect, not something the persona did.',
   unknown: 'That did not go through. Nothing was changed.',
 };

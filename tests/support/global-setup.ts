@@ -23,6 +23,7 @@ import {
   TEMPLATE_SOURCES,
   urlFor,
   clonePrefix,
+  dropDatabase,
   type TemplateKind,
 } from './database';
 
@@ -77,9 +78,7 @@ export async function teardown(): Promise<void> {
       'SELECT datname FROM pg_database WHERE datname LIKE $1',
       [`${clonePrefix()}%`],
     );
-    for (const { datname } of rows) {
-      await admin.query(`DROP DATABASE IF EXISTS ${datname} WITH (FORCE)`);
-    }
+    for (const { datname } of rows) await dropDatabase(datname);
   } finally {
     await admin.end();
   }

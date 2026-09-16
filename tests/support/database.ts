@@ -28,9 +28,9 @@ types.setTypeParser(PG_NUMERIC, (value) => BigInt(value));
 /** `bare` is schema only. `fixtures` is the world a fresh database boots into. `seed` is the demo world. */
 export type TemplateKind = 'bare' | 'fixtures' | 'seed';
 
-// schema.sql defines ledger.post() as a stub that raises 'not implemented';
-// post.sql replaces it. Loading only the first gives a database that refuses
-// every command, so both always load, in this order.
+// schema.sql is the tables and invariants; post.sql is ledger.post(). Loading
+// only the first gives a database with no way to write, so both always load,
+// in this order.
 export const TEMPLATE_SOURCES: Record<TemplateKind, readonly string[]> = {
   bare: ['db/schema.sql', 'db/post.sql'],
   fixtures: ['db/schema.sql', 'db/post.sql', 'db/fixtures.sql'],
@@ -116,6 +116,7 @@ export async function createDatabase(suite: string, from: TemplateKind = 'fixtur
 }
 
 export async function dropDatabase(name: string): Promise<void> {
+  if (process.env.KEEP_DATABASES === '1') return;
   await withAdmin(async (pool) => {
     await pool.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
   });
@@ -152,6 +153,7 @@ export async function freshDatabase(suite: string, from: TemplateKind = 'fixture
     pool,
     async close() {
       await pool.end().catch(() => {});
+      if (process.env.KEEP_DATABASES === '1') console.error(`KEEP_DATABASES=1: kept ${urlFor(name)}`);
       await dropDatabase(name);
     },
   };

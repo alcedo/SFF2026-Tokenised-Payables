@@ -19,6 +19,9 @@ npm run dev                               # or scripts/serve.sh on :3100
 `npm test` runs everything: vitest, typecheck, a schema check that no float
 touches the money path, the SQL ledger stages, and the mutation gates. It needs
 Postgres up. `SKIP_MUTATION=1` skips the slow part for a quick loop.
+`KEEP_DATABASES=1` keeps each suite's database after the run so a failure can
+be inspected with `psql`. `post()` in `src/db/post.ts` logs every refusal to
+stderr with its SQLSTATE, intent kind and actor.
 
 Other entry points are in `README.md` under "Verify it".
 
@@ -38,9 +41,9 @@ The payable lifecycle has seven stored states and its legal edges are **rows** i
 hardcoding them. `matured` and `overdue` are derived from the clock in
 TypeScript and never stored.
 
-Four constraint triggers are `DEFERRABLE INITIALLY DEFERRED`, so `ADA03`,
-`ADA04` and `ADA05` fire at COMMIT rather than at the statement. A plpgsql
-`BEGIN ... EXCEPTION` block cannot observe them.
+Five constraint triggers are `DEFERRABLE INITIALLY DEFERRED`, so `ADA03`,
+`ADA04`, `ADA05` and `ADA39` fire at COMMIT rather than at the statement. A
+plpgsql `BEGIN ... EXCEPTION` block cannot observe them.
 
 ## Tests
 

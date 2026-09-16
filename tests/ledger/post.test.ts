@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { closePool, query } from '@/db/client';
 import { ERROR_MESSAGE, post } from '@/db/post';
@@ -119,6 +119,43 @@ describe('post returns a tagged result, never an exception', () => {
       expect(result.error.code).toBe('insufficient_quantity');
       expect(ERROR_MESSAGE[result.error.code]).toMatch(/listed quantity is locked/i);
     }
+  });
+
+  it('names an out-of-order lifecycle step and logs the refusal with its context', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = await post({
+      key: 'c1000000-0000-0000-0000-000000000011',
+      actorUserId: SUPPLIER_USER,
+      intent: { kind: 'approve', payableId: PAYABLE },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('illegal_transition');
+      expect(result.error.detail).toMatch(/issued/);
+    }
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors.mock.calls[0]?.[1]).toMatchObject({
+      sqlstate: 'ADA01',
+      code: 'illegal_transition',
+      kind: 'approve',
+      actor: SUPPLIER_USER,
+    });
+    errors.mockRestore();
+  });
+
+  it('tags a command the ledger does not recognise as internal, not unknown', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = await post({
+      key: 'c1000000-0000-0000-0000-000000000012',
+      actorUserId: SUPPLIER_USER,
+      intent: { kind: 'nonsense' } as never,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('internal');
+      expect(result.error.detail).toMatch(/nonsense/);
+    }
+    errors.mockRestore();
   });
 
   it('settles a trade and returns a simulated receipt with a conversion', async () => {
