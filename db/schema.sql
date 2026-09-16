@@ -13,7 +13,7 @@
 --   §7  the journal                — journal_entry, journal_leg
 --   §8  invariants                 — deferred constraint triggers
 --   §9  views                      — holding, trade, chain_receipt, proofs
---   §10 the write surface          — ledger.post()
+--   §10 the write surface          — ledger.post(), in db/post.sql
 --   §11 grants                     — the REVOKE that makes §0 true
 --
 -- Two rules govern every choice below:
@@ -853,91 +853,7 @@ $$;
 -- 250-350ms of pure latency from Vercel before any work happens, against a
 -- 500-2000ms budget that also has to absorb a cold start.
 
-CREATE FUNCTION ledger.post(p_command jsonb) RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_key         uuid  := (p_command->>'idempotencyKey')::uuid;
-  v_fingerprint bytea := digest(p_command->'intent'::text, 'sha256');
-  v_entry       ledger.journal_entry;
-BEGIN
-  -- TODO 1. IDEMPOTENCY GATE, before any lock is taken.
-  --   INSERT INTO ledger.journal_entry (idempotency_key, request_fingerprint, ...)
-  --   VALUES (v_key, v_fingerprint, ...)
-  --   ON CONFLICT (idempotency_key) DO NOTHING
-  --   RETURNING * INTO v_entry;
-  --   IF v_entry IS NULL THEN
-  --     SELECT * INTO v_entry FROM ledger.journal_entry WHERE idempotency_key = v_key;
-  --     IF v_entry.request_fingerprint <> v_fingerprint THEN
-  --       RAISE EXCEPTION ... USING ERRCODE = 'ADA10';   -- key reuse, different intent
-  --     END IF;
-  --     RETURN ledger.render_entry(v_entry) || jsonb_build_object('replayed', true);
-  --   END IF;
-  -- Taking the unique-key insert FIRST means two concurrent replays of the
-  -- same command serialise on the unique index, not on the accounts: the
-  -- loser blocks, then sees the winner's row and returns the same receipt.
-
-  -- TODO 2. RESOLVE the intent into (a) the rows to lock and (b) the legs to
-  -- post. For settle_maturity the leg set is not knowable until the holder
-  -- accounts are locked, so resolution happens *after* step 3 for that kind.
-
-  -- TODO 3. LOCK, in one total order. Deadlock freedom is the ordering, and
-  -- the ordering is here and nowhere else:
-  --     3a. app.payable      rows, ORDER BY id, FOR NO KEY UPDATE
-  --     3b. app.series       rows, ORDER BY id, FOR NO KEY UPDATE
-  --     3c. app.listing      rows, ORDER BY id, FOR UPDATE
-  --     3d. INSERT INTO ledger.account_balance (account_id, asset_id, class, balance)
-  --         SELECT ... ORDER BY account_id, asset_id ON CONFLICT DO NOTHING;
-  --     3e. SELECT 1 FROM ledger.account_balance
-  --          WHERE (account_id, asset_id) IN (...) ORDER BY account_id, asset_id
-  --          FOR UPDATE;
-  -- 3d creates any missing (account, asset) row so 3e always finds one — a
-  -- first-time holder has no balance row to lock, and "lock a row that does
-  -- not exist yet" is the classic hole in this pattern.
-  -- FOR NO KEY UPDATE on parents so child FK inserts do not block on them.
-  -- The world row is deliberately NOT locked: a fast-forward concurrent with
-  -- a trade may land either side of it, and both outcomes are legal.
-
-  -- TODO 4. RECHECK under lock, per PRD §9 "recheck balance, ownership,
-  -- listed quantity, listing status, and maturity when a seller accepts".
-  -- The TypeScript pre-checks exist to produce good inline messages; these
-  -- are the authoritative ones. Each raises a distinct SQLSTATE that
-  -- ledger/post.ts maps to a PostFailure variant:
-  --   ADA11 listing_not_open     ADA12 past_maturity
-  --   ADA13 stale_owner          ADA14 series_not_whole_lot
-  --   ADA15 not_permitted        ADA16 already_settled
-  --   ADA22 duplicate_invoice    ADA23 invalid_terms
-  --   ADA24 unknown_supplier     ADA25 missing_invoice_ref
-  --   ADA26 duplicate_reference  ADA27 duplicate_entity
-  --   ADA28 missing_name         ADA29 role_mismatch
-  --   ADA30 last_user           ADA31 supplier_not_onboarded
-  --   ADA32 issuer_not_certified ADA33 programme_limit_exceeded
-  --   ADA34 not_institutional    ADA35 not_graded
-  --   ADA36 wrong_actor_role     ADA37 receipt_rejected
-  --   ADA38 below_min_price      ADA39 moved_nothing
-  --   ADA40 not_cancellable
-  -- ADA22 to ADA26 exist because PRD §8 screen 2's manual entry is the first
-  -- form a person types into freely. Folding them into not_permitted would
-  -- tell a preparer who mistyped an invoice number that they lack permission,
-  -- which is both wrong and unactionable.
-  -- Insufficient funds and over-quantity transfers need no explicit check:
-  -- the CHECK in §4 raises 23514 when the leg lands, which post.ts maps to
-  -- insufficient_funds / insufficient_unlisted_quantity using the leg's asset
-  -- kind. Fewer checks to forget.
-
-  -- TODO 5. APPLY side effects on app.* (listing.status, bid.status,
-  -- payable.lifecycle_status). The lifecycle trigger in §5 vets transitions.
-
-  -- TODO 6. INSERT the legs. The §8 triggers project balances, and at COMMIT
-  -- assert per-asset balance, escrow equality and conservation. If any fails
-  -- the whole operation vanishes: no partial trade, no orphaned escrow.
-
-  -- TODO 7. ATTACH the chain result.
-  --   mock:    chain_status='confirmed', tx hash = sha256(idempotency_key),
-  --            block number = seq. Same transaction, deterministic.
-  --   sepolia: chain_status='pending'; the indexer confirms later.
-
-  RAISE EXCEPTION 'not implemented';
-END $$;
+-- Defined in db/post.sql, which loads after this file.
 
 -- ----------------------------------------------------------------------------
 -- §11  Grants — what makes §0 true
@@ -975,7 +891,7 @@ DO $$ BEGIN
                 ledger.account, ledger.asset FROM adata_app';
   EXECUTE 'GRANT SELECT ON ledger.journal_entry, ledger.journal_leg, ledger.account_balance,
                   ledger.account, ledger.asset TO adata_app';
-  EXECUTE 'GRANT EXECUTE ON FUNCTION ledger.post(jsonb) TO adata_app';
+  -- EXECUTE on ledger.post() is granted in db/post.sql, next to the function.
   EXECUTE 'GRANT EXECUTE ON FUNCTION ledger.prove_books_balance() TO adata_app';
 END $$;
 

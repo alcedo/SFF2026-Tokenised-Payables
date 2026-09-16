@@ -63,7 +63,12 @@ export function ActionButton({
   if (result) {
     return (
       <div className="space-y-1.5">
-        <Notice tone={result.ok ? 'positive' : 'critical'}>{result.message}</Notice>
+        <Notice tone={result.ok ? 'positive' : 'critical'}>
+          {result.message}
+          {result.detail ? (
+            <span className="mt-0.5 block text-[11px] opacity-80">{result.detail}</span>
+          ) : null}
+        </Notice>
         {result.receipt ? (
           <div className="flex items-center gap-2 text-[11.5px] text-ink-muted">
             <span>Receipt</span>

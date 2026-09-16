@@ -17,6 +17,8 @@ file is the shared recipe. Read it before writing a suite, and do not edit it.
 - `actors(pool)` maps role to user id. `anyActor(pool)` is the default.
 - `ledgerHealth(pool)` returns the four-part oracle. `HEALTHY` is the value it
   must equal.
+- `KEEP_DATABASES=1` leaves every suite's database in place after the run and
+  prints its URL, so a failing state can be inspected with `psql`.
 
 Never open your own `Pool` against a hardcoded database name, and never write
 to the shared `adata` database. A suite that does either will race every other

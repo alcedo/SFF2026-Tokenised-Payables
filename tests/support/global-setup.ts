@@ -71,6 +71,7 @@ export async function setup(): Promise<void> {
 }
 
 export async function teardown(): Promise<void> {
+  if (process.env.KEEP_DATABASES === '1') return;
   const admin = new Pool({ connectionString: ADMIN_URL, max: 1 });
   try {
     const { rows } = await admin.query<{ datname: string }>(
