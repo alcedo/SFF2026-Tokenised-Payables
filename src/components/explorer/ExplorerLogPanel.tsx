@@ -56,13 +56,15 @@ export function ExplorerLogPanel({
                 </tr>
               </thead>
               <tbody>
-                {events.map((e) => (
+                {events.map((e) => {
+                  const command = describeIntent(e.intent);
+                  return (
                   <tr key={e.entryId}>
                     <td className="num text-ink-faint">{e.seq}</td>
                     <td className="num">{e.worldDate}</td>
                     <td className="font-medium">{e.kind.replace(/_/g, ' ')}</td>
-                    <td className="max-w-[28ch] truncate text-[11px] text-ink-faint" title={describeIntent(e.intent)}>
-                      {describeIntent(e.intent) || '—'}
+                    <td className="max-w-[28ch] truncate text-[11px] text-ink-faint" title={command}>
+                      {command || '—'}
                     </td>
                     <td className="text-ink-muted">{e.payableRef ?? '—'}</td>
                     <td className="text-ink-muted">{e.actorName}</td>
@@ -82,7 +84,8 @@ export function ExplorerLogPanel({
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </LedgerScroll>

@@ -23,6 +23,7 @@ import {
   TEMPLATE_SOURCES,
   urlFor,
   clonePrefix,
+  dropDatabase,
   type TemplateKind,
 } from './database';
 
@@ -71,16 +72,13 @@ export async function setup(): Promise<void> {
 }
 
 export async function teardown(): Promise<void> {
-  if (process.env.KEEP_DATABASES === '1') return;
   const admin = new Pool({ connectionString: ADMIN_URL, max: 1 });
   try {
     const { rows } = await admin.query<{ datname: string }>(
       'SELECT datname FROM pg_database WHERE datname LIKE $1',
       [`${clonePrefix()}%`],
     );
-    for (const { datname } of rows) {
-      await admin.query(`DROP DATABASE IF EXISTS ${datname} WITH (FORCE)`);
-    }
+    for (const { datname } of rows) await dropDatabase(datname);
   } finally {
     await admin.end();
   }

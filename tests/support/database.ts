@@ -116,6 +116,7 @@ export async function createDatabase(suite: string, from: TemplateKind = 'fixtur
 }
 
 export async function dropDatabase(name: string): Promise<void> {
+  if (process.env.KEEP_DATABASES === '1') return;
   await withAdmin(async (pool) => {
     await pool.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
   });
@@ -152,10 +153,7 @@ export async function freshDatabase(suite: string, from: TemplateKind = 'fixture
     pool,
     async close() {
       await pool.end().catch(() => {});
-      if (process.env.KEEP_DATABASES === '1') {
-        console.error(`KEEP_DATABASES=1: kept ${urlFor(name)}`);
-        return;
-      }
+      if (process.env.KEEP_DATABASES === '1') console.error(`KEEP_DATABASES=1: kept ${urlFor(name)}`);
       await dropDatabase(name);
     },
   };

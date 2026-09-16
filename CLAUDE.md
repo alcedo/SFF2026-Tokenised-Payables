@@ -20,8 +20,8 @@ npm run dev                               # or scripts/serve.sh on :3100
 touches the money path, the SQL ledger stages, and the mutation gates. It needs
 Postgres up. `SKIP_MUTATION=1` skips the slow part for a quick loop.
 `KEEP_DATABASES=1` keeps each suite's database after the run so a failure can
-be inspected with `psql`; `ledger.post()` also logs every refusal to stderr
-with its SQLSTATE, intent kind and actor.
+be inspected with `psql`. `post()` in `src/db/post.ts` logs every refusal to
+stderr with its SQLSTATE, intent kind and actor.
 
 Other entry points are in `README.md` under "Verify it".
 
