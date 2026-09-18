@@ -15,6 +15,7 @@ import { revalidatePath } from 'next/cache';
 
 import { ERROR_MESSAGE, type Intent, post } from '@/db/post';
 import { readPayables, readPersonas, readWorld } from '@/db/read';
+import { personaAfterOnboarding } from './onboard-persona';
 import { currentPersona, setPersona } from './session';
 
 export interface ActionResult {
@@ -306,7 +307,7 @@ export async function onboardEntity(
     key,
   );
   if (result.ok) {
-    const created = (await readPersonas()).find((p) => p.name === userName.trim());
+    const created = personaAfterOnboarding(await readPersonas(), userName, name);
     if (created) await setPersona(created.userId);
     revalidatePath('/', 'layout');
   }
