@@ -9,7 +9,7 @@ import {
   StatusChip,
 } from '@/components/primitives';
 import { formatUnits } from '@/core/money';
-import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
+import { readAllPayables, readProgrammeTotals, readWorld } from '@/db/read';
 
 /**
  * PRD §8 screen 16. Programme oversight.
@@ -25,7 +25,7 @@ import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
  */
 export default async function AdminPage() {
   const world = await readWorld();
-  const [totals, payables] = await Promise.all([readProgrammeTotals(world), readPayables(world)]);
+  const [totals, payables] = await Promise.all([readProgrammeTotals(world), readAllPayables(world)]);
   const overdue = payables.filter((p) => p.status === 'overdue');
 
   return (

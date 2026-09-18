@@ -325,9 +325,27 @@ function toPayable(r: RawPayable, world: World): PayableRow {
   };
 }
 
-export async function readPayables(world: World): Promise<PayableRow[]> {
-  const rows = await query<RawPayable>(`${PAYABLE_SELECT} WHERE p.series_id IS NULL ORDER BY p.ref`);
+async function loadPayables(world: World, where: string): Promise<PayableRow[]> {
+  const rows = await query<RawPayable>(`${PAYABLE_SELECT} WHERE ${where} ORDER BY p.ref`);
   return rows.map((r) => toPayable(r, world));
+}
+
+/**
+ * Standalone payables only. Series members are hidden so a marketplace-style
+ * list does not show five tickets next to the lot they already belong to.
+ * Settlement, the clock, and the outstanding book need {@link readAllPayables}.
+ */
+export async function readPayables(world: World): Promise<PayableRow[]> {
+  return loadPayables(world, 'p.series_id IS NULL');
+}
+
+/**
+ * Every payable, including series members. Programme totals already count
+ * those members; settlement, overdue, jump-to-maturity and the ADATA book
+ * have to see the same rows or a matured series lot has no Fund control.
+ */
+export async function readAllPayables(world: World): Promise<PayableRow[]> {
+  return loadPayables(world, 'true');
 }
 
 export async function readPayable(id: string, world: World): Promise<PayableRow | null> {

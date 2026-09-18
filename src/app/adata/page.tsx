@@ -10,7 +10,7 @@ import {
   StatusChip,
 } from '@/components/primitives';
 import { formatUnits } from '@/core/money';
-import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
+import { readAllPayables, readProgrammeTotals, readWorld } from '@/db/read';
 
 /**
  * PRD §8 screen 1. ADATA's view of what it owes.
@@ -22,7 +22,7 @@ import { readPayables, readProgrammeTotals, readWorld } from '@/db/read';
  */
 export default async function AdataDashboard() {
   const world = await readWorld();
-  const [totals, payables] = await Promise.all([readProgrammeTotals(world), readPayables(world)]);
+  const [totals, payables] = await Promise.all([readProgrammeTotals(world), readAllPayables(world)]);
 
   const live = payables.filter(
     (p) => p.status === 'issued' || p.status === 'matured' || p.status === 'overdue',
@@ -86,7 +86,7 @@ export default async function AdataDashboard() {
   );
 }
 
-function PayableTable({ rows }: { rows: Awaited<ReturnType<typeof readPayables>> }) {
+function PayableTable({ rows }: { rows: Awaited<ReturnType<typeof readAllPayables>> }) {
   return (
     <LedgerScroll label="Payables">
       <table className="ledger">
