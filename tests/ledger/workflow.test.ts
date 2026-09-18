@@ -119,4 +119,110 @@ describe('issue → list → bid → accept as one walk', () => {
     const drift = await query<{ count: bigint }>('SELECT count(*)::bigint AS count FROM ledger.prove_books_balance()');
     expect(drift[0]!.count).toBe(0n);
   });
+
+  it('refuses to fill a large listing at a bid placed on a smaller one', async () => {
+    const smallFace = 100_000_000n;
+    const largeFace = 9_000_000_000n;
+    const smallPrice = 97_000_000n;
+    const largeMin = 8_800_000_000n;
+
+    async function issueAndList(
+      ref: string,
+      invoiceRef: string,
+      face: bigint,
+      minPrice: bigint,
+      listingId: string,
+      tokenId: number,
+    ): Promise<string> {
+      await mustPost(PREP, {
+        kind: 'create_payable',
+        ref,
+        supplierId: SUPPLIER_ENTITY,
+        invoiceRef,
+        faceBase: face as never,
+        termsDays: 60,
+      });
+      const payableId = (await query<{ id: string }>('SELECT id FROM app.payable WHERE ref = $1', [ref]))[0]!.id;
+      await mustPost(PREP, { kind: 'submit', payableId });
+      await mustPost(CHECKR, { kind: 'approve', payableId });
+      await mustPost(PREP, {
+        kind: 'grade',
+        payableId,
+        grade: 'AA',
+        gradeRationale: 'Workflow coverage grade. Sample value.',
+      });
+      await mustPost(ADMIN, { kind: 'certify', payableId });
+      await mustPost(ADMIN, { kind: 'issue_payable', payableId, toWallet: SUPP, tokenId });
+      await mustPost(SUPP_USER, { kind: 'accept_receipt', payableId });
+      await mustPost(SUPP_USER, {
+        kind: 'publish_listing',
+        listingId,
+        payableId,
+        sellerWallet: SUPP,
+        quantityBase: face as never,
+        minPriceBase: minPrice as never,
+      });
+      return payableId;
+    }
+
+    const largeListing = '7a000000-0000-0000-0000-00000000aa02';
+    const smallListing = '7a000000-0000-0000-0000-00000000aa03';
+    const cheapBid = 'b0000000-0000-0000-0000-00000000aa03';
+
+    await issueAndList('TP-WF-0002', 'INV-WF-0002', largeFace, largeMin, largeListing, 8802);
+    await issueAndList('TP-WF-0003', 'INV-WF-0003', smallFace, smallPrice, smallListing, 8803);
+    await mustPost(BANK_USER, {
+      kind: 'place_bid',
+      bidId: cheapBid,
+      listingId: smallListing,
+      bidderWallet: BANK,
+      priceBase: smallPrice as never,
+      fundingCode: 'USDC',
+    });
+
+    const sellerXusdBefore = await query<{ balance: bigint }>(
+      `SELECT b.balance FROM ledger.account_balance b
+         JOIN ledger.account a ON a.id = b.account_id
+         JOIN ledger.asset s ON s.id = b.asset_id
+        WHERE a.wallet_address = $1 AND s.cash_code = 'XUSD'`,
+      [SUPP],
+    );
+    const before = sellerXusdBefore[0]?.balance ?? 0n;
+
+    const result = await post({
+      key: randomUUID(),
+      actorUserId: SUPP_USER,
+      intent: { kind: 'accept_bid', listingId: largeListing, bidId: cheapBid },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('listing_not_open');
+      expect(result.error.detail).toBe('bid is not on this listing');
+    }
+
+    const listings = await query<{ id: string; status: string }>(
+      'SELECT id::text AS id, status::text AS status FROM app.listing WHERE id = ANY($1::uuid[])',
+      [[largeListing, smallListing]],
+    );
+    const byId = Object.fromEntries(listings.map((row) => [row.id, row.status]));
+    expect(byId[largeListing]).toBe('open');
+    expect(byId[smallListing]).toBe('open');
+
+    const bid = await query<{ status: string }>('SELECT status::text AS status FROM app.bid WHERE id = $1', [
+      cheapBid,
+    ]);
+    expect(bid[0]!.status).toBe('placed');
+
+    const sellerXusdAfter = await query<{ balance: bigint }>(
+      `SELECT b.balance FROM ledger.account_balance b
+         JOIN ledger.account a ON a.id = b.account_id
+         JOIN ledger.asset s ON s.id = b.asset_id
+        WHERE a.wallet_address = $1 AND s.cash_code = 'XUSD'`,
+      [SUPP],
+    );
+    expect(sellerXusdAfter[0]?.balance ?? 0n).toBe(before);
+
+    const drift = await query<{ count: bigint }>('SELECT count(*)::bigint AS count FROM ledger.prove_books_balance()');
+    expect(drift[0]!.count).toBe(0n);
+  });
 });

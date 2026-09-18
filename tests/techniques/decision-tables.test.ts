@@ -1141,6 +1141,49 @@ describe('table 3: bid acceptance', () => {
     );
   }
 
+  it('refuses to settle one listing at a bid placed on another', async () => {
+    const seller = world.suppliers[0].wallet;
+    const buyer = world.lenders[0].wallet;
+    const expensive = await listLot({
+      seller,
+      termsDays: 90,
+      minPriceBase: PRICE,
+      buyNowPriceBase: null,
+    });
+    const cheap = await listLot({
+      seller,
+      termsDays: 90,
+      minPriceBase: PRICE,
+      buyNowPriceBase: null,
+    });
+    const bidId = randomUUID();
+    await must(db.pool, {
+      kind: 'place_bid',
+      bidId,
+      listingId: cheap.listingId,
+      bidderWallet: buyer,
+      priceBase: PRICE,
+      fundingCode: 'XUSD',
+    });
+
+    const result = await post(db.pool, {
+      kind: 'accept_bid',
+      listingId: expensive.listingId,
+      bidId,
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: 'ADA11',
+      message: 'bid is not on this listing',
+    });
+    expect(await listingStatus(expensive.listingId)).toBe('open');
+    expect(await listingStatus(cheap.listingId)).toBe('open');
+    expect(
+      await scalar<string>(db.pool, `SELECT status::text AS value FROM app.bid WHERE id = $1`, [bidId]),
+    ).toBe('placed');
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
+  });
+
   it('cannot hold a placed bid from an ineligible wallet, which is why those rows are infeasible', async () => {
     const seller = world.suppliers[0].wallet;
     const lot = await listLot({

@@ -741,6 +741,12 @@ BEGIN
       IF v_bid.status <> 'placed' THEN
         RAISE EXCEPTION 'bid is %', v_bid.status USING ERRCODE = 'ADA11';
       END IF;
+      -- Quantity comes from the listing, cash from the bid. Without this the
+      -- two can name different lots, and a cheap bid on a small listing would
+      -- buy the quantity escrowed against a different one.
+      IF v_bid.listing_id IS DISTINCT FROM v_listing.id THEN
+        RAISE EXCEPTION 'bid is not on this listing' USING ERRCODE = 'ADA11';
+      END IF;
     END IF;
 
     -- A seller cannot be the buyer. Without this the trade nets to nothing but
