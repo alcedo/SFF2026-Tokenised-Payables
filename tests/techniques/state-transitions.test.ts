@@ -1522,6 +1522,23 @@ describe('machine 4: app.payable.receipt_status', () => {
     expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
   });
 
+  it('refuses to reject a receipt from a wallet that does not hold the face', async () => {
+    const payableId = await park(world, 'RC-reject-wrong-wallet', 'issued', LONG_TERM);
+    const result = await post(
+      db.pool,
+      { kind: 'reject_receipt', payableId, holderWallet: world.buyerWallet },
+      { actorUserId: world.supplier },
+    );
+    expect(result).toEqual({
+      ok: false,
+      code: 'ADA21',
+      message: `wallet ${world.buyerWallet} holds 0 unlisted, needs ${FACE_BASE}`,
+    });
+    expect(await receiptOf(db.pool, payableId)).toBe('pending');
+    expect(await lifecycleOf(db.pool, payableId)).toBe('issued');
+    expect(await ledgerHealth(db.pool)).toEqual(HEALTHY);
+  });
+
   it('has no edge table of its own, so a direct write may walk the receipt backwards', async () => {
     const payableId = await park(world, 'RC-backwards', 'issued', LONG_TERM);
     expect(

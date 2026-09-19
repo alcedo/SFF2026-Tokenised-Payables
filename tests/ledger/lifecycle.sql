@@ -224,6 +224,18 @@ BEGIN
      WHERE e.entity_type = 'anchor';
     -- Reset that payable's receipt so the decline path can be exercised.
     UPDATE app.payable SET receipt_status = 'pending' WHERE id = v_other;
+    BEGIN
+      PERFORM ledger.post(jsonb_build_object(
+        'idempotencyKey','aaaa0000-0000-0000-0000-00000000000c','actorUserId',ADMIN,
+        'intent', jsonb_build_object('kind','reject_receipt','payableId',v_other,
+          'holderWallet','0x1e4de40000000000000000000000000000004b13')));
+      RAISE EXCEPTION 'FAIL: a decline from a wallet that does not hold the face was accepted';
+    EXCEPTION WHEN sqlstate 'ADA21' THEN
+      RAISE NOTICE 'PASS  declining from a wallet that does not hold the face is refused';
+    END;
+    IF (SELECT receipt_status FROM app.payable WHERE id = v_other) <> 'pending' THEN
+      RAISE EXCEPTION 'FAIL: a refused decline still marked the receipt rejected';
+    END IF;
     PERFORM ledger.post(jsonb_build_object(
       'idempotencyKey','aaaa0000-0000-0000-0000-00000000000b','actorUserId',ADMIN,
       'intent', jsonb_build_object('kind','reject_receipt','payableId',v_other,

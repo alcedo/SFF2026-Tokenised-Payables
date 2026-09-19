@@ -912,11 +912,17 @@ BEGIN
     -- listing it afterwards, so the whole face has to still be here and free.
     -- Burning what the anchor no longer holds would drive a wallet negative or
     -- leave the rest outstanding against a payable that says it is cancelled.
+    -- SELECT INTO leaves the variable NULL when no row matches. COALESCE in
+    -- the select list never runs, `NULL <> face` is NULL, and IF does not
+    -- take. The legs were then posted with a NULL amount, post_legs dropped
+    -- them, and a payable whose reject never moved the tokens could still be
+    -- marked cancelled.
     SELECT COALESCE(b.balance, 0) INTO v_qty
       FROM ledger.account_balance b
       JOIN ledger.account a ON a.id = b.account_id
      WHERE a.wallet_address = v_anchor_wallet
        AND a.purpose = 'wallet_free' AND b.asset_id = v_asset;
+    v_qty := COALESCE(v_qty, 0);
     IF v_qty <> v_payable.face_base THEN
       RAISE EXCEPTION 'payable % cannot be cancelled while the anchor holds % of its % face',
         v_payable.ref, v_qty, v_payable.face_base USING ERRCODE = 'ADA40';
@@ -950,18 +956,24 @@ BEGIN
     IF v_kind = 'accept_receipt' THEN
       UPDATE app.payable SET receipt_status = 'accepted' WHERE id = v_payable.id;
     ELSE
-      -- Return the whole quantity to the anchor. The obligation still exists
-      -- and still matures; it is simply held by ADATA rather than the supplier.
+      -- Return the whole face to the anchor. The obligation still exists and
+      -- still matures; it is simply held by ADATA rather than the supplier.
+      -- Debit face, not whatever the named wallet happens to hold: a wallet
+      -- with none of the token used to yield v_qty NULL (SELECT INTO found
+      -- no row), post_legs dropped the NULL amounts, and receipt_status still
+      -- became rejected. Settlement then refused ADA37 and cancel_payable
+      -- could not burn, so the tokens sat at the supplier against an
+      -- obligation nobody could pay and nobody could withdraw. Debiting face
+      -- lets post_legs raise ADA21 when the wallet does not hold it, and the
+      -- receipt stays pending.
       SELECT address INTO v_anchor_wallet FROM app.wallet WHERE entity_id = v_payable.anchor_id LIMIT 1;
-      SELECT COALESCE(b.balance, 0) INTO v_qty
-        FROM ledger.account_balance b
-        JOIN ledger.account a ON a.id = b.account_id
-       WHERE a.wallet_address = v_intent->>'holderWallet'
-         AND a.purpose = 'wallet_free' AND b.asset_id = v_asset;
+      IF v_anchor_wallet IS NULL THEN
+        RAISE EXCEPTION 'anchor for % has no wallet', v_payable.ref USING ERRCODE = 'ADA15';
+      END IF;
       UPDATE app.payable SET receipt_status = 'rejected' WHERE id = v_payable.id;
       v_legs := ARRAY[
-        ROW(ledger.wallet_account(v_intent->>'holderWallet', 'wallet_free'), v_asset, -v_qty)::ledger.leg_spec,
-        ROW(ledger.wallet_account(v_anchor_wallet, 'wallet_free'), v_asset, v_qty)::ledger.leg_spec
+        ROW(ledger.wallet_account(v_intent->>'holderWallet', 'wallet_free'), v_asset, -v_payable.face_base)::ledger.leg_spec,
+        ROW(ledger.wallet_account(v_anchor_wallet, 'wallet_free'), v_asset, v_payable.face_base)::ledger.leg_spec
       ];
     END IF;
 
